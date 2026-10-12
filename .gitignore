@@ -11,5 +11,6 @@ docs/superpowers
 .idea
 .opencode
 .superpowers
+.dsh/
 node_modules/
 .pnpm-store/
