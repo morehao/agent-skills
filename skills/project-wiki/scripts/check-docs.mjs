@@ -2,7 +2,14 @@
 // check-docs.mjs —— project-wiki 的文档质量门禁（自研，零依赖：只用 node 内置模块）。
 //
 // 用法：
-//   node check-docs.mjs <输出目录|a.md b.md ...> [--source-repo <源码根>] [--strict] [--quiet]
+//   node check-docs.mjs <输出目录|a.md b.md ...> [--source-repo <源码根>] [--expect-baseline <ref>]
+//                       [--kb-repo <知识库根>] [--allow-in-repo] [--strict] [--quiet]
+//
+// 严重度三档（语义已冻结，见 references/grounding-light.md「严重度与归级判据」）：
+//   error  程序可确定判定，且违反会让读者读到错的产物            → 退出码 1
+//   warn   程序可判定，但属质量偏好                              → 默认 0；--strict 下 1
+//   note   作者侧流程与口径合规，或程序判不了、只有人能判的事      → **任何模式下都是 0**
+//   note 默认打印（不静默）；note 升 error 必须过判据并在 grounding-light 写明理由。
 //
 // 它检查的是本 skill 相对 project-insight 的那几条核心差异，全部可程序化：
 //
@@ -30,12 +37,26 @@
 //     [DOC-FIGURE-COMPLEX] mermaid 图节点 ≥12，建议改 SVG
 //     [DOC-FIGURE-PARTICIPANT] sequenceDiagram 用了未声明的参与者
 //     [DOC-THIN]           页面正文过短（< 20 行有效行）
+//     [DOC-FRONTMATTER-TYPE] 未写 type（同一知识库里的检索层靠它区分解读与 Wiki）——note
 //
-// 退出码：0 = 通过（仅有 warning）；1 = 存在 error（--strict 时 warning 也算失败）；2 = 用法/目标错误。
-// 本脚本只读，不改动任何文档。
+//   落点与版本契约（note 为主；唯一 error 是"产物落在源码仓内"）
+//     [DOC-DOCROOT-IN-SRC]   产物目录落在 --source-repo 内（error；可用 --allow-in-repo 显式放行）
+//     [DOC-BASELINE-MISSING] 首页没有「本文档依据」契约行
+//     [DOC-BASELINE-FORMAT]  契约行存在但解析不出 ref/短SHA/日期
+//     [DOC-BASELINE-UNRESOLVED] 契约声明的 ref/SHA/日期无法与 git 核对（含缺 git、非仓库）
+//     [DOC-SRC-BASELINE-MISMATCH] --expect-baseline 与 --source-repo 的 HEAD 不一致（含未传）
+//     [DOC-KB-UNLINKED]      KB 模式下没有任何索引链接到本 wiki 的首页
+//
+// 退出码：0 = 通过（仅有 warning / note）；1 = 存在 error（--strict 时 warning 也算失败，**note 永不参与**）；
+//         2 = 用法/目标错误。
+// 本脚本只读，不改动任何文档。git 只用于只读核对（rev-parse / log / for-each-ref），缺 git 时降级为 note。
 
 import { readFileSync, existsSync, realpathSync, statSync, readdirSync } from 'node:fs';
 import { resolve, join, sep } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import {
+  extractCitations, extractCodeBlocks, splitFrontmatter,
+} from './lib/doc-parse.mjs';
 
 // —— 预算（与 references/writing-style.md 的表保持一致）——
 const MAX_BLOCKS_PER_PAGE = 3;
@@ -46,7 +67,7 @@ const MIN_BODY_LINES = 15;
 const COMPLEX_NODE_THRESHOLD = 12;
 
 const C = {
-  reset: '\u001b[0m', red: '\u001b[31m', yellow: '\u001b[33m', dim: '\u001b[2m',
+  reset: '\u001b[0m', red: '\u001b[31m', yellow: '\u001b[33m', cyan: '\u001b[36m', dim: '\u001b[2m',
 };
 
 // ———————————————————————————— 参数 ————————————————————————————
@@ -54,23 +75,35 @@ const C = {
 const argv = process.argv.slice(2);
 const targets = [];
 let sourceRepo = null;
+let expectBaseline = null;
+let kbRepo = null;
+let allowInRepo = false;
 let strict = false;
 let quiet = false;
+
+const USAGE = '用法: node check-docs.mjs <输出目录|a.md b.md ...> [--source-repo <源码根>] [--expect-baseline <ref>] [--kb-repo <知识库根>] [--allow-in-repo] [--strict] [--quiet]';
 
 for (let i = 0; i < argv.length; i += 1) {
   const a = argv[i];
   if (a === '--source-repo') { sourceRepo = argv[++i]; continue; }
+  if (a === '--expect-baseline') { expectBaseline = argv[++i]; continue; }
+  if (a === '--kb-repo') { kbRepo = argv[++i]; continue; }
+  if (a === '--allow-in-repo') { allowInRepo = true; continue; }
   if (a === '--strict') { strict = true; continue; }
   if (a === '--quiet') { quiet = true; continue; }
   if (a === '-h' || a === '--help') {
-    console.log('用法: node check-docs.mjs <输出目录|a.md b.md ...> [--source-repo <源码根>] [--strict] [--quiet]');
+    console.log(USAGE);
     process.exit(0);
   }
   targets.push(a);
 }
 
 if (!targets.length) {
-  console.error('用法: node check-docs.mjs <输出目录|a.md b.md ...> [--source-repo <源码根>] [--strict] [--quiet]');
+  console.error(USAGE);
+  process.exit(2);
+}
+if (expectBaseline !== null && (expectBaseline === undefined || expectBaseline.trim() === '')) {
+  console.error('[用法错误] --expect-baseline 需要一个 ref（如 v1.2.3 或 main）');
   process.exit(2);
 }
 
@@ -84,20 +117,56 @@ if (sourceRepo) {
   repoReal = realpathSync(abs);
 }
 
+let kbReal = null;
+if (kbRepo) {
+  const abs = resolve(kbRepo);
+  if (!existsSync(abs)) {
+    console.error(`[用法错误] --kb-repo 不存在：${abs}`);
+    process.exit(2);
+  }
+  kbReal = realpathSync(abs);
+}
+
 // ———————————————————————————— 工具 ————————————————————————————
 
 const errors = [];
 const warns = [];
+const notes = [];
 
 function report(level, code, file, line, msg) {
   const entry = { level, code, file: disp(file), line, msg };
-  (level === 'error' ? errors : warns).push(entry);
+  if (level === 'error') errors.push(entry);
+  else if (level === 'warn') warns.push(entry);
+  else notes.push(entry);
 }
 
 function isWithinRoot(root, target) {
   if (target === root) return true;
   return target.startsWith(root + sep);
 }
+
+// —— 只读 git 辅助（缺 git / 非仓库 / 命令失败一律返回 null，由调用方降级为 note）——
+function git(repo, args) {
+  if (!repo) return null;
+  try {
+    return execFileSync('git', ['-C', repo, ...args], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20000,
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+function isGitRepo(repo) {
+  return git(repo, ['rev-parse', '--git-dir']) !== null;
+}
+
+/** 契约行：`**本文档依据**：\`v1.2.3\`（\`abc1234\`，2026-08-14）`
+ *  反引号可省（容错），但 ref / 短SHA / ISO 日期三者缺一即判 FORMAT——三个字段各有用途：
+ *  ref 是下次 diff 的左端、SHA 是对得上哪次提交、日期是读者判断新鲜度的依据。 */
+const CONTRACT_RE = /^\s*\*\*本文档依据\*\*\s*[:：]\s*`?([^`（）()\s]+)`?\s*[（(]\s*`?([0-9a-fA-F]{4,40})`?\s*[，,]\s*(\d{4}-\d{2}-\d{2})\s*[）)]/m;
+// 只写了标题但没写全三元组的行（用于区分 MISSING 与 FORMAT）
+const CONTRACT_HEAD_RE = /^\s*\*\*本文档依据\*\*/m;
 
 let docRoot = null;
 // 目标不存在必须让门禁失败：否则末尾的 exitCode 会把它覆盖成 0，等于静默放过
@@ -140,27 +209,9 @@ function disp(p) {
 const files = collectMd(targets);
 
 // ———————————————————————————— 解析 ————————————————————————————
+// 引用/代码块/frontmatter 的解析实现是 scripts/lib/doc-parse.mjs（单一真源，
+// 与 plan-update.mjs 共用）——这里不再自己写正则，避免两边判定漂移。
 
-// 引用：逐个 code span 解析，而不是全文件扫正则——否则"正则不认的写法"会静默漏检。
-// PRIMARY：整个 code span 内容就是一个 `路径:行号`（允许 ./ ../ / 开头、允许无扩展名）
-// 路径字符类含 `[` `]`：Next.js 之类的动态路由目录名就是 `src/app/[owner]/[repo]/page.tsx`，
-// 不收的话这类真实引用会掉进 UNPARSED，等于「看得见却验不了」。
-const PRIMARY_CITATION_RE = /^(?:(?:\.{1,2}\/)+|\/)?[A-Za-z0-9_@][A-Za-z0-9_./@+[\]-]*(?:\.[A-Za-z][A-Za-z0-9]{0,9})?:(\d+)(?:-(\d+))?$/;
-// 任意 code span（用于取出候选再分类）
-const CODE_SPAN_RE = /`([^`\n]+)`/g;
-// 疑似引用：含 `/` 且以 `:行号` 结尾，但没被 PRIMARY 认出来 → 必须显式告知，不静默放过
-const SUSPECT_CITATION_RE = /\/.*:\d+(?:-\d+)?$/;
-
-/**
- * 归一化引用写法：全角冒号、en/em dash、`#L12` 与 `:L12-L20` 锚点式行号。
- * 不做归一化的话，模型换个写法就绕过了校验——这正是"静默放过"的入口。
- */
-function normalizeSpan(raw) {
-  let out = raw.replace(/：/g, ':').replace(/[–—]/g, '-').trim();
-  out = out.replace(/#L(\d+)(?:\s*-\s*L?(\d+))?/gi, (_m, a, b) => (b ? `:${a}-${b}` : `:${a}`));
-  out = out.replace(/:L(\d+)(?:\s*-\s*L?(\d+))?/gi, (_m, a, b) => (b ? `:${a}-${b}` : `:${a}`));
-  return out;
-}
 // 校验痕迹（正文不得出现）
 const TRACE_RES = [
   /<!--\s*anchor(?:-base64)?\s*:/,
@@ -168,42 +219,6 @@ const TRACE_RES = [
   /\bSources?\s*:\s*\[/,
 ];
 const HEADING_NUM_RE = /^#{1,6}\s+(?:[0-9]+|[一二三四五六七八九十百千]+)\s*[.、)）:：]/;
-
-function splitFrontmatter(text) {
-  const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
-  if (!m) return { frontmatter: null, body: text, bodyLine: 1 };
-  return {
-    frontmatter: m[1],
-    body: text.slice(m[0].length),
-    bodyLine: m[0].split('\n').length,
-  };
-}
-
-/** 提取围栏代码块 [{lang, startLine, endLine, lines}] */
-function extractCodeBlocks(lines) {
-  const blocks = [];
-  let open = null;
-  for (let i = 0; i < lines.length; i += 1) {
-    const m = /^\s*```+\s*(\S*)\s*$/.exec(lines[i]);
-    if (!m) continue;
-    if (open === null) {
-      open = { lang: (m[1] || '').toLowerCase(), startLine: i + 1, contentStart: i + 1 };
-    } else {
-      blocks.push({
-        lang: open.lang,
-        startLine: open.startLine,
-        endLine: i + 1,
-        lines: lines.slice(open.contentStart, i),
-      });
-      open = null;
-    }
-  }
-  if (open !== null) {
-    // 未闭合的围栏：按到文末处理，避免整段代码漏检
-    blocks.push({ lang: open.lang, startLine: open.startLine, endLine: lines.length, lines: lines.slice(open.contentStart) });
-  }
-  return blocks;
-}
 
 /** flowchart/graph 节点数（节点定义 id[...]/(...)/{...} 与边端点取并集） */
 function mermaidNodeCount(src) {
@@ -265,6 +280,10 @@ for (const file of files) {
   } else {
     if (!/^\s*title\s*:/m.test(frontmatter)) report('error', 'DOC-FRONTMATTER', rel, 1, 'frontmatter 缺 title');
     if (!/^\s*description\s*:/m.test(frontmatter)) report('error', 'DOC-FRONTMATTER', rel, 1, 'frontmatter 缺 description');
+    // type 只服务检索（同一知识库里要与 project-insight 的 `type: 项目解读` 区分），不影响读者能否读懂 → note
+    if (!/^\s*type\s*:/m.test(frontmatter)) {
+      report('note', 'DOC-FRONTMATTER-TYPE', rel, 1, 'frontmatter 未写 type——知识库检索层靠它区分两类产物，建议 `type: 项目 Wiki`（不阻断）');
+    }
   }
 
   // —— 代码预算 ——
@@ -291,39 +310,8 @@ for (const file of files) {
     console.log(`${C.dim}[code-budget 豁免] ${rel}${C.reset}`);
   }
 
-  // —— 引用：依据行 + 行内 ——
-  const citations = [];
-  const inlineCitations = [];
-  const unparsed = [];
-  // 依据可以是「一行」，也可以是同一引用块里折行的「一块」：续行同样算依据。
-  // 否则长依据列表一折行，后半截就被误判成散落在正文里的行内引用。
-  let inBasisBlock = false;
-  for (let i = 0; i < lines.length; i += 1) {
-    if (/^\s*>?\s*依据\s*[:：]/.test(lines[i])) inBasisBlock = true;
-    else if (!(inBasisBlock && /^\s*>/.test(lines[i]))) inBasisBlock = false;
-    const isBasis = inBasisBlock;
-    CODE_SPAN_RE.lastIndex = 0;
-    let m;
-    while ((m = CODE_SPAN_RE.exec(lines[i])) !== null) {
-      const span = normalizeSpan(m[1]);
-      const pm = PRIMARY_CITATION_RE.exec(span);
-      if (pm) {
-        // 路径 = span 去掉末尾的 `:start[-end]`
-        const suffix = pm[0].slice(pm[0].lastIndexOf(':'));
-        const rec = {
-          path: span.slice(0, span.length - suffix.length),
-          start: parseInt(pm[1], 10),
-          end: pm[2] ? parseInt(pm[2], 10) : parseInt(pm[1], 10),
-          line: i + 1,
-          basis: isBasis,
-        };
-        citations.push(rec);
-        if (!isBasis) inlineCitations.push(rec);
-      } else if (span.includes('/') && SUSPECT_CITATION_RE.test(span)) {
-        unparsed.push({ text: span, line: i + 1 });
-      }
-    }
-  }
+  // —— 引用：依据行 + 行内（解析实现见 lib/doc-parse.mjs，与预检脚本共用）——
+  const { citations, inlineCitations, unparsed } = extractCitations(lines);
 
   for (const u of unparsed) {
     report('warn', 'DOC-SRC-UNPARSED', rel, u.line, `疑似引用但无法解析：\`${u.text}\` —— 写成「相对路径:起止行」的形式，否则不会被校验`);
@@ -440,6 +428,138 @@ if (readme) {
   report('error', 'DOC-INDEX-MISSING', files[0], 1, '输出目录缺首页 README.md');
 }
 
+// ———————————————————————————— 落点：产物不得落在被描述项目的源码仓内 ————————————————————————————
+// 唯一的新增 error：程序可确定判定（纯路径比较），且后果落在第三方仓库
+// （产物污染维护者的仓库，而这个 skill 还会为基线在其上做过 checkout）。
+// --allow-in-repo 是显式逃生开关：放行要出声，不能静默跳过。
+
+const degradeReasons = [];
+let baselineVerified = false;
+let docRootReal = null;
+if (docRoot) { try { docRootReal = realpathSync(docRoot); } catch { docRootReal = docRoot; } }
+
+if (docRootReal && repoReal) {
+  if (isWithinRoot(repoReal, docRootReal)) {
+    if (allowInRepo) {
+      report('note', 'DOC-DOCROOT-IN-SRC', docRoot, 1, `已按 --allow-in-repo 显式放行：产物目录位于源码仓内（${docRootReal} ⊂ ${repoReal}）——请确认这是有意的`);
+    } else {
+      report('error', 'DOC-DOCROOT-IN-SRC', docRoot, 1, `产物目录落在源码仓内（${docRootReal} ⊂ ${repoReal}）——本 skill 的产物不得写入被描述项目；换到仓外目录，或确属有意时显式传 --allow-in-repo`);
+    }
+  }
+} else if (docRootReal && !repoReal) {
+  report('note', 'DOC-DOCROOT-IN-SRC', docRoot, 1, '未传 --source-repo，无法判定产物是否落在源码仓内（传上即可自动判定）');
+}
+
+// ———————————————————————————— 版本契约（单基线）————————————————————————————
+// 契约行是读者需要的口径声明，属正文合法内容（不受铁律 1 约束）。
+// 它的作用是三件事：读者知道看的是哪版、依据行有确定快照、下次更新有 diff 的左端。
+
+if (readme) {
+  const rmText = readFileSync(readme, 'utf8');
+  const cm = CONTRACT_RE.exec(rmText);
+  if (!cm) {
+    if (CONTRACT_HEAD_RE.test(rmText)) {
+      report('note', 'DOC-BASELINE-FORMAT', readme, 1, '「本文档依据」无法解析出 ref/短SHA/日期三元组——写成 `**本文档依据**：\\`v1.2.3\\`（\\`abc1234\\`，2026-08-14）`');
+    } else {
+      report('note', 'DOC-BASELINE-MISSING', readme, 1, '首页没有「本文档依据」契约行——读者无从判断文档对应哪个版本，下次更新也拿不到 diff 左端');
+    }
+  } else {
+    const [, ref, sha, date] = cm;
+    if (!repoReal) {
+      report('note', 'DOC-BASELINE-UNRESOLVED', readme, 1, `契约声明 ${ref}@${sha}（${date}）无法核对：未传 --source-repo`);
+    } else if (!isGitRepo(repoReal)) {
+      report('note', 'DOC-BASELINE-UNRESOLVED', readme, 1, `契约声明 ${ref}@${sha}（${date}）无法核对：源码根不是 git 仓库或缺 git`);
+    } else {
+      const full = git(repoReal, ['rev-parse', '--verify', `${ref}^{commit}`]);
+      if (!full) {
+        report('note', 'DOC-BASELINE-UNRESOLVED', readme, 1, `契约声明的 ref 在源码仓里不存在：${ref}`);
+      } else {
+        const commitDate = git(repoReal, ['log', '-1', '--format=%cs', ref]) || '';
+        const tagDate = git(repoReal, ['for-each-ref', '--format=%(creatordate:short)', `refs/tags/${ref}`]) || '';
+        const shaOk = full.toLowerCase().startsWith(sha.toLowerCase());
+        const dateOk = date === commitDate || (tagDate !== '' && date === tagDate);
+        if (!shaOk || !dateOk) {
+          const why = [];
+          if (!shaOk) why.push(`短SHA 对不上（${ref} 实际为 ${full.slice(0, 12)}…）`);
+          if (!dateOk) why.push(`日期对不上（${ref} 的提交日期 ${commitDate || '未知'}${tagDate ? `、tag 日期 ${tagDate}` : ''}）`);
+          report('note', 'DOC-BASELINE-UNRESOLVED', readme, 1, `契约声明 ${ref}@${sha}（${date}）与 git 不符：${why.join('；')}`);
+        }
+      }
+    }
+  }
+}
+
+// —— --expect-baseline：把「校验根 = 自述基线」从口头约定变成机器事实 ——
+if (!repoReal) {
+  degradeReasons.push('未传 --source-repo');
+} else if (!isGitRepo(repoReal)) {
+  degradeReasons.push('源码根不是 git 仓库或缺 git，无法核对');
+} else if (!expectBaseline) {
+  degradeReasons.push('未传 --expect-baseline，无法确认 --source-repo 就是自述基线');
+} else {
+  const head = git(repoReal, ['rev-parse', 'HEAD']);
+  const want = git(repoReal, ['rev-parse', '--verify', `${expectBaseline}^{commit}`]);
+  if (!want) {
+    degradeReasons.push(`--expect-baseline ${expectBaseline} 无法解析`);
+  } else if (head !== want) {
+    degradeReasons.push(`当前 HEAD=${(head || '').slice(0, 12)} ≠ --expect-baseline ${expectBaseline}@${want.slice(0, 12)}`);
+  } else {
+    baselineVerified = true;
+  }
+}
+if (degradeReasons.length && !targetMissing && repoReal) {
+  // 未传 --source-repo 时不再重复报一条 note：那属于"根本没校验"，
+  // 已由每条引用的 [DOC-SRC-UNCHECKED] 与末尾的降级行说明，重复报只会变噪声。
+  report('note', 'DOC-SRC-BASELINE-MISMATCH', docRoot || (readme ?? files[0] ?? '.'), 1, degradeReasons.join('；'));
+}
+
+// ———————————————————————————— KB 模式：本 wiki 是否被索引到 ————————————————————————————
+// 入库了但没有任何索引链接过来 = 读者找不到 = 另一种静默失败。
+// 不传 --kb-repo 则不做此检查（本 skill 的默认形态是独立目录，不是知识库）。
+
+if (kbReal && readme) {
+  const target = (() => { try { return realpathSync(readme); } catch { return resolve(readme); } })();
+  const CAP = 2000;
+  let scanned = 0;
+  let truncated = false;
+  let linkedToWiki = false;
+  const walkKb = (dir) => {
+    if (linkedToWiki || truncated) return;
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (linkedToWiki || truncated) return;
+      if (e.name === 'node_modules' || e.name.startsWith('.')) continue;
+      const p = join(dir, e.name);
+      if (e.isDirectory()) {
+        // 跳过 wiki 自己：内部页面互链（如"返回首页"）不能算作知识库索引
+        let pr = p;
+        try { pr = realpathSync(p); } catch { /* 保持原样 */ }
+        if (docRootReal && isWithinRoot(docRootReal, pr)) continue;
+        walkKb(p);
+        continue;
+      }
+      if (!e.name.toLowerCase().endsWith('.md')) continue;
+      scanned += 1;
+      if (scanned > CAP) { truncated = true; return; }
+      let t;
+      try { t = readFileSync(p, 'utf8'); } catch { continue; }
+      const lre = /\[[^\]]*\]\(([^)\s]+\.md)\)/g;
+      let mm;
+      while ((mm = lre.exec(t)) !== null) {
+        const cand = resolve(dir, mm[1]);
+        let cr = cand;
+        try { cr = realpathSync(cand); } catch { /* 悬空链接不满足 */ }
+        if (cr === target) { linkedToWiki = true; break; }
+      }
+    }
+  };
+  walkKb(kbReal);
+  if (!linkedToWiki) {
+    report('note', 'DOC-KB-UNLINKED', readme, 1, `知识库（${kbReal}）里没有任何索引链接到本 wiki 首页${truncated ? `（扫描上限 ${CAP} 个 md 后截断，结果可能不完整）` : ''}`);
+  }
+}
+
 // ———————————————————————————— 输出 ————————————————————————————
 
 if (!quiet) {
@@ -456,8 +576,17 @@ for (const e of errors) {
 for (const w of warns) {
   console.log(`${C.yellow}[${w.code}]${C.reset} ${w.file}:${w.line} —— ${w.msg}`);
 }
+// note 默认打印：不阻断 ≠ 不报告。滑成"不报告"就与本 skill 的反静默立场冲突。
+for (const n of notes) {
+  console.log(`${C.cyan}[${n.code}]${C.reset} ${n.file}:${n.line} —— ${n.msg}`);
+}
 
-console.log(`\n检查结果：error=${errors.length} warn=${warns.length}（文件 ${files.length} 个）`);
+const totalCitations = stats.reduce((n, s) => n + s.citations, 0);
+console.log(`\n检查结果：error=${errors.length} warn=${warns.length} note=${notes.length}（文件 ${files.length} 个）`);
+if (totalCitations > 0 && !baselineVerified) {
+  // 结论不越权：不阻断，但也不假装"校验过了"。
+  console.log(`引用校验结论：未在自述基线上执行（${degradeReasons.join('；') || '未知原因'}）——已校验项不覆盖「行号是否属于该版本」。`);
+}
 if (targetMissing) {
   console.log('存在必须修复的问题（目标不存在，未检查任何目标）。');
   process.exitCode = 2;
@@ -465,8 +594,11 @@ if (targetMissing) {
   console.log('存在必须修复的问题（error）。代码预算超标时：删减，或写 <!-- code-budget: 理由 --> 显式豁免。');
   process.exitCode = 1;
 } else if (strict && warns.length) {
-  console.log('--strict 模式：warning 视为失败。');
+  console.log('--strict 模式：warning 视为失败（note 不参与，永不阻断）。');
   process.exitCode = 1;
+} else if (notes.length) {
+  console.log(`未发现必须修复的问题（${notes.length} 条 note 待作者回应——不阻断，须在交付清单里逐条交代，见 references/grounding-light.md）。`);
+  process.exitCode = 0;
 } else {
   console.log('未发现必须修复的问题。');
   process.exitCode = 0;

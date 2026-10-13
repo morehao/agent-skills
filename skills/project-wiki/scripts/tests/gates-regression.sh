@@ -9,7 +9,14 @@
 #
 # 覆盖：代码预算（含豁免）、引用真实性（缺失/越界/乱序/越界根/无法解析/未传源码根）、
 #       校验痕迹、行内引用密度、标题数字前缀、首页索引（漏列/悬空）、
-#       图表（节点复杂度/未声明参与者）、篇幅、以及合规夹具应全绿。
+#       图表（节点复杂度/未声明参与者）、篇幅、解析器缺口（目标不存在/依据折行/方括号路径）、
+#       **note 档语义**（不阻断、--strict 不参与、必须打印）、**落点检查**（仓内 error + 放行出声）、
+#       **版本契约**（缺失/格式/与 git 不符/校验根不一致 + 结论不越权降级）、**KB 索引可达性**、
+#       **更新预检**（两张清单/行号漂移/噪声过滤/结构指纹，且它自述不是门禁），
+#       以及合规夹具应全绿。
+#
+# 为什么每条都要有夹具：门禁失效是静默的——校验器一旦漏检，坏文档照样"通过"，
+# 新增的 note 档更是如此：它不阻断，所以"有没有真的在检查"只能靠"故意违规必须被报出"来证明。
 #
 # 退出码：0 = 全部门禁按预期工作；1 = 有断言失败。
 
@@ -18,6 +25,7 @@ set -uo pipefail
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 CHECK_DOCS="$(cd -- "$HERE/.." && pwd)/check-docs.mjs"
 CHECK_ALL="$(cd -- "$HERE/.." && pwd)/check-all.mjs"
+PLAN_UPDATE="$(cd -- "$HERE/.." && pwd)/plan-update.mjs"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -74,6 +82,7 @@ GOOD="$TMP/good-wiki"; mkdir -p "$GOOD"
 cat > "$GOOD/README.md" <<'EOF'
 ---
 title: Demo 文档
+type: 项目 Wiki
 description: 面向使用者的 Demo 文档：概览与架构。
 ---
 
@@ -100,6 +109,7 @@ EOF
 cat > "$GOOD/topic.md" <<'EOF'
 ---
 title: 主题页
+type: 项目 Wiki
 description: 验证合规页面能通过全部门禁。
 ---
 
@@ -130,6 +140,7 @@ graph TD
 | 服务 | 业务处理 | 登录态 |
 
 再补一段散文把这一页说完整，确保正文行数足够，不再依赖任何警告豁免。
+这一段是留给"篇幅下限"的余量：夹具 1 要求零 warning，而 --strict 的断言依赖这一点。
 
 > 依据：`internal/gateway/router.go:1-5`、`internal/gateway/middleware.go:1-4`
 EOF
@@ -517,6 +528,267 @@ if [ "$got" = "0" ] && ! grep -q 'DOC-TARGET-MISSING' "$TMP/out-all.txt"; then
   PASS=$((PASS + 1)); printf '  ok   check-all 传相对路径时自研门禁真的跑到了文件\n'
 else
   FAIL=$((FAIL + 1)); printf '  FAIL check-all 相对路径下自研门禁空转（退出码 %s）\n' "$got"
+fi
+
+# ———————————————————————— 夹具 6：note 档（不阻断，但必须显形） ————————————————————————
+# 这是本次改动最核心的一组断言：新增检查全部是 note 时，"不阻断"必须被真的验证过，
+# 否则 note 随时会滑成 warn（--strict 一开就阻断）或滑成"不报告"。
+
+echo
+echo "== 夹具 6：note 档与严重度 =="
+
+node "$CHECK_DOCS" "$GOOD" --source-repo "$SRC" >"$TMP/out.txt" 2>&1
+if grep -qE 'note=[1-9]' "$TMP/out.txt"; then
+  PASS=$((PASS + 1)); printf '  ok   合规文档的 note 被打印出来（不静默）\n'
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL 没有 note 输出，无法验证"note 不阻断"\n'; sed 's/^/       /' "$TMP/out.txt"
+fi
+assert_exit 0 "--strict 下 note 不参与（不阻断）" "$GOOD" --source-repo "$SRC" --strict
+assert_report DOC-SRC-BASELINE-MISMATCH "未传 --expect-baseline 只报 note" "$GOOD" --source-repo "$SRC" --strict
+
+# 6.2 契约行缺失 / 格式坏
+NOCON="$TMP/nocon-wiki"; mkdir -p "$NOCON"
+cp "$GOOD/topic.md" "$NOCON/topic.md"
+grep -v '本文档依据' "$GOOD/README.md" > "$NOCON/README.md"
+assert_report DOC-BASELINE-MISSING "缺契约行被报出（note）" "$NOCON" --source-repo "$SRC"
+assert_exit 0 "缺契约行不阻断" "$NOCON" --source-repo "$SRC"
+
+BADFMT="$TMP/badfmt-wiki"; mkdir -p "$BADFMT"
+cp "$GOOD/topic.md" "$BADFMT/topic.md"
+cat > "$BADFMT/README.md" <<'EOF'
+---
+title: Demo 文档
+type: 项目 Wiki
+description: 契约行写法坏掉的夹具。
+---
+
+# Demo
+
+**本文档依据**：回头再补
+
+## 页面索引
+
+| 页面 | 内容 |
+|------|------|
+| [topic.md](topic.md) | 主题页 |
+EOF
+assert_report DOC-BASELINE-FORMAT "契约行解析不出三元组被报出（note）" "$BADFMT" --source-repo "$SRC"
+
+# 6.3 落点：唯一的新增 error 与它的显式逃生开关
+INSRC="$SRC/docs-wiki"; mkdir -p "$INSRC"; cp "$GOOD"/README.md "$GOOD"/topic.md "$INSRC/"
+assert_exit 1 "产物落在源码仓内判 error" "$INSRC" --source-repo "$SRC"
+assert_report DOC-DOCROOT-IN-SRC "落点检查报出" "$INSRC" --source-repo "$SRC"
+assert_exit 0 "显式放行后不阻断" "$INSRC" --source-repo "$SRC" --allow-in-repo
+assert_report DOC-DOCROOT-IN-SRC "放行要出声（报 note 而非静默跳过）" "$INSRC" --source-repo "$SRC" --allow-in-repo
+rm -rf "$INSRC"
+
+# 6.4 git 契约核对：一致时零 note、不一致时 note + 结论降级
+GREPO="$TMP/git-src"; mkdir -p "$GREPO/internal"
+(
+  cd "$GREPO" || exit 1
+  git init -q -b main .
+  printf 'package x\nfunc A() {}\nfunc B() {}\n' > internal/a.go
+  git add -A
+  GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t git commit -qm init
+  git tag v1.0.0
+)
+GSHA=$(git -C "$GREPO" rev-parse --short HEAD)
+GDATE=$(git -C "$GREPO" log -1 --format=%cs HEAD)
+GW="$TMP/git-wiki"; mkdir -p "$GW"
+cat > "$GW/README.md" <<'EOF'
+---
+title: Git 文档
+type: 项目 Wiki
+description: 基线一致时应零 note。
+---
+
+# Git
+
+**本文档依据**：`__REF__`（`__SHA__`，__DATE__）
+
+## 页面索引
+
+| 页面 | 内容 |
+|------|------|
+| [topic.md](topic.md) | 主题页 |
+EOF
+sed -i '' -e "s/__REF__/v1.0.0/" -e "s/__SHA__/${GSHA}/" -e "s/__DATE__/${GDATE}/" "$GW/README.md"
+cat > "$GW/topic.md" <<'EOF'
+---
+title: 主题页
+type: 项目 Wiki
+description: 引用 git 仓库里的真实文件。
+---
+
+# 主题页
+
+## 这一段讲什么
+
+这是一段足够长的散文，用来让正文有效行数超过下限，避免触发篇幅过短的提示。
+继续补充说明文字，确保这个夹具是合规的而不是靠警告侥幸通过，这里再多写一点。
+
+## 结构图
+
+```mermaid
+graph TD
+    A[一] --> B[二]
+```
+
+> 依据：`internal/a.go:1-3`
+EOF
+node "$CHECK_DOCS" "$GW" --source-repo "$GREPO" --expect-baseline v1.0.0 >"$TMP/out.txt" 2>&1
+if grep -q 'note=0' "$TMP/out.txt" && ! grep -q '引用校验结论' "$TMP/out.txt"; then
+  PASS=$((PASS + 1)); printf '  ok   基线一致时零 note、且无降级行\n'
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL 基线一致却仍有 note 或降级行\n'; sed 's/^/       /' "$TMP/out.txt"
+fi
+sed -i '' "s/${GSHA}/deadbeef/" "$GW/README.md"
+assert_report DOC-BASELINE-UNRESOLVED "契约短SHA与 git 不符被报出（note）" "$GW" --source-repo "$GREPO" --expect-baseline v1.0.0
+printf 'x\n' >> "$GREPO/internal/a.go"
+(
+  cd "$GREPO" || exit 1
+  git add -A
+  GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t git commit -qm more
+)
+assert_report DOC-SRC-BASELINE-MISMATCH "校验根≠自述基线被报出（note）" "$GW" --source-repo "$GREPO" --expect-baseline v1.0.0
+assert_exit 0 "基线不一致也不阻断" "$GW" --source-repo "$GREPO" --expect-baseline v1.0.0
+node "$CHECK_DOCS" "$GW" --source-repo "$GREPO" --expect-baseline v1.0.0 >"$TMP/out.txt" 2>&1
+if grep -q '引用校验结论：未在自述基线上执行' "$TMP/out.txt"; then
+  PASS=$((PASS + 1)); printf '  ok   结论不越权（如实降级，不假装通过）\n'
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL 未在自述基线上校验却没降级说明\n'
+fi
+
+# 6.5 KB 模式：入库了但没被索引 → note
+KB="$TMP/kb"; mkdir -p "$KB/ai-agent/a" "$KB/ai-agent/a-wiki"
+cp "$GOOD"/README.md "$GOOD"/topic.md "$KB/ai-agent/a-wiki/"
+printf '# 顶层索引\n' > "$KB/README.md"
+printf '# 分类索引\n' > "$KB/ai-agent/README.md"
+assert_report DOC-KB-UNLINKED "入库但没被任何索引链接（note）" "$KB/ai-agent/a-wiki" --source-repo "$SRC" --kb-repo "$KB"
+printf '# 分类索引\n\n| 项目 | 说明 |\n|------|------|\n| a | [Wiki](a-wiki/README.md) |\n' > "$KB/ai-agent/README.md"
+node "$CHECK_DOCS" "$KB/ai-agent/a-wiki" --source-repo "$SRC" --kb-repo "$KB" >"$TMP/out.txt" 2>&1
+if grep -q 'DOC-KB-UNLINKED' "$TMP/out.txt"; then
+  FAIL=$((FAIL + 1)); printf '  FAIL 已被索引却仍报 KB-UNLINKED\n'
+else
+  PASS=$((PASS + 1)); printf '  ok   被索引后不再报 KB-UNLINKED\n'
+fi
+
+# ———————————————————————— 夹具 7：更新预检（plan-update，非门禁） ————————————————————————
+# 预检不阻断，但它的判定必须是确定的——"两张清单算不出来"同样是静默失效。
+
+echo
+echo "== 夹具 7：更新预检（plan-update） =="
+
+PREPO="$TMP/plan-src"; mkdir -p "$PREPO/internal/gateway"
+(
+  cd "$PREPO" || exit 1
+  git init -q -b main .
+  for i in $(seq 1 40); do echo "line $i"; done > internal/gateway/router.go
+  git add -A
+  GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t git commit -qm init
+  git tag v1.0.0
+)
+PW="$TMP/plan-wiki"; mkdir -p "$PW"
+cat > "$PW/README.md" <<'EOF'
+---
+title: Plan 文档
+type: 项目 Wiki
+description: 更新预检夹具首页。
+---
+
+# Plan
+
+**本文档依据**：`v1.0.0`（`abc1234`，2026-01-01）
+
+## 页面索引
+
+| 页面 | 内容 |
+|------|------|
+| [architecture.md](architecture.md) | 架构 |
+EOF
+cat > "$PW/architecture.md" <<'EOF'
+---
+title: 架构
+type: 项目 Wiki
+description: 引用将要被改动的区间。
+---
+
+# 架构
+
+## 路由
+
+> 依据：`internal/gateway/router.go:20-30`
+EOF
+cat > "$PW/deployment.md" <<'EOF'
+---
+title: 部署
+type: 项目 Wiki
+description: 引用只发生行号漂移的区间。
+---
+
+# 部署
+
+## 启动
+
+> 依据：`internal/gateway/router.go:31-40`
+EOF
+(
+  cd "$PREPO" || exit 1
+  # 变更一：在依据区间之前插入（造成行号漂移）；变更二：改动区间内部（论断可能失效）；
+  # 变更三：新增一个没人引用的模块（未覆盖的变更面）
+  sed -i '' '5a\
+inserted line' internal/gateway/router.go
+  sed -i '' '25s/.*/CHANGED LINE/' internal/gateway/router.go
+  printf 'package newcap\n' > internal/gateway/newcap.go
+  mkdir -p internal/tests && printf 'package tests\n' > internal/tests/ignored_test.go
+  git add -A
+  GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t git commit -qm "v1.1"
+  git tag v1.1.0
+)
+node "$PLAN_UPDATE" "$PW" --source-repo "$PREPO" --from v1.0.0 --to v1.1.0 --emit "$TMP/snap.json" >"$TMP/out.txt" 2>&1
+got=$?
+if [ "$got" = "0" ] && grep -q 'DOC-UPDATE-TOUCHED' "$TMP/out.txt" && grep -q 'DOC-UPDATE-UNCOVERED' "$TMP/out.txt"; then
+  PASS=$((PASS + 1)); printf '  ok   预检产出两张清单（受影响页 + 未覆盖变更面）\n'
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL 预检清单不完整（退出码 %s）\n' "$got"; sed 's/^/       /' "$TMP/out.txt"
+fi
+# 行号漂移必须给出真实新行号（无指纹版的 STALE 解析）
+if grep -q '新行号' "$TMP/out.txt"; then
+  PASS=$((PASS + 1)); printf '  ok   纯漂移给出真实新行号\n'
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL 漂移未给出新行号\n'
+fi
+# 新增的测试文件属于噪声，不应出现在未覆盖清单里
+if grep -q 'ignored_test.go' "$TMP/out.txt"; then
+  FAIL=$((FAIL + 1)); printf '  FAIL 测试文件未被噪声过滤\n'
+else
+  PASS=$((PASS + 1)); printf '  ok   测试/示例类新增文件被噪声过滤\n'
+fi
+# 改写后比对：删页与依据行缩水必须显形（note，不阻断）
+rm "$PW/architecture.md"
+cat > "$PW/topic2.md" <<'EOF'
+---
+title: 备用页
+type: 项目 Wiki
+description: 改写后新增。
+---
+
+# 备用页
+
+一段内容。
+EOF
+node "$PLAN_UPDATE" "$PW" --against "$TMP/snap.json" >"$TMP/out.txt" 2>&1
+got=$?
+if [ "$got" = "0" ] && grep -q 'DOC-UPDATE-PAGE-DROPPED' "$TMP/out.txt"; then
+  PASS=$((PASS + 1)); printf '  ok   结构指纹比对发现页丢失（note，不阻断）\n'
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL 结构指纹未发现页丢失（退出码 %s）\n' "$got"; sed 's/^/       /' "$TMP/out.txt"
+fi
+# 它明确不是门禁：清单产出即 0，不表达通过与否
+if grep -q '不表达通过与否' "$TMP/out.txt" || grep -q '这些是 note：不阻断' "$TMP/out.txt"; then
+  PASS=$((PASS + 1)); printf '  ok   预检自述"不是门禁"\n'
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL 预检未说明它不是门禁\n'
 fi
 
 echo

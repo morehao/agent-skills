@@ -1,6 +1,6 @@
 # 轻量真源：真实性怎么保证，以及放弃了什么
 
-> 由 SKILL.md「铁律 5」与 step 5（校验）按需加载。
+> 由 SKILL.md「铁律 5 / 铁律 7」与 step 6（校验）按需加载。
 > 本文件是**有意取舍的说明书**：先说清读者看不到什么、程序检查什么、放弃了什么精度。
 
 ## 立场
@@ -53,26 +53,72 @@ project-insight 用"把证据堆进正文"来保证真实性：每条论断后�
 反过来，**真实路径要主动写成这个形状**才有校验：`src/app/[owner]/[repo]/page.tsx:111-134`
 这种带动态路由方括号的路径是支持的，不写行号则等于没校验。
 
+## 正文合法声明清单
+
+铁律 1 禁的是**校验痕迹**（`<!-- anchor: … -->`、`<!-- snippet: … -->`、`Sources:`、行号百分比、
+"已校验"之类），不是所有与"版本/边界"有关的话。下面三类是**读者需要**的信息，**该写就写**：
+
+| 声明 | 形态 | 为什么它合法 |
+|------|------|--------------|
+| 版本契约行 | **本文档依据**：`v1.2.3`（`abc1234`，2026-08-14） | 读者据此知道"我读的是哪一版"；它同时是校验根与更新时的 diff 左端（[version-contract.md](version-contract.md)） |
+| 陈旧 / 未发布版本声明 | 本文档基于 `v1.2.3`（2026-08-14），晚于该版本的变更未涵盖。／ 未发布版本 | 陈旧基线的代价必须让读者看见，否则误导无从察觉（[version-contract.md](version-contract.md)） |
+| 现状与边界 | 首页 `## 现状与边界`：不做什么、当前限制、未能确认的点 | 只讲优点的文档无法用于选型；"文档未能确认"比编一个答案诚实 |
+
+判断口径：**它是给读者的信息，还是给校验器看的痕迹？** 前者进正文，后者留在作者侧。
+
 ## 程序检查什么
 
 ```bash
-node scripts/check-all.mjs <输出目录> --source-repo <源码根>
+node scripts/check-all.mjs <输出目录> --source-repo <基线工作树> --expect-baseline <ref> \
+  [--kb-repo <知识库根>] [--allow-in-repo] [--strict]
 ```
 
-| 检查 | 输出码 | 拦住什么幻觉 |
-|------|--------|-------------|
-| 依据行/行内引用的路径真实存在 | `[DOC-SRC-MISSING]` | 编造文件路径（最常见） |
-| 行号落在该文件行数范围内 | `[DOC-SRC-ORANGE]` | 编造行号、越界区间 |
-| 引用的行号区间首末有序 | `[DOC-SRC-RANGE]` | `100-20` 这类笔误 |
-| 引用路径未越出源码根 | `[DOC-SRC-TRAVERSAL]` | `../` 逃逸 |
-| 疑似引用但解析不出 | `[DOC-SRC-UNPARSED]` | 换个写法绕过校验（**不静默放过**） |
-| 有引用却没传 `--source-repo` | `[DOC-SRC-UNCHECKED]` | "没校验却当成校验过了" |
-| 正文出现校验痕迹 | `[DOC-TRACE]` | 锚点指纹/`Sources:` 混进读者视野 |
-| 行内引用密度 | `[DOC-INLINE-REFS]` | 出处没聚合，阅读被打断 |
-| Mermaid 真解析（flowchart 额外 render） | `[MERMAID-ERROR]` | 渲染报错的图 |
-| 代码预算 | `[DOC-CODE-HEAVY]` / `[DOC-CODE-LONG]` | 文档退化成代码堆 |
-| 首页索引与实际文件一致 | `[DOC-INDEX-*]` | 索引指向不存在的页 / 页面漏列 |
-| 标题数字前缀、缺图、图过复杂、篇幅过短 | `[DOC-HEADING-NUM]` / `[DOC-NO-FIGURE]` / `[DOC-FIGURE-COMPLEX]` / `[DOC-THIN]` | 结构失范 |
+| 检查 | 输出码 | 档位 | 拦住什么幻觉 |
+|------|--------|------|-------------|
+| 依据行/行内引用的路径真实存在 | `[DOC-SRC-MISSING]` | error | 编造文件路径（最常见） |
+| 行号落在该文件行数范围内 | `[DOC-SRC-ORANGE]` | error | 编造行号、越界区间 |
+| 引用的行号区间首末有序 | `[DOC-SRC-RANGE]` | error | `100-20` 这类笔误 |
+| 引用路径未越出源码根 | `[DOC-SRC-TRAVERSAL]` | error | `../` 逃逸 |
+| 疑似引用但解析不出 | `[DOC-SRC-UNPARSED]` | warn | 换个写法绕过校验（**不静默放过**） |
+| 有引用却没传 `--source-repo` | `[DOC-SRC-UNCHECKED]` | warn | "没校验却当成校验过了" |
+| 正文出现校验痕迹 | `[DOC-TRACE]` | error | 锚点指纹/`Sources:` 混进读者视野 |
+| 行内引用密度 | `[DOC-INLINE-REFS]` | error | 出处没聚合，阅读被打断 |
+| Mermaid 真解析（flowchart 额外 render） | `[MERMAID-ERROR]` | error | 渲染报错的图 |
+| 代码预算 | `[DOC-CODE-HEAVY]` / `[DOC-CODE-LONG]` | error | 文档退化成代码堆 |
+| 首页索引与实际文件一致 | `[DOC-INDEX-*]` | error | 索引指向不存在的页 / 页面漏列 |
+| 缺 frontmatter / 缺 title / description | `[DOC-FRONTMATTER]` | error | 检索元数据缺失 |
+| 标题数字前缀 | `[DOC-HEADING-NUM]` | error | 结构失范 |
+| 缺图 / 图过复杂 / 时序图参与者未声明 | `[DOC-NO-FIGURE]` / `[DOC-FIGURE-COMPLEX]` / `[DOC-FIGURE-PARTICIPANT]` | warn | 结构失范 |
+| 篇幅过短 | `[DOC-THIN]` | warn | 撑不起一页 |
+| 未写 `type`（同一 KB 里区分解读与 Wiki） | `[DOC-FRONTMATTER-TYPE]` | note | 检索层分不出两类产物 |
+| 首页没有契约行 / 契约行不可解析 | `[DOC-BASELINE-MISSING]` / `[DOC-BASELINE-FORMAT]` | note | 版本口径缺失、或写着但读不出来 |
+| 契约声明的 ref/SHA/日期无法与 git 核对（含缺 git、非仓库） | `[DOC-BASELINE-UNRESOLVED]` | note | "签了字但核不上" |
+| `--expect-baseline` 与 `--source-repo` 的 HEAD 不一致（含未传） | `[DOC-SRC-BASELINE-MISMATCH]` | note + **结论降级** | 在错误的树上校验、却当成校验过了 |
+| 产物目录落在 `--source-repo` 内 | `[DOC-DOCROOT-IN-SRC]` | **error** | 污染被描述项目的仓库（可用 `--allow-in-repo` 显式放行，放行时输出 note） |
+| KB 模式下没有任何索引链接到本 wiki 首页 | `[DOC-KB-UNLINKED]` | note | 入库了但读者找不到 |
+
+更新模式另有四个 note 由预检脚本产出（**不进门禁退出码**）：`[DOC-UPDATE-PAGE-DROPPED]`、
+`[DOC-UPDATE-SHRUNK]`、`[DOC-UPDATE-TOUCHED]`、`[DOC-UPDATE-UNCOVERED]`（见 [update-flow.md](update-flow.md)）。
+
+### 严重度与归级判据
+
+三档，语义**已冻结**：
+
+| 档 | 判据 | 退出码 |
+|----|------|--------|
+| `error` | 程序可**确定判定**，**且**违反会让读者读到错的产物 | 1 |
+| `warn` | 程序可判定，但属**质量偏好** | 默认 0；`--strict` 下 1 |
+| `note` | 作者侧流程与口径合规，或程序判不了、只有人能判的事 | **任何模式下都是 0** |
+
+四条配套约束：
+
+- **note 在任何模式（含 `--strict`）都不影响退出码**。`--strict` 的语义**冻结为"只提升 warn"**，
+  不许再往里加档——否则 note 形同虚设（在 CI 里跑 `--strict` 的人会遇到硬失败）。
+- **note 必须默认打印**，不得静默：不阻断 ≠ 不报告。
+- **note 升 `error` 必须过上面的判据，并在本文件写明理由**。目前新增项里**只有
+  `[DOC-DOCROOT-IN-SRC]` 够格**：它可确定判定，且后果落在第三方仓库（这个 skill 还会为基线在其上做 checkout）。
+- 判不了的**如实降级**，不假装通过：未在自述基线上校验时，输出会说明"已校验项不覆盖行号是否属于该版本"
+  （见下方「基线」）。这是"**不阻断但不说谎**"。
 
 ### 写法变体会被归一化，不会被跳过
 
@@ -131,6 +177,21 @@ node scripts/check-all.mjs <输出目录> --source-repo <源码根>
 node scripts/select-baseline.mjs <本地路径|远端URL> [--ref <ref>]
 ```
 
-稳定 tag > 稳定分支（`release*`/`stable*`/`maintenance*`/`1.x`）> 默认分支。
-选定结果写进首页一行：`**本文档依据**：<ref>（<短SHA>），<日期>`。
+稳定 tag > 稳定分支（`release*`/`stable*`/`maintenance*`/`1.x`）> 默认分支 > 无 `main`/`master` 兜底矩阵。
+选定结果写进首页**唯一一处**契约行（ref 与短 SHA 各一个 code span，日期取自 git）：
+
+```markdown
+**本文档依据**：`v1.2.3`（`abc1234`，2026-08-14）
+```
+
+校验时把校验根与自述基线一起交给门禁：`--source-repo` 指向**该基线的工作树**，并传 `--expect-baseline <ref>`。
+两者缺一，"校验通过"就不完整。
+
+**结论不越权**：未在自述基线上校验（未传 `--expect-baseline`，或 HEAD 与自述基线不符）时，
+程序**不会假装通过**——它照常给出 exit 0，但汇总里如实说明"已校验项不覆盖行号是否属于该版本"
+（`[DOC-SRC-BASELINE-MISMATCH]` 是 note，不阻断）。这正是本 skill 的立场：程序只保证它能保证的。
+
 用户显式指定 ref 时以用户为准，并声明"按用户指定 ref 撰写，非稳定版"。
+陈旧冲突（`[BASELINE-STALE]`）与多包/歧义（`[BASELINE-AMBIGUOUS]`）走**三选一结构化裁决**；
+落地动作（clone / checkout / worktree / 收尾恢复）与旧产物没有契约行时的退化，见
+[version-contract.md](version-contract.md)。
