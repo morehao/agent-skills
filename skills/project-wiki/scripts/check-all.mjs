@@ -2,10 +2,14 @@
 // check-all.mjs —— project-wiki 的唯一门禁入口（薄壳编排）
 //
 // 用法：
-//   node check-all.mjs <输出目录|a.md b.md ...> [--source-repo <源码根>] [--strict] [--preview]
+//   node check-all.mjs <输出目录|a.md b.md ...> [--source-repo <源码根>] [--expect-baseline <ref>]
+//                       [--kb-repo <知识库根>] [--allow-in-repo] [--strict] [--preview]
 //
 // 为什么要有这个入口：校验器一旦分散成多条命令，就会"只跑了其中一个就当通过"，
 // 而漏跑校验器 = 静默放过——那正是本 skill 最不能接受的事。所以收成一条命令、一个退出码。
+//
+// 它管的是**产物质量**（通过 / 不通过），不承担"更新预检"的语义：
+//   "该怎么改"的清单由 scripts/plan-update.mjs 产出（需要 git diff），是规划输入而非门禁。
 //
 // 编排：
 //   1. check-docs.mjs（本 skill 自研）—— 代码预算 / 依据行真实性 / 结构 / 索引一致性
@@ -36,15 +40,20 @@ let preview = false;
 for (let i = 0; i < argv.length; i += 1) {
   const a = argv[i];
   if (a === '--preview') { preview = true; continue; }
-  if (a === '--source-repo') {
+  if (a === '--source-repo' || a === '--kb-repo') {
     const v = argv[++i];
-    sourceRepo = v;
+    if (a === '--source-repo') sourceRepo = v;
     // 子进程 cwd 是本脚本目录，相对路径必须在这里先绝对化，否则 check-docs 解析不到目标
     passthrough.push(a, v === undefined ? v : resolve(v));
     continue;
   }
+  if (a === '--expect-baseline') {
+    // 它带值但不带路径：必须显式成对透传，否则值会被当成位置参数（目标目录）收走
+    passthrough.push(a, argv[++i]);
+    continue;
+  }
   if (a === '-h' || a === '--help') {
-    console.log('用法: node check-all.mjs <输出目录|a.md b.md ...> [--source-repo <源码根>] [--strict] [--preview]');
+    console.log('用法: node check-all.mjs <输出目录|a.md b.md ...> [--source-repo <源码根>] [--expect-baseline <ref>] [--kb-repo <知识库根>] [--allow-in-repo] [--strict] [--preview]');
     process.exit(0);
   }
   if (a.startsWith('--')) { passthrough.push(a); continue; }
@@ -57,13 +66,19 @@ if (!targets.length) {
   process.exit(2);
 }
 
-function run(label, scriptPath, args) {
+function run(label, scriptPath, args, opts = {}) {
   console.log(`\n===== ${label} =====`);
+  const capture = opts.capture === true;
   const r = spawnSync(process.execPath, [scriptPath, ...args], {
     cwd: HERE,
-    stdio: 'inherit',
+    stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
+    encoding: capture ? 'utf8' : undefined,
   });
-  return r.status ?? 1;
+  if (capture) {
+    if (r.stdout) process.stdout.write(r.stdout);
+    if (r.stderr) process.stderr.write(r.stderr);
+  }
+  return { status: r.status ?? 1, stdout: capture ? (r.stdout ?? '') : '' };
 }
 
 // —— 收集 .md / .svg（用于决定要不要跑对应校验器）——
@@ -93,9 +108,17 @@ const mdFiles = collect(targets, '.md');
 const svgFiles = collect(targets, '.svg');
 
 let failed = 0;
+let noteCount = 0;
+let degraded = false;
 
-// 1. 自研门禁
-failed += run('文档质量门禁（check-docs）', join(HERE, 'check-docs.mjs'), passthrough) === 0 ? 0 : 1;
+// 1. 自研门禁（捕获输出以便把 note 计数带进汇总——note 不阻断，但必须显形）
+const docsRun = run('文档质量门禁（check-docs）', join(HERE, 'check-docs.mjs'), passthrough, { capture: true });
+if (docsRun.status !== 0) failed += 1;
+{
+  const m = /检查结果：error=(\d+) warn=(\d+) note=(\d+)/.exec(docsRun.stdout);
+  if (m) noteCount = Number(m[3]);
+  degraded = /引用校验结论：未在自述基线上执行/.test(docsRun.stdout);
+}
 
 // 2. Mermaid 真解析
 let warnOnly = false;
@@ -108,7 +131,7 @@ if (mdFiles.length) {
     console.error('  并在 skills/project-insight/scripts/ 下执行过 npm install（node_modules 不入库）。');
     process.exit(2);
   }
-  const code = run('Mermaid 真解析（project-insight 引擎）', engineScript, mdFiles);
+  const code = run('Mermaid 真解析（project-insight 引擎）', engineScript, mdFiles).status;
   if (code !== 0) failed += 1;
 } else {
   console.log('\n===== Mermaid 真解析 =====\n（未发现 .md 文件，跳过）');
@@ -119,13 +142,13 @@ if (mdFiles.length) {
 if (svgFiles.length) {
   const auditScript = join(ENGINE, 'audit-svg-topology.mjs');
   if (existsSync(auditScript)) {
-    const code = run('SVG 边拓扑审计（project-insight 引擎）', auditScript, svgFiles);
+    const code = run('SVG 边拓扑审计（project-insight 引擎）', auditScript, svgFiles).status;
     if (code !== 0) failed += 1;
   }
   if (preview) {
     const previewScript = join(ENGINE, 'render-svg-preview.mjs');
     if (existsSync(previewScript)) {
-      const code = run('SVG 目视预览（project-insight 引擎）', previewScript, svgFiles);
+      const code = run('SVG 目视预览（project-insight 引擎）', previewScript, svgFiles).status;
       // 预览失败不阻断（依赖本机 rsvg-convert）
       if (code !== 0) console.log('\n（预览未生成：可能缺 rsvg-convert，不阻断校验）');
     }
@@ -135,8 +158,15 @@ if (svgFiles.length) {
 }
 
 console.log(`\n########## check-all 汇总 ##########`);
-console.log(failed === 0
-  ? '全部门禁通过。'
-  : `${failed} 项门禁未通过，请按上方输出逐条修复（不静默放过）。`);
+if (failed !== 0) {
+  console.log(`${failed} 项门禁未通过，请按上方输出逐条修复（不静默放过）。`);
+} else if (noteCount > 0) {
+  console.log(`全部门禁通过（${noteCount} 条 note 待作者回应——note 不阻断，但须在交付清单里逐条交代，见 references/grounding-light.md）。`);
+} else {
+  console.log('全部门禁通过。');
+}
+if (degraded) {
+  console.log('注意：引用校验未在自述基线上执行（上方「引用校验结论」），本次"通过"不覆盖"行号是否属于该版本"。');
+}
 if (warnOnly) console.log('提示：本次未发现 .md 文件，请确认传入的是输出目录而非源码目录。');
 process.exit(failed === 0 ? 0 : 1);
