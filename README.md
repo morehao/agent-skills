@@ -11,6 +11,7 @@ ai-kit/
 ├── PUBLISHING.md              # npm 发包流程与踩坑说明（@morehao/dsh-commands / OIDC）
 ├── commands-opencode/          # opencode 斜杠指令
 │   ├── README.md              # 指令功能与用法说明
+│   ├── handoff.md             # 跨会话交接指令（/handoff，只打印）
 │   └── git/                   # Git 相关指令
 │       ├── branch.md
 │       ├── message.md
@@ -20,7 +21,7 @@ ai-kit/
 │       ├── commit-push.md
 │       ├── slim.md
 │       └── star-classify.md
-├── commands-dsh/              # dsh 插件：git-kit 的 dsh 原生斜杠命令入口（命令=意图表，与 opencode 入口共享 git-kit）
+├── commands-dsh/              # dsh 插件：git-kit / handoff 的 dsh 原生斜杠命令入口（命令=意图表，与 opencode 入口共享 skill）
 │   ├── package.json
 │   ├── cordis.patch.yml
 │   ├── lib/index.js
@@ -31,6 +32,8 @@ ai-kit/
     ├── git-kit/               # Git 工作流辅助（message/commit-push/branch/pr-create/pr-merge/tag/slim/star）
     │   ├── references/        # 拆分的辅助逻辑
     │   └── scripts/           # 附带脚本
+    ├── handoff/               # 跨会话交接：把当前会话压成可粘贴的续跑提示（只打印）
+    │   └── references/
     ├── project-insight/       # 开源项目深度解读
     │   ├── references/        # 拆分的辅助逻辑
     │   └── scripts/           # 附带脚本
@@ -49,6 +52,7 @@ ai-kit/
 | 路径 | 功能 |
 |------|------|
 | `skills/git-kit` | Git 工作流辅助工具包，按意图路由到生成 commit message、提交推送、创建/切换分支、创建/更新 PR/MR、按编号合并 PR/MR 并回主干更新、给分支打版本标签并推送、仓库瘦身、分类 star。 |
+| `skills/handoff` | 跨会话交接：把当前会话的任务状态压缩成一段可直接粘贴的续跑提示（只打印、不落盘），新会话粘贴即可继续；命令入口为 `/handoff`。 |
 | `skills/project-insight` | 开源项目深度解读，产出每个论断都带可点开验证的真实源码引用（文件:行号），避免幻觉。 |
 | `skills/project-wiki` | 面向**不读源码的读者**生成项目 Wiki 文档（Markdown）：散文为主 + 架构图 + 表格，**代码密度极低**。立场是"读者不打开源码也能读懂"，所以表达手段按**读者成本**排序（散文 → 图 → 表 → 代码），出处**收进章末一行 `> 依据：…`** 而不是逐句内联；真实性由**作者侧程序校验**保证（路径存在、行号未越界、Mermaid 真渲染），正文**不留任何校验痕迹**（禁锚点指纹与 `Sources:`）。图默认用 **Mermaid**，仅结构/分层、左右对比、回边状态机、节点 ≥12 四类升级 SVG（`svg-maker` 产出，放 `assets/`）。**与 project-insight 分工**：要逐条可点开核验、要深挖设计权衡走 project-insight；要给团队一份能读的文档走本技能。门禁 `scripts/check-all.mjs` 为**唯一入口**，检查代码预算（每页 ≤3 块 / 单块 ≤15 行 / 单页 ≤40 行，可写 `<!-- code-budget: 理由 -->` 显式豁免）、依据行真实性、首页索引一致性、图表复杂度与参与者声明等 19 个输出码，并有回归测试 `scripts/tests/gates-regression.sh`（23 条断言）。**零额外依赖**：Mermaid 校验与基线选择是薄壳，复用 project-insight 引擎（单一真源），无需另行 `npm install`。 |
 | `skills/tech-design`（原 `tech-design-proposal`，曾用名 `design-doc`） | 编写技术方案/技术设计文档：三轴决策——**档位**（轻量/标准/完整）定篇幅、**场景**（新建/增量改造/结构重构/替换与迁移/下线与废弃/专项优化，单选）定过程义务（影响面与兼容、行为基线与等价性验证、对账与回退窗口、消费者盘点与下线判据）、**专题**（架构/API/数据模型/性能与容量/安全/迁移手法，可多选）定技术加固点；场景判定前先答**落点**第 0 问（新系统 / 既有系统的新模块 / 既有系统的既有模块），决定取证对象与义务增量（宿主约束、对宿主的影响、必须谁签）；先按**叙事链** 9 问推理（为什么现在做 → 有什么实体 → 什么问题 → 约束 → 整体 → 拆分 → 流转 → 怎么证明 → 理由与落地）再成文，**取证先于动笔**；四条硬要求——**事实有据**（既有系统的现状/影响面/调用方/容量水位须带 `路径:行号`、监控口径或工单号，取不到标 `[待核实]`）、**量化义务**（性能/容量/可用性/成本/收益须给数字 + 口径 + 假设，量级表见 `quantification.md`）、**取舍对偶**（每个选型写代价与不该选的场景，并回指目标）、**宁轻勿重**；配图 **Mermaid 与 SVG 均为一等公民**（结构/拓扑/分层/对比/回边状态机走 SVG，经 `svg-maker` 产出；时序与线性小图用 Mermaid；节点 ≥12 或含分层/泳道即改用 SVG），同一张图不做双份，图有程序校验（Mermaid 解析 / SVG 边拓扑审计与预览），产出可评审、可执行的 Markdown 文档。 |
@@ -56,11 +60,11 @@ ai-kit/
 
 每个 skill 目录下是一个 `SKILL.md`（含 frontmatter 定义触发条件），复杂逻辑可拆到 `references/` 子目录。`skills/` 下只放各技能的目录，不放置说明性文件（见下方"用法说明"）。
 
-> **联动**：`skills/git-kit` 是 Git 工作流逻辑与意图路由的唯一真源；`commands-opencode/git/*`（opencode 斜杠）与 `commands-dsh/`（dsh 斜杠）只是**命令入口**，声明「命令 → git-kit 分支」映射并交给 git-kit 执行，互为多条入口（opencode 斜杠指令 / dsh 斜杠命令 / 自然语言触发）。
+> **联动**：`skills/git-kit` 是 Git 工作流逻辑与意图路由的唯一真源；`commands-opencode/git/*`（opencode 斜杠）与 `commands-dsh/`（dsh 斜杠）只是**命令入口**，声明「命令 → git-kit 分支」映射并交给 git-kit 执行，互为多条入口（opencode 斜杠指令 / dsh 斜杠命令 / 自然语言触发）。`skills/handoff` 同理：`commands-opencode/handoff.md` 与 dsh `/handoff` 只声明「命令 → handoff print 分支」，只打印交接文本、不落盘。
 
 ## commands —— 斜杠指令
 
-`commands-opencode/` 下是与 Git 相关的自定义指令：
+`commands-opencode/` 下是 Git 工作流与跨会话交接的自定义指令：
 
 | 路径 | 功能 |
 |------|------|
@@ -72,12 +76,13 @@ ai-kit/
 | `commands-opencode/git/commit-push` | 基于代码变更自动生成 commit message 并执行提交推送 |
 | `commands-opencode/git/slim` | 将当前 git 仓库瘦身为浅克隆，默认保留 30 天历史 |
 | `commands-opencode/git/star-classify` | 拉取并分类自己的 GitHub star 仓库，输出中文分组清单 |
+| `commands-opencode/handoff` | 把当前会话的任务状态压缩成一段可粘贴的续跑提示，供新会话继续执行（只打印，不落盘） |
 
 详见 [commands-opencode/README.md](commands-opencode/README.md)。
 
 ## dsh 接入（可选）
 
-`commands-dsh/` 以 **dsh 原生命令**形式暴露 git-kit 工作流：`/git-message`、`/git-commit-push`、`/git-branch`、`/git-pr-create`、`/git-pr-merge`、`/git-tag`、`/git-slim`、`/git-star-classify`。插件是**自包含意图表**（一行声明 = 命令名 + git-kit 分支 key），命令执行时向当前 agent 注入一条加载 git-kit 并按其分支执行的指令——与 opencode 入口共用 git-kit、单一真源，编辑 `skills/git-kit/` 即同步生效（改插件 `lib/index.js` 需重启 dsh）。
+`commands-dsh/` 以 **dsh 原生命令**形式暴露 git-kit 工作流与跨会话交接：`/git-message`、`/git-commit-push`、`/git-branch`、`/git-pr-create`、`/git-pr-merge`、`/git-tag`、`/git-slim`、`/git-star-classify`、`/handoff`。插件是**自包含意图表**（一行声明 = 命令名 + 对应 skill 分支 key，`skill` 省略时默认 git-kit），命令执行时向当前 agent 注入一条加载对应 skill（git-kit / handoff）并按其分支执行的指令——与 opencode 入口共用同一 skill、单一真源，编辑 `skills/git-kit/` 或 `skills/handoff/` 即同步生效（改插件 `lib/index.js` 需重启 dsh）。
 
 一键接入（幂等，可重复执行）：
 
@@ -99,10 +104,10 @@ DSH_USE_NPM=1 ./scripts/dsh-install.sh       # 插件改走 npm 已发布包，�
 
 ```bash
 mkdir -p "$DSH_HOME/skills"     # 默认 ~/.dsh/skills；这是 dsh 的**用户级**技能根
-for name in git-kit project-insight project-wiki svg-maker tech-design; do
+for name in git-kit handoff project-insight project-wiki svg-maker tech-design; do
   ln -sfn "<本仓库>/skills/$name" "$DSH_HOME/skills/$name"
 done
-ls -la "$DSH_HOME/skills"       # 验证：5 条软链均无悬空
+ls -la "$DSH_HOME/skills"       # 验证：6 条软链均无悬空
 ```
 
 dsh 侧技能目录约定（`skills/` 是**全局**的，软链后所有项目可用）：
@@ -130,6 +135,7 @@ ln -sfn /path/to/ai-kit/skills/* ~/.config/opencode/skills/
 
 # 软链 commands 到 opencode 的 command 目录
 ln -sfn /path/to/ai-kit/commands-opencode/git ~/.config/opencode/command/git
+ln -sfn /path/to/ai-kit/commands-opencode/handoff.md ~/.config/opencode/command/handoff.md
 ```
 
 > **约定**：`skills/` 下只放各技能的目录（如 `git-kit/`），不放置说明性文件。`skills/*` 会展开全部条目，若未来在 `skills/` 新增非目录文件，会一并被软链到 skills 目录，故请保持该约定。
