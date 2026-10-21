@@ -19,6 +19,9 @@
  *   @deepseek-ai/* 运行时 import（消息对象手工构造为官方 createUserMessage 的
  *   契约形状：role/source/content/id 全齐）。改 skill 无需重启；
  *   改本文件（含 COMMANDS 表）需重启 dsh web。
+ * - 例外：`handoff` 的 SKILL.md 标了 `disable-model-invocation`（只允许用户手动调用），
+ *   dsh 会把它移出模型可见的技能目录、且 skill 工具直接拒绝加载；所以这条命令置
+ *   `readFallback: true`，注入文本里带「直接 read 技能文件」的兜底路径。
  *
  * 分支 key 词汇表（与各 SKILL.md 决策树对齐）：
  *   git-kit: commit-push / commit-message / branch / pr-create / pr-merge / tag / slim / star-classify
@@ -88,7 +91,11 @@ const COMMANDS = [
 		skill: "handoff",
 		branch: "print",
 		hint: "[任务范围]",
-		description: "把当前会话的任务状态压缩成一段可粘贴的续跑提示（只打印，不落盘）"
+		description: "把当前会话的任务状态压缩成一段可粘贴的续跑提示（只打印，不落盘）",
+		// handoff 的 SKILL.md 标了 disable-model-invocation（只允许用户手动调用），
+		// dsh 会把它移出模型可见目录且 skill 工具拒绝加载 —— 本命令是它的唯一入口，
+		// 故注入文本要带上「直接 read 技能文件」的兜底（见 buildInstruction）。
+		readFallback: true
 	}
 ];
 
@@ -110,13 +117,21 @@ function userMessage(text) {
  */
 function buildInstruction(def, input) {
 	const skill = def.skill ?? "git-kit";
-	return [
+	const lines = [
 		`【dsh 命令 /${def.name}】`,
 		`用户请求：${input.length > 0 ? input : "（未附加说明，按分支流程默认处理）"}`,
 		"",
 		`请用 skill 工具加载 ${skill}，将本次请求视为 ${def.branch} 分支并按该分支的完整流程执行。`,
 		"如需用户决策（候选分支名 / PR·MR 编号 / tag 版本号 / 交接范围等），先向用户确认再继续。"
-	].join("\n");
+	];
+	if (def.readFallback === true) {
+		lines.push(
+			'若 skill 工具报 "not available for model invocation"（该技能标了 disable-model-invocation，只能由用户手动调用），' +
+				`改用 read 工具读取 \`$DSH_HOME/skills/${skill}/SKILL.md\`（DSH_HOME 通常为 ~/.dsh），` +
+				"需要时再读同目录下的 references/。"
+		);
+	}
+	return lines.join("\n");
 }
 
 function makeHandler(def) {
