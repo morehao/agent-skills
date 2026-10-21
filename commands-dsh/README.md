@@ -1,31 +1,32 @@
 # dsh-commands
 
-一个可扩展的 **dsh 原生斜杠命令集合包**（npm 名 `@morehao/dsh-commands`，仓库目录仍为 `commands-dsh/`）。当前内置 git-kit 的 Git 工作流命令（与 opencode 入口、自然语言入口共用 git-kit 同一实现，单一真源）；将来其它 skill 的命令只需往 `lib/index.js` 的 `COMMANDS` 表加条目即可。
+一个可扩展的 **dsh 原生斜杠命令集合包**（npm 名 `@morehao/dsh-commands`，仓库目录仍为 `commands-dsh/`）。当前内置 git-kit 的 Git 工作流命令与 handoff 的跨会话交接命令（与 opencode 入口、自然语言入口共用同一 skill 实现，单一真源）；将来其它 skill 的命令只需往 `lib/index.js` 的 `COMMANDS` 表加条目即可。
 
 ## 提供的命令
 
-| 命令 | 参数 | 委托的 git-kit 分支 |
+| 命令 | 参数 | 委托的 skill 分支 |
 |---|---|---|
-| `/git-message` | `<中文描述>`（必填） | commit-message |
-| `/git-commit-push` | 无 | commit-push |
-| `/git-branch` | `<中文描述>`（必填） | branch |
-| `/git-pr-create` | `[目标分支]` | pr-create |
-| `/git-pr-merge` | `[PR/MR 编号]` | pr-merge |
-| `/git-tag` | `[tag名或分支名]` | tag |
-| `/git-slim` | `[保留天数]` | slim |
-| `/git-star-classify` | 无 | star-classify |
+| `/git-message` | `<中文描述>`（必填） | git-kit → commit-message |
+| `/git-commit-push` | 无 | git-kit → commit-push |
+| `/git-branch` | `<中文描述>`（必填） | git-kit → branch |
+| `/git-pr-create` | `[目标分支]` | git-kit → pr-create |
+| `/git-pr-merge` | `[PR/MR 编号]` | git-kit → pr-merge |
+| `/git-tag` | `[tag名或分支名]` | git-kit → tag |
+| `/git-slim` | `[保留天数]` | git-kit → slim |
+| `/git-star-classify` | 无 | git-kit → star-classify |
+| `/handoff` | `[任务范围]` | handoff → print（只打印，不落盘） |
 
 ## 原理（命令 = 意图表）
 
-每条 dsh 命令注册到 `ctx.commands`（`name`/`description`/`input.hint`/`recordInput`/`handler`，即 `CommandDefinition`），出现在 dsh 斜杠菜单。`COMMANDS` 表是**自包含的意图表**：一行声明 = 注册元数据 + 对应的 git-kit 分支 key，**不再读取任何仓库文件**，逻辑与路由唯一真源在 `skills/git-kit`（`SKILL.md` 意图决策树 + `references/` + `scripts/`）。
+每条 dsh 命令注册到 `ctx.commands`（`name`/`description`/`input.hint`/`recordInput`/`handler`，即 `CommandDefinition`），出现在 dsh 斜杠菜单。`COMMANDS` 表是**自包含的意图表**：一行声明 = 注册元数据 + 对应的 skill 分支 key（`skill` 省略时默认 `git-kit`），**不再读取任何仓库文件**，逻辑与路由唯一真源在各 skill（`SKILL.md` 意图决策树 + `references/` + `scripts/`）。
 
-命令执行时 handler 校验必填输入，然后构造一条 user 消息经 `invocation.agent.followup()` 注入当前会话，由 agent 加载 `git-kit` 并落到对应分支执行——交互确认步骤与自然语言触发 git-kit 完全一致。
+命令执行时 handler 校验必填输入，然后构造一条 user 消息经 `invocation.agent.followup()` 注入当前会话，由 agent 加载对应 skill（`git-kit` / `handoff`）并落到对应分支执行——交互确认步骤与自然语言触发同一 skill 完全一致。
 
 因为输入已逐字写进这条注入的 user 消息（会话日志的真实事件），全部命令统一注册 `recordInput: false`，避免 `command/run` 再记一份同样的 `args`（dsh 官方指引：命令自身的权威事件已承载 payload 时置 false）。这不影响聊天区的命令行显示——`GenericCommandCard` 只渲染命令名与结算文案，不渲染 `args`。
 
-> **描述文本不做 i18n（有意为之）**：dsh 只本地化它自己的 6 条一方命令——客户端 `HOST_DESCRIPTION_KEYS` 硬编码 `compact`/`export`/`feedback`/`goal`/`permission`/`plan`，且要求 `description` 与英文原文逐字相等才翻译，其余一律**原样透传**；第三方也**无法**用同名客户端 `CommandContribution` 覆盖（同名会在候选合成时 `collides with a host command` 直接抛错），`CommandDecoration` 又**没有** description 字段。Host 侧同样拿不到语言偏好（`SettingsProvider` 只提供 `register()`，namespace `locale` 已被 locale 插件独占、重复注册会抛错；且 `locale.preference` 缺省时本就交给浏览器 `navigator.language` 决定）。因此本插件 8 条描述直接写中文：中文界面下与一方命令表现一致。若将来 dsh 开放第三方描述 i18n 钩子，再改为按键取值。
+> **描述文本不做 i18n（有意为之）**：dsh 只本地化它自己的 6 条一方命令——客户端 `HOST_DESCRIPTION_KEYS` 硬编码 `compact`/`export`/`feedback`/`goal`/`permission`/`plan`，且要求 `description` 与英文原文逐字相等才翻译，其余一律**原样透传**；第三方也**无法**用同名客户端 `CommandContribution` 覆盖（同名会在候选合成时 `collides with a host command` 直接抛错），`CommandDecoration` 又**没有** description 字段。Host 侧同样拿不到语言偏好（`SettingsProvider` 只提供 `register()`，namespace `locale` 已被 locale 插件独占、重复注册会抛错；且 `locale.preference` 缺省时本就交给浏览器 `navigator.language` 决定）。因此本插件 9 条描述直接写中文：中文界面下与一方命令表现一致。若将来 dsh 开放第三方描述 i18n 钩子，再改为按键取值。
 
-- 编辑 `skills/git-kit/` 的内容**无需重启**，下次执行即生效。
+- 编辑 `skills/git-kit/`、`skills/handoff/` 的内容**无需重启**，下次执行即生效。
 - 修改本插件的 `lib/index.js`（含 `COMMANDS` 表）需重启 dsh web 生效。**但只有以 `link:` 方式接入时改源码才生效**：若 profile 里装的是 npm 版（`dsh plugin --profile web add @morehao/dsh-commands`），profile 下的 `node_modules` 是一份**拷贝**，改仓库源码不会生效，需先升版本发版再重装。
 
 ## 安装
@@ -38,7 +39,7 @@ dsh plugin --profile web add @morehao/dsh-commands
 # 重启 dsh web
 ```
 
-> **skill 依赖**：插件只声明「命令 → git-kit 分支」意图表，真正的执行授权给 `git-kit` skill。而 dsh 不从 node_modules 扫描 skill，所以仍需把 `skills/git-kit/` 放入 `$DSH_HOME/skills`（默认 `~/.dsh/skills`）。完整一键接入见仓库根 `./scripts/dsh-install.sh`，它同时软链 `skills/*` 并以 `link:`（开发模式，源码改动即生效）方式接入本插件。
+> **skill 依赖**：插件只声明「命令 → skill 分支」意图表，真正的执行授权给对应 skill（`git-kit` / `handoff`）。而 dsh 不从 node_modules 扫描 skill，所以仍需把 `skills/git-kit/`、`skills/handoff/` 放入 `$DSH_HOME/skills`（默认 `~/.dsh/skills`）。完整一键接入见仓库根 `./scripts/dsh-install.sh`，它同时软链 `skills/*` 并以 `link:`（开发模式，源码改动即生效）方式接入本插件。
 
 本地开发 / 测试用 `link:` 方式（源码即时生效）：
 
@@ -57,8 +58,8 @@ dsh 的插件页（侧栏「插件」→ 组合包详情与组件行）在**不�
 
 ## 开发
 
-- 增删命令：改 `lib/index.js` 的 `COMMANDS` 表即可（每条一行声明）；`branch` 值必须与 git-kit `SKILL.md` 决策树的分支 key 一致。
-- 命令与 opencode 侧 `commands-opencode/git/*.md` 是同一 git-kit 的两条入口，只声明意图、不重复逻辑。
+- 增删命令：改 `lib/index.js` 的 `COMMANDS` 表即可（每条一行声明）；`branch` 值必须与对应 `SKILL.md` 决策树的分支 key 一致（`skill` 省略时默认 `git-kit`）。
+- 命令与 opencode 侧 `commands-opencode/git/*.md`、`commands-opencode/handoff.md` 是同一 skill 的多条入口，只声明意图、不重复逻辑。
 
 ## 发布（自动）
 

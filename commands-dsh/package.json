@@ -1,7 +1,7 @@
 {
   "name": "@morehao/dsh-commands",
-  "version": "0.1.3",
-  "description": "把 ai-kit 的 git-kit Git 工作流以 dsh 原生斜杠命令接入（薄意图表，委托 git-kit skill 执行）",
+  "version": "0.1.4",
+  "description": "把 ai-kit 的 git-kit Git 工作流与 handoff 跨会话交接以 dsh 原生斜杠命令接入（薄意图表，委托对应 skill 执行）",
   "icon": "icon.svg",
   "type": "module",
   "main": "lib/index.js",
@@ -31,6 +31,7 @@
     "dsh-command",
     "git",
     "git-kit",
+    "handoff",
     "conventional-commits"
   ],
   "engines": {

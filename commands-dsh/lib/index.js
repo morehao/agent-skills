@@ -1,14 +1,14 @@
 /**
- * dsh-commands —— 把 ai-kit 的 git-kit Git 工作流以 dsh 原生命令方式接入（可扩展其他命令）。
+ * dsh-commands —— 把 ai-kit 的 git-kit / handoff 工作流以 dsh 原生命令方式接入（可扩展其他命令）。
  *
- * 架构（命令 = 意图表，单一真源在 git-kit skill）：
- * - 逻辑与「意图路由」的唯一真源是 `skills/git-kit`（SKILL.md 意图决策树 +
- *   references/ + scripts/）。本插件不复制逻辑，只声明「命令 → git-kit 分支」的
- *   映射表（COMMANDS），是 dsh 斜杠侧的一条薄入口，与 opencode 的
- *   `commands-opencode/git/*.md`、自然语言触发互为入口。
+ * 架构（命令 = 意图表，单一真源在对应 skill）：
+ * - 逻辑与「意图路由」的唯一真源是对应 skill：`skills/git-kit` 与 `skills/handoff`
+ *   （各自 SKILL.md 的意图决策树 + references/ + scripts/）。本插件不复制逻辑，
+ *   只声明「命令 → skill 分支」的映射表（COMMANDS），是 dsh 斜杠侧的一条薄入口，
+ *   与 opencode 的 `commands-opencode/*`、自然语言触发互为入口。
  * - 每条命令注册到 ctx.commands（CommandDefinition：name/description/input.hint/
  *   recordInput/handler），出现在 dsh 斜杠菜单；handler 校验必填输入后构造一条 user
- *   消息，经 invocation.agent.followup() 注入当前会话，让 agent 按 git-kit 对应分支执行。
+ *   消息，经 invocation.agent.followup() 注入当前会话，让 agent 按对应 skill 的分支执行。
  * - 统一 recordInput:false：用户输入已逐字写进下面注入的那条 user 消息（会话日志的
  *   真实事件），若再让 command/run 记一份 args 就是同一 payload 落两份日志。按 dsh
  *   官方指引（命令自身的权威事件已承载 payload 时置 false 以免重复）统一关掉。
@@ -17,11 +17,12 @@
  *   直接写中文，是有意为之。
  * - 本模块自包含：不读取 ai-kit 仓库内任何文件、无路径耦合、不依赖
  *   @deepseek-ai/* 运行时 import（消息对象手工构造为官方 createUserMessage 的
- *   契约形状：role/source/content/id 全齐）。改 git-kit skill 无需重启；
+ *   契约形状：role/source/content/id 全齐）。改 skill 无需重启；
  *   改本文件（含 COMMANDS 表）需重启 dsh web。
  *
- * git-kit 分支 key 词汇表（与 SKILL.md 决策树对齐）：
- *   commit-push / commit-message / branch / pr-create / pr-merge / tag / slim / star-classify
+ * 分支 key 词汇表（与各 SKILL.md 决策树对齐）：
+ *   git-kit: commit-push / commit-message / branch / pr-create / pr-merge / tag / slim / star-classify
+ *   handoff: print
  */
 
 import { randomUUID } from "node:crypto";
@@ -30,8 +31,8 @@ export const name = "dsh-commands";
 export const inject = ["commands"];
 
 /**
- * 命令意图表。每条 = 一行声明：注册元数据 + git-kit 分支 key。
- * `branch` 必须与 skills/git-kit/SKILL.md 决策树的分支 key 一致。
+ * 命令意图表。每条 = 一行声明：注册元数据 + 对应 skill 的分支 key。
+ * `branch` 必须与对应 SKILL.md 决策树的分支 key 一致；`skill` 省略时默认 git-kit。
  */
 const COMMANDS = [
 	{
@@ -81,6 +82,13 @@ const COMMANDS = [
 		name: "git-star-classify",
 		branch: "star-classify",
 		description: "拉取并分类你自己的 GitHub star 仓库，输出按大类分组的中文 Markdown 清单"
+	},
+	{
+		name: "handoff",
+		skill: "handoff",
+		branch: "print",
+		hint: "[任务范围]",
+		description: "把当前会话的任务状态压缩成一段可粘贴的续跑提示（只打印，不落盘）"
 	}
 ];
 
@@ -96,17 +104,18 @@ function userMessage(text) {
 }
 
 /**
- * 构造注入当前会话的指令：告知用户请求，并把执行交给 git-kit 的对应分支。
- * git-kit 分支的完整流程（references/ 与 scripts/）由 agent 加载 skill 后自行读取，
+ * 构造注入当前会话的指令：告知用户请求，并把执行交给对应 skill 的对应分支。
+ * 分支的完整流程（references/ 与 scripts/）由 agent 加载 skill 后自行读取，
  * 这里不复制任何逻辑，只做意图指路。
  */
 function buildInstruction(def, input) {
+	const skill = def.skill ?? "git-kit";
 	return [
 		`【dsh 命令 /${def.name}】`,
 		`用户请求：${input.length > 0 ? input : "（未附加说明，按分支流程默认处理）"}`,
 		"",
-		`请用 skill 工具加载 git-kit，将本次请求视为 ${def.branch} 分支并按该分支的完整流程执行。`,
-		"如需用户决策（候选分支名 / PR·MR 编号 / tag 版本号 / 保留天数等），先向用户确认再继续。"
+		`请用 skill 工具加载 ${skill}，将本次请求视为 ${def.branch} 分支并按该分支的完整流程执行。`,
+		"如需用户决策（候选分支名 / PR·MR 编号 / tag 版本号 / 交接范围等），先向用户确认再继续。"
 	].join("\n");
 }
 
@@ -125,7 +134,8 @@ function makeHandler(def) {
 				text: `已生成委托指令，但无法交给当前会话执行：${error instanceof Error ? error.message : String(error)}`
 			};
 		}
-		return { kind: "success", text: `已按 git-kit ${def.branch} 分支委托执行 /${def.name}，agent 将按流程继续。` };
+		const skill = def.skill ?? "git-kit";
+		return { kind: "success", text: `已按 ${skill} ${def.branch} 分支委托执行 /${def.name}，agent 将按流程继续。` };
 	};
 }
 
