@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Git Commands (dsh-commands)",
+    "description": "Adds ai-kit's git-kit Git workflows to DSH as native slash commands: commit message, commit and push, branch, PR/MR create and merge, tag, repository slimming, and star classification."
+  }
+}

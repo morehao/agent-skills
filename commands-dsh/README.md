@@ -47,6 +47,14 @@ dsh plugin --profile web add @morehao/dsh-commands
 # 重启 dsh web
 ```
 
+## 显示元信息（插件页标题 / 描述 / 图标）
+
+dsh 的插件页（侧栏「插件」→ 组合包详情与组件行）在**不加载插件 JS** 的前提下读取展示元信息：
+
+- 标题与描述取自导出的 `locale/<语言>.json` 的 `meta.title` / `meta.description`（本包提供 `en` 与 `zh`，随界面语言切换）。
+- 图标取自 `package.json` 的 `icon`（优先）或导出的 `./icon`；格式限 SVG/PNG/JPEG/WebP，且不超过 256 KiB。
+- 这些资源必须同时写进 `exports` 与 `files`；`package.json` 也要导出（`"./package.json": "./package.json"`）。否则「缺 locale 时回退到 package.json 的 `name`/`description`」这条兜底会因 `ERR_PACKAGE_PATH_NOT_EXPORTED` 静默失效：标题退化成模块名、描述为空，组件行还会多出一行与标题重复的包名。这正是本插件此前与 `dsh-context` 等信息完整的插件在页面上出现差异的原因。
+
 ## 开发
 
 - 增删命令：改 `lib/index.js` 的 `COMMANDS` 表即可（每条一行声明）；`branch` 值必须与 git-kit `SKILL.md` 决策树的分支 key 一致。
