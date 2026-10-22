@@ -36,5 +36,41 @@ if [ -n "$published" ]; then
 fi
 
 # 3) OIDC 可信发布：job 提 id-token: write，npm CLI(>=11.5.1) 自动换取短时令牌，无需 NODE_AUTH_TOKEN。
+#
+# 为什么要重试：npm registry 偶发降级（https://status.npmjs.org 的 Package publishing / OIDC 端点）
+# 时，PUT 会直接回 `E404 Not found`（令牌交换失败时的表现与权限问题一模一样）。这类 404 不是配置问题，
+# 等几十秒重试往往就过了；把重试放在这里，避免为一次 registry 抖动去 rerun 整个 workflow 或重新打 tag。
+#   - 每次失败后先回读 registry：请求可能已被受理、只是响应丢了，此时已可见即视为成功（幂等）。
+#   - 重试耗尽才失败，并打印排查路径（registry 状态 → Trusted Publisher 配置 → rerun）。
+#   - `RETRY_BASE_SECONDS` 只给本地测试用（默认 30 秒，第 n 次失败等 n×base）。
+echo "npm version: $(npm --version)"
 echo "Publishing ${name}@${PKG_VERSION}"
-npm publish --provenance --access public --registry https://registry.npmjs.org
+
+RETRY_BASE_SECONDS="${RETRY_BASE_SECONDS:-30}"
+MAX_ATTEMPTS=3
+attempt=1
+while :; do
+  if npm publish --provenance --access public --registry https://registry.npmjs.org; then
+    exit 0
+  fi
+
+  # 请求可能已被受理但响应丢失 → 回读确认，已可见即成功，避免重复发布报「已存在」。
+  if npm view "${name}@${PKG_VERSION}" version --registry https://registry.npmjs.org >/dev/null 2>&1; then
+    echo "${name}@${PKG_VERSION} 已出现在 registry，视为发布成功（首次响应丢失）"
+    exit 0
+  fi
+
+  if [ "$attempt" -ge "$MAX_ATTEMPTS" ]; then
+    echo "错误：npm publish 连续 ${attempt} 次失败" >&2
+    echo "排查顺序：" >&2
+    echo "  1) https://status.npmjs.org 的 Package publishing 是否 degraded（降级期间的 404 属正常现象）" >&2
+    echo "  2) 状态正常时：核对 Trusted Publisher（workflow=release.yml、Allowed actions 允许 npm publish）" >&2
+    echo "  3) 故障恢复后重跑该 run：gh run rerun <run-id>" >&2
+    exit 1
+  fi
+
+  wait_seconds=$((attempt * RETRY_BASE_SECONDS))
+  echo "第 ${attempt} 次 publish 失败，${wait_seconds}s 后重试（registry 瞬时故障常见，见 https://status.npmjs.org）" >&2
+  sleep "$wait_seconds"
+  attempt=$((attempt + 1))
+done
