@@ -3,17 +3,27 @@
 #
 # 起点假设：版本号已经随 PR 合并进稳定分支，工作由「打 tag → 创建/校验 Release → 跟踪发布后效」构成。
 #
-# 三条设计前提（避免把某个仓库的习惯当成通用规律）：
-#   1. 版本来源因仓而异：Node 包读 package.json；Go/Rust/无清单仓库以 tag 本身为准。
-#   2. 平台因仓而异：GitHub 用 gh、GitLab 用 glab；host/平台/CLI 从远端 URL 与 PATH 探测。
-#      Release 是默认交付物，所以这里要给出「能不能建、要不要建、现在已经有没有」。
-#   3. tag 之后的后效因仓而异：npm 包、容器镜像、文档站、CI 的 Release，或什么都不做。
-#      本脚本只**探测**后效，不假设；探测不到一律写「未检测到」，不当成「没有后效」。
+# 分工原则（本脚本的边界）：
+#   - 判断归调用方（skill/模型）：哪个文件是版本源、这版该发什么号、workflow 发布到哪，
+#     都由读仓库的人给出。脚本**不内置任何生态知识**（不认 package.json/Cargo.toml/pyproject…）；
+#     主流约定的例子见 references/version-conventions.md。
+#   - 事实归脚本：远端/平台/CLI、稳定分支、tag 序列与命名样式、CI 触发信号、CHANGELOG、提交统计、
+#     Release 存在性。这些与语言无关，且必须可回归。
+#   - 校验用通用手段：声明版本是否在该文件里（边界匹配 + 回报行号）、版本是否领先最新 tag（纯 tag 比较）。
+#     不解析任何清单格式，也不需要 node/python/jq。
+#
+# 输入（至少给一个，否则 STATE=NEEDS_TARGET）：
+#   --version <v> [--version-file <路径>]   声明「本版版本是 v，它写在这个文件里」
+#   --tag <tag>                             直接指定目标 tag（tag 即版本源；裸版本号会补上仓库前缀）
+#
+# 版本声明只是**可选证据**：「没有字面版本」是一等公民（Go 的 ldflags 注入、Python 的 setuptools-scm、
+# Maven 的 ${revision}）。所以回查失败默认只 WARN；仓库确实「字面常量 + CI 硬校验」时才加
+# --require-version-match 升为阻断。
 #
 # 不写文件、不切分支、不打 tag、不创建 Release。默认 fetch 远端分支与 tag；
 # Release 存在性查询需要 gh/glab 已登录，查不了记 unknown（不是「不存在」）。
 #
-# 另探测仓库是否维护 CHANGELOG.md（只读判断，不写）：决定计划卡里是否询问「要不要记录变更」。
+# 只读探测仓库是否维护 CHANGELOG（不写）：决定计划卡是否询问「要不要记录变更」。
 #
 # 退出码：0 可继续 / 2 有阻断项 / 1 环境或参数错误。
 #
@@ -24,13 +34,15 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 用法: bash release-preflight.sh [选项]
-  --remote <名>    目标远端（默认 upstream → 回退 origin）
-  --pkg <目录>     发布包目录（默认按 workspaces 识别唯一非私有包）
-  --tag <vX.Y.Z>   目标 tag；仓库没有可读的版本清单时**必需**（Go/Rust 等以 tag 为版本源）
-  --no-fetch       跳过 fetch
-  --no-npm         跳过 npm 已发布校验（结果记 unknown）
-  --no-release-check  跳过远端 Release 存在性查询（RELEASE_EXISTS=unknown）
-  --platform <p>   覆盖平台判定：github|gitlab|gitea|unknown（自建域名/夹具用）
+  --version <v>            声明本版版本号（1.2.3 / v1.2.3 / 1.2.3+45 均可）
+  --version-file <路径>     版本源文件（仓内相对路径）；给了就回查该文件在 BASE_REF 里是否含该版本
+  --tag <tag>              目标 tag；不给 --version 时它本身就是版本源（裸 1.2.3 会补上仓库前缀）
+  --require-version-match  回查失败时阻断（用于「tag 版本必须等于清单版本，否则 CI 拒发」的仓库）
+  --changelog <路径>        指定 CHANGELOG 文件（默认探测常见文件名）
+  --remote <名>             目标远端（默认 upstream → 回退 origin）
+  --no-fetch               跳过 fetch
+  --no-release-check       跳过远端 Release 存在性查询（RELEASE_EXISTS=unknown）
+  --platform <p>           覆盖平台判定：github|gitlab|gitea|unknown（自建域名/夹具用）
   -h, --help
 EOF
 }
@@ -42,21 +54,25 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIR}/lib/remote.sh"
 
 REMOTE=""
-PKG_DIR=""
+EXPLICIT_VERSION=""
+VERSION_FILE=""
 EXPLICIT_TAG=""
+CHANGELOG_OVERRIDE=""
 PLATFORM_OVERRIDE=""
+REQUIRE_MATCH=0
 DO_FETCH=1
-DO_NPM=1
 DO_RELEASE_CHECK=1
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --remote) REMOTE="${2:-}"; shift 2 ;;
-    --pkg) PKG_DIR="${2:-}"; shift 2 ;;
+    --version) EXPLICIT_VERSION="${2:-}"; shift 2 ;;
+    --version-file) VERSION_FILE="${2:-}"; shift 2 ;;
     --tag) EXPLICIT_TAG="${2:-}"; shift 2 ;;
+    --require-version-match) REQUIRE_MATCH=1; shift ;;
+    --changelog) CHANGELOG_OVERRIDE="${2:-}"; shift 2 ;;
     --platform) PLATFORM_OVERRIDE="${2:-}"; shift 2 ;;
     --no-fetch) DO_FETCH=0; shift ;;
-    --no-npm) DO_NPM=0; shift ;;
     --no-release-check) DO_RELEASE_CHECK=0; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "未知参数 $1（-h 查看用法）" ;;
@@ -71,16 +87,12 @@ esac
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || die "当前目录不在 git 仓库内"
 cd "$ROOT"
 
-# --pkg 写错不能静默降级成「以 tag 为版本源」：直接报错。
-if [ -n "$PKG_DIR" ]; then
-  case "$PKG_DIR" in
-    /*) PKG_ABS="$PKG_DIR" ;;
-    *) PKG_ABS="${ROOT}/${PKG_DIR}" ;;
-  esac
-  [ -f "${PKG_ABS}/package.json" ] || die "--pkg ${PKG_DIR} 下没有 package.json（相对仓库根传入，如 packages/foo）"
-  case "$PKG_ABS" in
-    "$ROOT"/*) PKG_DIR="${PKG_ABS#"$ROOT"/}" ;;
-    *) die "--pkg 必须指向仓库内的目录：${PKG_DIR}" ;;
+# --version-file 必须是仓内相对路径（绝对路径与 ../ 一律拒绝，避免回查到仓库外）。
+if [ -n "$VERSION_FILE" ]; then
+  case "$VERSION_FILE" in
+    /*) die "--version-file 必须是仓内相对路径（当前：${VERSION_FILE}）" ;;
+    ..|../*|*/../*|*/..) die "--version-file 不能跳出仓库（当前：${VERSION_FILE}）" ;;
+    ./*) VERSION_FILE="${VERSION_FILE#./}" ;;
   esac
 fi
 
@@ -135,118 +147,159 @@ fi
 BASE_REF="${REMOTE}/${BASE}"
 git rev-parse --verify -q "$BASE_REF" >/dev/null || die "${BASE_REF} 不存在"
 
-# ---------- 版本来源：清单优先，没有清单就以 tag 为源 ----------
-resolve_pkg_dir() {
-  node -e '
-const fs = require("fs");
-const path = require("path");
-const root = process.argv[1];
-const readJson = (p) => { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return null; } };
-const rootPkg = readJson(path.join(root, "package.json"));
-if (!rootPkg) process.exit(5);
-let dirs = [];
-const ws = Array.isArray(rootPkg.workspaces) ? rootPkg.workspaces : [];
-for (const w of ws) {
-  if (w.includes("*")) {
-    const base = w.split("*")[0].replace(/\/$/, "");
-    const abs = path.join(root, base);
-    if (!fs.existsSync(abs)) continue;
-    for (const e of fs.readdirSync(abs)) {
-      const d = path.join(base, e);
-      if (fs.existsSync(path.join(root, d, "package.json"))) dirs.push(d);
-    }
-  } else dirs.push(w);
-}
-const found = [];
-for (const d of dirs) {
-  const p = readJson(path.join(root, d, "package.json"));
-  if (p && p.version && !p.private) found.push(d);
-}
-if (found.length === 1) { console.log(found[0]); process.exit(0); }
-if (found.length === 0 && rootPkg.version && !rootPkg.private) { console.log("."); process.exit(0); }
-for (const f of found) console.error(f);
-process.exit(found.length === 0 ? 5 : 4);
-' "$ROOT"
+# ---------- tag 形状：只从 tag 自身推断，不预设任何版本方案 ----------
+# version_core_of <tag>：取 tag 里的版本内核（数字段 + 可选 -pre/+build），至少要有 X.Y 两段。
+#   v1.2.3 → 1.2.3 ; demo-1.0.0 → 1.0.0 ; sub/v1.2.3 → 1.2.3 ; 1.2.3+45 → 1.2.3+45 ; nightly-2026-10-01 → 空
+version_core_of() {
+  printf '%s' "${1:-}" | awk '
+    {
+      s = $0
+      sub(/^[^0-9]*/, "", s)
+      if (match(s, /^[0-9][0-9]*(\.[0-9][0-9]*)+([-+][0-9A-Za-z][-0-9A-Za-z.]*)?/))
+        printf "%s", substr(s, 1, RLENGTH)
+    }'
 }
 
-PKG_CANDIDATES=""
-if [ -z "$PKG_DIR" ] && command -v node >/dev/null 2>&1; then
-  PKG_ERR="$(mktemp)"
-  set +e
-  PKG_DIR="$(resolve_pkg_dir 2>"$PKG_ERR")"
-  PKG_RC=$?
-  set -e
-  PKG_CANDIDATES="$(tr '\n' ' ' < "$PKG_ERR" | sed 's/ *$//')"
-  rm -f "$PKG_ERR"
-  [ "$PKG_RC" -eq 0 ] || PKG_DIR=""
-fi
+# tag_prefix_of <tag>：数字段之前的一切（v / demo- / sub/v / core-v / 空）。不猜新样式。
+tag_prefix_of() {
+  printf '%s' "${1:-}" | awk '{ sub(/[0-9].*$/, ""); printf "%s", $0 }'
+}
 
-PKG_NAME=""
-PKG_VERSION=""
-PUBLISH_CONFIG=no
-if [ -n "$PKG_DIR" ] && [ -f "${ROOT}/${PKG_DIR}/package.json" ]; then
-  VERSION_SOURCE=manifest
-  read_remote_field() {
-    git show "${BASE_REF}:${PKG_DIR}/package.json" 2>/dev/null | node -e '
-const fs = require("fs");
-try {
-  const j = JSON.parse(fs.readFileSync(0, "utf8"));
-  const v = j[process.argv[1]];
-  process.stdout.write(typeof v === "string" ? v : (v ? "yes" : ""));
-} catch { process.exit(1); }
-' "$1"
-  }
-  PKG_NAME="$(read_remote_field name)" || PKG_NAME=""
-  PKG_VERSION="$(read_remote_field version)" || PKG_VERSION=""
-  PUBLISH_CONFIG="$(read_remote_field publishConfig)" || PUBLISH_CONFIG="no"
-  [ -n "$PUBLISH_CONFIG" ] || PUBLISH_CONFIG=no
-else
-  PKG_DIR=""
-  VERSION_SOURCE=tag
-fi
-
-# ---------- 最新 tag 与目标 tag ----------
-LATEST_TAG="$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n1)"
-if [ -z "$LATEST_TAG" ]; then
-  LATEST_TAG="$(git tag --sort=-creatordate | head -n1)"
-  TAG_STYLE="non-semver"
-else
-  TAG_STYLE="vX.Y.Z"
-fi
-
-# 版本比较是否可用：看 tag 的数字内核，而不是「有没有 v 前缀」。
-# 只认 v 前缀会让 `1.2.3` / `2026.10` 这类 tag 的仓库整条「版本必须领先」守卫失效。
-LATEST_SEMVER=no
-if [ -n "$LATEST_TAG" ]; then
-  LATEST_CORE="${LATEST_TAG#v}"
-  LATEST_CORE="${LATEST_CORE%%-*}"
-  case "$LATEST_CORE" in
-    ''|*[!0-9.]*|.*|*.|*..*) LATEST_SEMVER=no ;;
-    *) LATEST_SEMVER=yes ;;
+# is_version_core <core>：去掉 -pre/+build 后必须是「数字.数字…」且至少一个点。
+is_version_core() {
+  local base="$1"
+  base="${base%%-*}"
+  base="${base%%+*}"
+  case "$base" in
+    ''|.*|*.|*..*|*[!0-9.]*) return 1 ;;
+    *.*) return 0 ;;
+    *) return 1 ;;
   esac
-fi
+}
+
+base_of() {
+  local b="$1"
+  b="${b%%-*}"
+  b="${b%%+*}"
+  printf '%s' "$b"
+}
+
+ver_gt() {
+  # 1) 数字段逐段比较；2) 数字相同则「无预发布后缀」更大；3) 仍相同则比 +build（Dart 的 build 号）
+  local base_a base_b ap bp ab bb cmp
+  base_a="$(base_of "$1")"
+  base_b="$(base_of "$2")"
+  ap=0; bp=0
+  case "$1" in *-*) ap=1 ;; esac
+  case "$2" in *-*) bp=1 ;; esac
+  cmp="$(awk -v a="$base_a" -v b="$base_b" 'BEGIN{n=split(a,x,".");m=split(b,y,".");k=(n>m?n:m);
+    for(i=1;i<=k;i++){p=(i<=n?x[i]+0:0);q=(i<=m?y[i]+0:0);
+      if(p>q){print "gt"; exit} if(p<q){print "lt"; exit}} print "eq"}')"
+  case "$cmp" in
+    gt) return 0 ;;
+    lt) return 1 ;;
+  esac
+  if [ "$ap" -ne "$bp" ]; then
+    [ "$bp" -eq 1 ] && return 0
+    return 1
+  fi
+  ab=""; bb=""
+  case "$1" in *+*) ab="${1#*+}"; ab="${ab%%-*}" ;; esac
+  case "$2" in *+*) bb="${2#*+}"; bb="${bb%%-*}" ;; esac
+  case "${ab}${bb}" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$ab" -gt "$bb" ]
+}
+
+# 扫一遍 tag：取版本号最大者（不信排序，直接比大小），同时收集前缀样式与「按时间最新」的 tag。
+LATEST_TAG=""
+LATEST_CORE=""
+LATEST_SEMVER=no
+TAG_STYLE=non-semver
+PREFIX_LIST=""
+VERSION_TAG_COUNT=0
+while IFS= read -r t; do
+  [ -n "$t" ] || continue
+  core="$(version_core_of "$t")"
+  is_version_core "$core" || continue
+  VERSION_TAG_COUNT=$((VERSION_TAG_COUNT + 1))
+  pfx="$(tag_prefix_of "$t")"
+  [ -n "$pfx" ] || pfx="(none)"
+  case " ${PREFIX_LIST} " in
+    *" ${pfx} "*) ;;
+    *) PREFIX_LIST="${PREFIX_LIST}${PREFIX_LIST:+ }${pfx}" ;;
+  esac
+  if [ -z "$LATEST_TAG" ] || ver_gt "$core" "$LATEST_CORE"; then
+    LATEST_TAG="$t"
+    LATEST_CORE="$core"
+    LATEST_SEMVER=yes
+    TAG_STYLE=semver
+  fi
+done <<EOF
+$(git tag 2>/dev/null || true)
+EOF
+
+LATEST_TAG_BY_DATE="$(git tag --sort=-creatordate 2>/dev/null | head -n1 || true)"
 
 TAG_PREFIX="v"
 if [ -n "$LATEST_TAG" ]; then
-  case "$LATEST_TAG" in
-    v*) TAG_PREFIX="v" ;;
-    *) TAG_PREFIX="" ;;
-  esac
+  TAG_PREFIX="$(tag_prefix_of "$LATEST_TAG")"
+fi
+
+# 多个不同前缀 = 多版本线 / monorepo 多包：不猜打哪条线。
+TAG_PREFIX_COUNT=0
+if [ -n "$PREFIX_LIST" ]; then
+  TAG_PREFIX_COUNT="$(printf '%s\n' "$PREFIX_LIST" | tr ' ' '\n' | grep -c . || true)"
+fi
+
+# ---------- 版本与目标 tag（至少一个输入；不判断「仓库有没有版本信息」） ----------
+VERSION=""
+if [ -n "$EXPLICIT_VERSION" ]; then
+  VERSION="$(version_core_of "$EXPLICIT_VERSION")"
+  [ -n "$VERSION" ] || die "--version 需要可解析的版本号（如 1.2.3 / v1.2.3 / 1.2.3+45）"
 fi
 
 EXP_TAG=""
 if [ -n "$EXPLICIT_TAG" ]; then
   case "$EXPLICIT_TAG" in
-    v*) EXP_TAG="$EXPLICIT_TAG" ;;
-    *) EXP_TAG="${TAG_PREFIX}${EXPLICIT_TAG}" ;;
+    # 裸版本号才补后缀；手写的完整 tag（v1.2.3 / demo-1.0.0 / sub/v1.2.3）原样使用
+    [0-9]*) EXP_TAG="${TAG_PREFIX}${EXPLICIT_TAG}" ;;
+    *) EXP_TAG="$EXPLICIT_TAG" ;;
   esac
 fi
 
-CUR="${PKG_VERSION#v}"
-if [ "$VERSION_SOURCE" = "manifest" ] && [ -n "$CUR" ]; then
-  TARGET_TAG="${TAG_PREFIX}${CUR}"
-else
+if [ -n "$EXPLICIT_VERSION" ]; then
+  VERSION_ORIGIN=declared
+  TARGET_TAG="${TAG_PREFIX}${VERSION}"
+elif [ -n "$EXPLICIT_TAG" ]; then
+  VERSION_ORIGIN=tag
   TARGET_TAG="$EXP_TAG"
+  [ -n "$VERSION" ] || VERSION="$(version_core_of "$TARGET_TAG")"
+else
+  VERSION_ORIGIN=none
+  TARGET_TAG=""
+fi
+
+# ---------- 声明回查（可选证据）：边界匹配 + 回报行号；找不到时回显「该文件里实际是什么」 ----------
+VERSION_IN_FILE=na
+VERSION_FILE_LINE=""
+VERSION_FILE_TEXT=""
+VERSION_FILE_HINT=""
+if [ -n "$VERSION_FILE" ] && [ -n "$VERSION" ]; then
+  git cat-file -e "${BASE_REF}:${VERSION_FILE}" 2>/dev/null \
+    || die "--version-file ${VERSION_FILE} 在 ${BASE_REF} 上不存在（版本源必须是已合并进稳定分支的文件）"
+  VER_ESC="$(printf '%s' "$VERSION" | sed 's/[][\\.^$*+?(){}|]/\\&/g')"
+  MATCH="$(git show "${BASE_REF}:${VERSION_FILE}" 2>/dev/null \
+    | grep -nE "(^|[^0-9A-Za-z._+-])v?${VER_ESC}([^0-9A-Za-z._+-]|$)" \
+    | head -n1 || true)"
+  if [ -n "$MATCH" ]; then
+    VERSION_IN_FILE=yes
+    VERSION_FILE_LINE="${MATCH%%:*}"
+    VERSION_FILE_TEXT="$(printf '%s' "$MATCH" | cut -d: -f2- | sed 's/^[[:space:]]*//' | cut -c1-100)"
+  else
+    VERSION_IN_FILE=no
+    VERSION_FILE_HINT="$(git show "${BASE_REF}:${VERSION_FILE}" 2>/dev/null \
+      | grep -oE '[0-9][0-9]*(\.[0-9][0-9]*)+' | head -n1 || true)"
+  fi
 fi
 
 TAG_EXISTS=no
@@ -262,12 +315,26 @@ case "$TARGET_TAG" in *-*) RELEASE_PRERELEASE=yes ;; esac
 
 # ---------- CHANGELOG 维护情况（只读探测，决定计划卡要不要问） ----------
 CHANGELOG_FILE=""
-for c in CHANGELOG.md Changelog.md CHANGELOG CHANGELOG.rst; do
-  if git cat-file -e "${BASE_REF}:${c}" 2>/dev/null; then CHANGELOG_FILE="$c"; break; fi
-done
+if [ -n "$CHANGELOG_OVERRIDE" ]; then
+  if git cat-file -e "${BASE_REF}:${CHANGELOG_OVERRIDE}" 2>/dev/null; then
+    CHANGELOG_FILE="$CHANGELOG_OVERRIDE"
+  else
+    die "--changelog ${CHANGELOG_OVERRIDE} 在 ${BASE_REF} 上不存在"
+  fi
+else
+  # 只认常见文件名（命名约定，不是生态知识），调用方可用 --changelog 覆盖。
+  for c in CHANGELOG.md Changelog.md CHANGELOG CHANGELOG.rst NEWS.md HISTORY.md; do
+    if git cat-file -e "${BASE_REF}:${c}" 2>/dev/null; then CHANGELOG_FILE="$c"; break; fi
+  done
+fi
+
+# 小节匹配放宽到「版本号出现过」：`## [v1.1.0]` / `## 1.1.0` / `## v1.1.0 - 2026-10-22` 都算，
+# 且用数字边界避免 1.1.0 命中 11.1.0。与 changelog.sh 的写入判定保持同一语义。
 CHANGELOG_HAS_VERSION=na
-if [ -n "$CHANGELOG_FILE" ] && [ -n "$TARGET_TAG" ]; then
-  if git show "${BASE_REF}:${CHANGELOG_FILE}" 2>/dev/null | grep -qF "## [${TARGET_TAG}]"; then
+if [ -n "$CHANGELOG_FILE" ] && [ -n "$VERSION" ]; then
+  VER_ESC_CL="$(printf '%s' "$VERSION" | sed 's/[][\\.^$*+?(){}|]/\\&/g')"
+  if git show "${BASE_REF}:${CHANGELOG_FILE}" 2>/dev/null \
+     | grep -Eqi "(^|[^0-9])(v)?${VER_ESC_CL}([^0-9]|$)"; then
     CHANGELOG_HAS_VERSION=yes
   else
     CHANGELOG_HAS_VERSION=no
@@ -286,8 +353,8 @@ BANG="$(printf '%s\n' "$SUBJECTS" | grep -cE '^[A-Za-z]+(\([^)]*\))?!:' || true)
 BREAKING="$(printf '%s\n' "$FULL" | grep -c 'BREAKING[ -]CHANGE' || true)"
 BREAKING=$((BREAKING + BANG))
 
-# ---------- tag 之后的后效探测（仓库事实，不是 git-kit 的假设） ----------
-# 只看未注释的行：workflow 头部注释里常出现 `tags:` / `npm publish` 这类字样，误报会让回执凭空多出后效。
+# ---------- tag 触发的后效：只给信号，不给结论 ----------
+# 只看未注释的行：workflow 头部注释里常出现 `tags:` / `publish` 这类字样，误报会让回执凭空多出后效。
 TAG_WORKFLOWS=""
 if [ -d "${ROOT}/.github/workflows" ]; then
   for f in "${ROOT}"/.github/workflows/*.yml "${ROOT}"/.github/workflows/*.yaml; do
@@ -299,10 +366,29 @@ if [ -d "${ROOT}/.github/workflows" ]; then
 fi
 TAG_WORKFLOWS="$(printf '%s' "$TAG_WORKFLOWS" | sed 's/ *$//')"
 
-EFFECT_NPM=no
-if [ "$PUBLISH_CONFIG" = "yes" ]; then EFFECT_NPM=yes; fi
-if grep -rhE 'npm publish' "${ROOT}/.github/workflows" 2>/dev/null | grep -vE '^[[:space:]]*#' | grep -q .; then
-  EFFECT_NPM=yes
+# EFFECT_HINTS：只摘**可执行行**（`run:` / `uses:`）里像发布的那些，输出 `file:line: 原文`。
+# 不摘 job 名 / step 名 / workflow 名（那些多半是命名巧合，噪音大于信息）；也不做类型判定。
+EFFECT_HINTS=""
+if [ -d "${ROOT}/.github/workflows" ]; then
+  EFFECT_HINTS="$(grep -rnE '^[[:space:]]*(-[[:space:]]+)?(run|uses):' "${ROOT}/.github/workflows" 2>/dev/null \
+    | grep -E 'publish|upload|release create|action-gh-release' \
+    | grep -vE ':[[:space:]]*#' \
+    | sed "s#^${ROOT}/##" \
+    | cut -c1-120 \
+    | head -n8 \
+    | tr '\n' ';' | sed 's/;$//; s/;/; /g')" || true
+fi
+if [ -f "${ROOT}/.gitlab-ci.yml" ]; then
+  GL_HINTS="$(grep -nE '^[[:space:]]*(-[[:space:]]+)?(run|script):' "${ROOT}/.gitlab-ci.yml" 2>/dev/null \
+    | grep -E 'publish|upload|release create|glab release' \
+    | grep -vE '^[0-9]+:[[:space:]]*#' \
+    | cut -c1-120 \
+    | head -n8 \
+    | sed 's#^#.gitlab-ci.yml:#' \
+    | tr '\n' ';' | sed 's/;$//; s/;/; /g')" || true
+  if [ -n "$GL_HINTS" ]; then
+    if [ -z "$EFFECT_HINTS" ]; then EFFECT_HINTS="$GL_HINTS"; else EFFECT_HINTS="${EFFECT_HINTS}; ${GL_HINTS}"; fi
+  fi
 fi
 
 # Release 是否由 CI 负责创建：探测依据按平台分叉，只看未注释的行。
@@ -358,55 +444,12 @@ if [ "$DO_RELEASE_CHECK" -eq 1 ] && [ -n "$TARGET_TAG" ] && [ "$RELEASE_CLI_READ
   fi
 fi
 
-# 兼容别名：旧字段只表达「GitHub 的 CI 会建 Release」，请用 EFFECT_RELEASE。
-EFFECT_GH_RELEASE=no
-if [ "$EFFECT_RELEASE" = workflow ] && [ "$RELEASE_PLATFORM" = github ]; then EFFECT_GH_RELEASE=yes; fi
-
-# npm 后效：只有仓库确实发 npm 且能定位包名时才查。
-# 用独立缓存目录：本机 ~/.npm 可能被 root 占用（EPERM），那不是「版本不存在」，不能误判成 no。
-NPM_PUBLISHED=skipped
-if [ "$EFFECT_NPM" = "yes" ]; then
-  if [ "$DO_NPM" -eq 0 ] || [ -z "$PKG_NAME" ] || ! command -v npm >/dev/null 2>&1; then
-    NPM_PUBLISHED=unknown
-  else
-    NPM_CACHE="$(mktemp -d 2>/dev/null || true)"
-    if [ -n "$NPM_CACHE" ]; then
-      if NPM_OUT="$(npm view "${PKG_NAME}@${CUR}" version --registry https://registry.npmjs.org --cache "$NPM_CACHE" 2>&1)"; then
-        NPM_PUBLISHED=yes
-      elif printf '%s' "$NPM_OUT" | grep -qE 'E404|404 (No match|Not Found)'; then
-        NPM_PUBLISHED=no
-      else
-        NPM_PUBLISHED=unknown
-      fi
-      rm -rf "$NPM_CACHE"
-    fi
-  fi
-fi
-
 # ---------- 状态 ----------
-ver_gt() {
-  # 数字部分按段比较；数字相等时「无预发布后缀」的一方更大（1.0.1 > 1.0.1-beta.1）
-  local a="${1%%-*}" b="${2%%-*}"
-  local ap=0 bp=0 cmp
-  case "$1" in *-*) ap=1 ;; esac
-  case "$2" in *-*) bp=1 ;; esac
-  cmp="$(awk -v a="$a" -v b="$b" 'BEGIN{n=split(a,x,".");m=split(b,y,".");k=(n>m?n:m);
-    for(i=1;i<=k;i++){p=(i<=n?x[i]+0:0);q=(i<=m?y[i]+0:0);
-      if(p>q){print "gt"; exit} if(p<q){print "lt"; exit}} print "eq"}')"
-  case "$cmp" in
-    gt) return 0 ;;
-    lt) return 1 ;;
-    *) [ "$bp" -eq 1 ] && [ "$ap" -eq 0 ] && return 0; return 1 ;;
-  esac
-}
-
 STATE=READY
 if [ -z "$TARGET_TAG" ]; then
-  STATE=NEEDS_TAG
-elif [ "$TAG_EXISTS" = "yes" ]; then
+  STATE=NEEDS_TARGET
+elif [ "$TAG_EXISTS" = yes ]; then
   STATE=TAGGED
-elif [ "$VERSION_SOURCE" = "manifest" ] && [ "$LATEST_SEMVER" = "yes" ] && [ -n "$LATEST_TAG" ] && ! ver_gt "$CUR" "${LATEST_TAG#v}"; then
-  STATE=BLOCKED
 fi
 
 BLOCKERS=""
@@ -414,28 +457,55 @@ add_blocker() { if [ -z "$BLOCKERS" ]; then BLOCKERS="$1"; else BLOCKERS="${BLOC
 WARN=""
 add_warn() { if [ -z "$WARN" ]; then WARN="$1"; else WARN="${WARN}, $1"; fi; }
 
-if [ "$STATE" = "NEEDS_TAG" ]; then add_blocker "no-version-source"; fi
-if [ "$STATE" = "BLOCKED" ]; then add_blocker "version-not-ahead-of-tag"; fi
+if [ "$STATE" = NEEDS_TARGET ]; then add_blocker "target-version-unset"; fi
 # 阻断项必须同时反映到 STATE：STATE 才是流程的驱动量，只看 BLOCKERS 会被 READY 带走
-if [ "$TAG_EXISTS" = "yes" ] && [ "$TAG_ON_BASE" = "no" ]; then
+if [ "$TAG_EXISTS" = yes ] && [ "$TAG_ON_BASE" = no ]; then
   add_blocker "tag-not-on-base"
   STATE=BLOCKED
 fi
-if [ -n "$EXP_TAG" ] && [ "$VERSION_SOURCE" = "manifest" ] && [ "$EXP_TAG" != "$TARGET_TAG" ]; then
-  add_blocker "tag-version-mismatch"
+# 多版本线/多包：用 --version 推不出「哪条线的 tag」，必须显式 --tag。不猜。
+if [ "$TAG_PREFIX_COUNT" -gt 1 ] && [ "$VERSION_ORIGIN" = declared ] && [ -z "$EXPLICIT_TAG" ]; then
+  add_blocker "target-tag-ambiguous"
   STATE=BLOCKED
 fi
-if [ "$VERSION_SOURCE" = "manifest" ] && [ -n "$LATEST_TAG" ] && [ "$LATEST_SEMVER" = "no" ]; then
-  add_warn "latest-tag-not-semver"
+# 声明版本是否真在该文件里：默认只提醒（派生/注入型仓库本来就没有字面版本），严格模式才阻断。
+if [ "$VERSION_IN_FILE" = no ]; then
+  if [ "$REQUIRE_MATCH" -eq 1 ]; then
+    add_blocker "version-not-in-declared-file"
+    STATE=BLOCKED
+  else
+    add_warn "version-declaration-unverified"
+  fi
 fi
-if [ -n "$PKG_CANDIDATES" ]; then add_warn "multiple-publish-packages"; fi
+# --tag 与 --version 同时给出时必须一致（比版本内核，不比前缀风格）
+if [ "$VERSION_ORIGIN" = declared ] && [ -n "$EXP_TAG" ]; then
+  EXP_CORE="$(version_core_of "$EXP_TAG")"
+  if [ -z "$EXP_CORE" ] || [ "$EXP_CORE" != "$VERSION" ]; then
+    add_blocker "tag-version-mismatch"
+    STATE=BLOCKED
+  fi
+fi
+# 「版本必须领先最新 tag」与版本源无关，纯 tag 比较
+if [ "$TAG_EXISTS" = no ] && [ -n "$LATEST_TAG" ] && [ -n "$VERSION" ]; then
+  if ! ver_gt "$VERSION" "$LATEST_CORE"; then
+    add_blocker "version-not-ahead-of-tag"
+    STATE=BLOCKED
+  fi
+fi
+
+# 有 tag 但没有任何可解析的版本 tag → 版本比较守卫失效，必须说出来（不许静默跳过）
+if [ -z "$LATEST_TAG" ] && [ -n "$LATEST_TAG_BY_DATE" ]; then add_warn "no-version-like-tags"; fi
+# 版本号最大者不是时间最新者 → 可能在新线上发旧版 / 或在旧线上补丁，如实报出来
+if [ -n "$LATEST_TAG_BY_DATE" ] && [ "$LATEST_TAG_BY_DATE" != "$LATEST_TAG" ]; then add_warn "latest-tag-order-conflict"; fi
+if [ "$TAG_PREFIX_COUNT" -gt 1 ]; then add_warn "mixed-tag-prefixes"; fi
 if [ "${TOTAL_COMMITS:-0}" -gt 300 ]; then add_warn "commits-truncated"; fi
-if [ "$NPM_PUBLISHED" = "unknown" ]; then add_warn "npm-unknown"; fi
+if [ "$VERSION_ORIGIN" = declared ] && [ -z "$VERSION_FILE" ]; then add_warn "version-file-undeclared"; fi
+if [ "$VERSION_ORIGIN" = tag ]; then add_warn "version-origin-tag"; fi
 # Release 能力相关提醒：都不阻断，只影响「建 / 校验 / 手动」的选择。
-if [ "$RELEASE_PLATFORM" = "unknown" ]; then add_warn "release-host-unknown"; fi
-if [ "$RELEASE_PLATFORM" != "unknown" ] && [ "$RELEASE_CLI" = "none" ]; then add_warn "release-cli-missing"; fi
-if [ "$RELEASE_CLI" != "none" ] && [ "$RELEASE_CLI_READY" = "no" ]; then add_warn "release-auth-missing"; fi
-if [ "$DO_RELEASE_CHECK" -eq 1 ] && [ "$RELEASE_CLI_READY" = "yes" ] && [ "$RELEASE_EXISTS" = "unknown" ]; then
+if [ "$RELEASE_PLATFORM" = unknown ]; then add_warn "release-host-unknown"; fi
+if [ "$RELEASE_PLATFORM" != unknown ] && [ "$RELEASE_CLI" = none ]; then add_warn "release-cli-missing"; fi
+if [ "$RELEASE_CLI" != none ] && [ "$RELEASE_CLI_READY" = no ]; then add_warn "release-auth-missing"; fi
+if [ "$DO_RELEASE_CHECK" -eq 1 ] && [ "$RELEASE_CLI_READY" = yes ] && [ "$RELEASE_EXISTS" = unknown ]; then
   add_warn "release-check-unknown"
 fi
 if [ -n "$(git status --porcelain)" ]; then add_warn "dirty-worktree"; fi
@@ -456,13 +526,18 @@ echo "CI_SYSTEM=${CI_SYSTEM}"
 echo "GITLAB_TAG_CI=${GITLAB_TAG_CI}"
 echo "BASE=${BASE}"
 echo "BASE_REF=${BASE_REF}"
-echo "VERSION_SOURCE=${VERSION_SOURCE}"
-echo "PKG_DIR=${PKG_DIR:-<none>}"
-echo "PKG_NAME=${PKG_NAME:-<none>}"
-echo "PKG_VERSION=${CUR:-<none>}"
-echo "PKG_CANDIDATES=${PKG_CANDIDATES:-<none>}"
+echo "VERSION_ORIGIN=${VERSION_ORIGIN}"
+echo "VERSION=${VERSION:-<none>}"
+echo "VERSION_FILE=${VERSION_FILE:-<none>}"
+echo "VERSION_IN_FILE=${VERSION_IN_FILE}"
+echo "VERSION_FILE_LINE=${VERSION_FILE_LINE:-<none>}"
+echo "VERSION_FILE_TEXT=${VERSION_FILE_TEXT:-<none>}"
+echo "VERSION_FILE_HINT=${VERSION_FILE_HINT:-<none>}"
 echo "LATEST_TAG=${LATEST_TAG:-<none>}"
+echo "LATEST_TAG_BY_DATE=${LATEST_TAG_BY_DATE:-<none>}"
 echo "TAG_STYLE=${TAG_STYLE}"
+echo "TAG_PREFIX=${TAG_PREFIX:-<none>}"
+echo "TAG_PREFIX_COUNT=${TAG_PREFIX_COUNT}"
 echo "LATEST_SEMVER=${LATEST_SEMVER}"
 echo "TARGET_TAG=${TARGET_TAG:-<none>}"
 echo "TAG_EXISTS=${TAG_EXISTS}"
@@ -475,9 +550,7 @@ echo "FEAT=${FEAT}"
 echo "FIX=${FIX}"
 echo "BREAKING=${BREAKING}"
 echo "TAG_WORKFLOWS=${TAG_WORKFLOWS:-<none>}"
-echo "EFFECT_NPM=${EFFECT_NPM}"
-echo "EFFECT_GH_RELEASE=${EFFECT_GH_RELEASE}"
-echo "NPM_PUBLISHED=${NPM_PUBLISHED}"
+echo "EFFECT_HINTS=${EFFECT_HINTS:-<none>}"
 echo "STATE=${STATE}"
 echo "WARN=${WARN:-none}"
 echo "BLOCKERS=${BLOCKERS:-none}"

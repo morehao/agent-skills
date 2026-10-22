@@ -356,6 +356,42 @@ assert_rc 2 "Release notes 为空"
 assert_kv "$OUT" "RELEASE_NOTES=empty" "notes empty"
 assert_contains "$(printf '%s\n' "$OUT" | grep '^VERIFY_REASONS=')" "release-notes-empty" "原因含 release-notes-empty"
 
+# 15. 通用产物探测：2xx 可见（与生态无关，URL 里 %VERSION%/%TAG% 占位被替换）
+reset_state
+export CURL_CODE=200
+run_verify "$TEST_PATH" --platform github --tag v1.2.3 --no-ci --no-release \
+  --probe-url 'https://example.test/p/%VERSION%/tag/%TAG%' --timeout 5 --interval 1
+assert_rc 0 "probe 2xx"
+assert_kv "$OUT" "PROBE_STATUS=visible" "probe visible"
+assert_kv "$OUT" "PROBE_HTTP=200" "probe http 200"
+assert_kv "$OUT" "PROBE_TARGET=https://example.test/p/1.2.3/tag/v1.2.3" "probe 占位替换"
+assert_kv "$OUT" "NPM_STATUS=skipped" "probe 时不跑 npm"
+
+# 16. 通用产物探测：404 不可见 → 失败
+reset_state
+export CURL_CODE=404
+run_verify "$TEST_PATH" --platform github --tag v1.2.3 --no-ci --no-release \
+  --probe-url 'https://example.test/p/%VERSION%' --timeout 5 --interval 1
+assert_rc 2 "probe 404"
+assert_kv "$OUT" "PROBE_STATUS=missing" "probe missing"
+assert_contains "$(printf '%s\n' "$OUT" | grep '^VERIFY_REASONS=')" "probe-missing" "原因含 probe-missing"
+
+# 17. 通用产物探测：网络错误 → 未知（不算通过）
+reset_state
+export CURL_CODE=500
+run_verify "$TEST_PATH" --platform github --tag v1.2.3 --no-ci --no-release \
+  --probe-url 'https://example.test/p/%VERSION%' --timeout 5 --interval 1
+assert_rc 3 "probe 网络错误"
+assert_kv "$OUT" "PROBE_STATUS=unknown" "probe unknown"
+
+# 18. --no-npm 仍是 --no-probe 的别名（不探测即 skipped，不影响结论）
+reset_state
+export CURL_CODE=404
+run_verify "$TEST_PATH" --platform github --tag v1.2.3 --no-ci --no-release --no-npm \
+  --probe-url 'https://example.test/p/%VERSION%' --timeout 5 --interval 1
+assert_rc 0 "--no-npm 跳过探测"
+assert_kv "$OUT" "PROBE_STATUS=skipped" "probe skipped"
+
 # ---------- 汇总 ----------
 echo
 if [ "$FAIL" -eq 0 ]; then

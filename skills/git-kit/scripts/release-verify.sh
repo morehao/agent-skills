@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# release 发布后校验（一次出回执）：等流水 → 验 Release → 验 npm。
+# release 发布后校验（一次出回执）：等流水 → 验 Release → 验产物（可选）。
 #
-# 用途：tag 推送、Release 建好/校验之后，把「等 CI + 验 Release + 验 npm」收成一条命令。
+# 用途：tag 推送、Release 建好/校验之后，把「等 CI + 验 Release + 验产物」收成一条命令。
 # 首次查询立即执行；流水一到终态就停，不做固定 15s × 40 轮的空转。
 #
-# 只读：不改 tag、不创建/修改 Release、不写仓库文件；npm 只读 registry。
+# 只读：不改 tag、不创建/修改 Release、不写仓库文件；产物探测只发一次 HTTP GET。
 # 创建/补建 Release 仍由 release.md 4.1 负责，本脚本只校验。
+#
+# 产物探测与生态无关：`--probe-url` 给一个 URL（可用 %VERSION% / %TAG% 占位），
+# 2xx 视为可见、404/410 视为不可见、其他视为未知。npm registry 只是其中一种 URL，
+# `--npm-pkg` 是同义的便捷别名（内部拼出 registry URL），脚本里没有任何生态分支。
 #
 # 平台（--platform 不给时按远端 URL 判定，规则见 scripts/lib/remote.sh）：
 #   github  gh run list/view/watch + gh release view
@@ -31,12 +35,16 @@ usage() {
   --workflow <file>    GitHub 只看指定 workflow
   --timeout <秒>       等流水上限（默认 180）
   --interval <秒>      轮询间隔（默认 5）
-  --npm-pkg <name>     要校验的 npm 包名；不给则 NPM_STATUS=skipped
-  --npm-version <ver>  默认取 tag 去掉前缀 v
+  --probe-url <url>    产物可见性探测 URL；支持 %VERSION%（tag 去前缀）与 %TAG% 占位
+                       例：https://registry.npmjs.org/@scope%2Fpkg/%VERSION%
+                       不给则 PROBE_STATUS=skipped
+  --npm-pkg <name>     --probe-url 的 npm 便捷别名（包名）；与 --probe-url 互斥，后者优先
+  --npm-version <ver>  默认取 tag 去掉前缀
   --npm-registry <url> 默认 https://registry.npmjs.org
   --no-ci              跳过流水等待
   --no-release         跳过 Release 校验
-  --no-npm             跳过 npm 校验
+  --no-probe           跳过产物探测
+  --no-npm             --no-probe 的旧名（保留兼容）
   -h, --help
 EOF
 }
@@ -59,9 +67,10 @@ INTERVAL=5
 NPM_PKG=""
 NPM_VERSION=""
 NPM_REGISTRY="https://registry.npmjs.org"
+PROBE_URL=""
 DO_CI=1
 DO_RELEASE=1
-DO_NPM=1
+DO_PROBE=1
 
 need() { [ $# -ge 2 ] || die "$1 需要一个值"; }
 
@@ -79,9 +88,10 @@ while [ $# -gt 0 ]; do
     --npm-pkg) need "$@"; NPM_PKG="$2"; shift 2 ;;
     --npm-version) need "$@"; NPM_VERSION="$2"; shift 2 ;;
     --npm-registry) need "$@"; NPM_REGISTRY="$2"; shift 2 ;;
+    --probe-url) need "$@"; PROBE_URL="$2"; shift 2 ;;
     --no-ci) DO_CI=0; shift ;;
     --no-release) DO_RELEASE=0; shift ;;
-    --no-npm) DO_NPM=0; shift ;;
+    --no-probe|--no-npm) DO_PROBE=0; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "未知参数 $1（-h 查看用法）" ;;
   esac
@@ -96,6 +106,7 @@ case "$RUN_ID" in '<none>') RUN_ID="" ;; esac
 case "$PIPELINE_ID" in '<none>') PIPELINE_ID="" ;; esac
 case "$NPM_PKG" in '<none>') NPM_PKG="" ;; esac
 case "$NPM_VERSION" in '<none>') NPM_VERSION="" ;; esac
+case "$PROBE_URL" in '<none>') PROBE_URL="" ;; esac
 case "$TIMEOUT" in ''|*[!0-9]*|0) die "--timeout 必须是正整数（当前：${TIMEOUT}）" ;; esac
 case "$INTERVAL" in ''|*[!0-9]*|0) die "--interval 必须是正整数（当前：${INTERVAL}）" ;; esac
 case "$PLATFORM_OVERRIDE" in
@@ -182,6 +193,9 @@ RELEASE_NOTES_LEN=unknown
 RELEASE_NOTES=unknown
 NPM_STATUS=skipped
 NPM_SOURCE=none
+PROBE_STATUS=skipped
+PROBE_HTTP="<none>"
+PROBE_TARGET="<none>"
 REASONS=""
 
 add_reason() {
@@ -585,6 +599,45 @@ verify_npm() {
   npm_fallback
 }
 
+# ---------- 通用产物探测（与生态无关） ----------
+# 只发一次 HTTP GET：2xx=可见 / 404|410=不可见 / 其它或网络错误=未知。
+# 不做「这个 URL 是不是 registry」的判断——URL 由调用方按仓库事实给出。
+verify_probe() {
+  local url core tag_enc code rc
+  if [ -z "$PROBE_URL" ]; then
+    PROBE_STATUS=skipped
+    return
+  fi
+  core="${TAG#v}"
+  case "$TAG" in
+    *v[0-9]*) core="${TAG##*v}" ;;
+  esac
+  url="$PROBE_URL"
+  url="$(printf '%s' "$url" | sed "s|%VERSION%|${core}|g; s|%TAG%|${TAG}|g")"
+  PROBE_TARGET="$url"
+  if ! command -v curl >/dev/null 2>&1; then
+    PROBE_STATUS=unknown
+    add_reason probe-no-curl
+    return
+  fi
+  set +e
+  code="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' "$url" 2>/dev/null)"
+  rc=$?
+  set -e
+  code="${code:-000}"
+  PROBE_HTTP="$code"
+  if [ "$rc" -ne 0 ]; then
+    PROBE_STATUS=unknown
+    add_reason probe-unknown
+    return
+  fi
+  case "$code" in
+    2??) PROBE_STATUS=visible ;;
+    404|410) PROBE_STATUS=missing; add_reason probe-missing ;;
+    *) PROBE_STATUS=unknown; add_reason probe-unknown ;;
+  esac
+}
+
 # ---------- 执行 ----------
 if [ "$DO_CI" -eq 1 ]; then
   if [ -n "$BLOCK_REASON" ]; then
@@ -608,8 +661,12 @@ if [ "$DO_RELEASE" -eq 1 ]; then
   fi
 fi
 
-if [ "$DO_NPM" -eq 1 ]; then
-  verify_npm
+if [ "$DO_PROBE" -eq 1 ]; then
+  if [ -n "$PROBE_URL" ]; then
+    verify_probe
+  else
+    verify_npm
+  fi
 fi
 
 # ---------- 结论 ----------
@@ -640,6 +697,13 @@ elif [ "$NPM_STATUS" = unknown ] && [ "$VERIFY_RESULT" != fail ]; then
   VERIFY_RESULT=unknown
 fi
 
+# 产物探测与 npm 同档：不可见=fail、查不了=unknown（都不得静默算通过）
+if [ "$PROBE_STATUS" = missing ]; then
+  VERIFY_RESULT=fail
+elif [ "$PROBE_STATUS" = unknown ] && [ "$VERIFY_RESULT" != fail ]; then
+  VERIFY_RESULT=unknown
+fi
+
 # ---------- 回执（stdout 只有 KEY=VALUE） ----------
 echo "VERIFY_PLATFORM=${PLATFORM}"
 echo "VERIFY_TAG=${TAG}"
@@ -659,6 +723,9 @@ echo "NPM_PKG=${NPM_PKG:-<none>}"
 echo "NPM_VERSION=${NPM_VERSION:-<none>}"
 echo "NPM_STATUS=${NPM_STATUS}"
 echo "NPM_SOURCE=${NPM_SOURCE}"
+echo "PROBE_TARGET=${PROBE_TARGET}"
+echo "PROBE_HTTP=${PROBE_HTTP}"
+echo "PROBE_STATUS=${PROBE_STATUS}"
 echo "VERIFY_RESULT=${VERIFY_RESULT}"
 echo "VERIFY_REASONS=${REASONS:-none}"
 
