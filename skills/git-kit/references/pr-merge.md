@@ -18,7 +18,7 @@
 2. **上下文探测**：无显式编号时，若当前分支不是主干/集成分支（见 `references/stable-branch.md` 第一类，如 `main`/`master`/`trunk`/`develop`/`dev`/`integration`），探测当前分支关联的开放 PR/MR：
    - gh：`gh pr view --json number,state,baseRefName --jq '{number,state,base:.baseRefName}'`（无参数即取当前分支 PR）；报错或 `state` 非 `OPEN` → 视为探测不到
    - glab：`glab mr view <当前分支> --output json | jq '{iid, state, target_branch}'` 或 `glab mr list --source-branch <当前分支>` 解析 IID；`state` 非 `opened` → 视为探测不到
-3. **三选项确认**：无论编号来自显式提供还是上下文探测，合并前都把「编号 + 标题 + 目标分支 + head 分支及其去向（`将删除` / `稳定分支，保留`）」展示给用户，并提供三个选项：
+3. **三选项确认**：无论编号来自显式提供还是上下文探测，合并前都把「编号 + 标题 + 目标分支 + head 分支及其去向（`将删除` / `稳定分支，保留`）」展示给用户，并提供三个选项（**用选项式提问呈现**，见 `references/ask-options.md`；不要打印现状等用户回一句「合并吧」）：
    - **是**：确认按当前编号合并，继续执行
    - **否**：取消本次合并，停在当前状态
    - **自定义 id**：用户另给一个编号/URL，替换当前编号 → 回到「前置检查」重新校验该 PR/MR（含重新判定 head 是否稳定分支），校验不过按失败处理
