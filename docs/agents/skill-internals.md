@@ -69,4 +69,4 @@ references：`templates.md`（**叙事链 9 问与顺序依赖** + 三档骨架�
 
 ## disk-cleanup
 
-磁盘空间回收。**一条流程不分叉**：只读测量（`scripts/mac_cleanup.sh` 默认模式，仅 macOS）→ 分类报告（可自动 / 需应用内 / 需 sudo）→ 用户同意后执行 → 前后对比复核。两个脚本都是执行引擎：`mac_cleanup.sh` 有查询 / `--clean --dry-run` / `--clean` 三模式；`cleanup-opencode.sh` 是**本地数据库这一个对象**的处理方式（仅在用户点名或该库明显偏大时跑，事务内删旧会话 + 清孤儿 snapshot + `VACUUM`），不是固定步骤。**`SKILL.md` 只做流程与铁律**（先查询后删除、用户数据只报告不代删、sudo 交给用户终端、不可逆前先备份、不虚构数字），**不复述成散文步骤**让模型现拼命令。细节在 `references/cleanup.md`。原 `scripts-kit` 仓的 `tools/cleanup/` 已迁入此处，该仓只留指向。
+磁盘空间回收。**一条流程不分叉**：只读测量（`scripts/mac_cleanup.sh` 默认模式，仅 macOS）→ 分类报告（可勾选 / 需应用内 / 需 sudo）→ **用户勾选最终清理项** → 只跑勾选项 → 前后对比复核。两个脚本都是执行引擎：`mac_cleanup.sh` 有查询 / `--list` / `--clean --dry-run` / `--clean --only <ids>` 四类用法，清理项编码（`caches`、`logs`、`tmp`、`varfolders`、`snapshots`、`trash`、`xcode`、`toolcache`、`bigbuild`、`docker`）是用户勾选的落地单位，`--only/--skip` 决定这次到底删什么；`cleanup-opencode.sh` 是**本地数据库这一个对象**的处理方式（用户勾选或点名才跑，事务内删旧会话 + 清孤儿 snapshot + `VACUUM`），不是固定步骤。**`SKILL.md` 只做流程与铁律**（先查询后删除、最终清理项由用户勾选、用户数据只报告不代删、sudo 交给用户终端、不可逆前先备份、不虚构数字），**不复述成散文步骤**让模型现拼命令。细节在 `references/cleanup.md`。原 `scripts-kit` 仓的 `tools/cleanup/` 已迁入此处，该仓只留指向。

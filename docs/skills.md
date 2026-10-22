@@ -83,11 +83,11 @@ Git 工作流的唯一真源。`SKILL.md` 只做意图路由：先判断命中�
 
 磁盘空间回收与本地数据瘦身。核心分工：**脚本是执行引擎，判断与安全门在 `SKILL.md`**。
 
-- 一条流程不分叉：只读测量 → 分类报告 → 用户同意后执行 → 前后对比复核；
-- macOS 磁盘（`scripts/mac_cleanup.sh`，查询 / `--clean --dry-run` / `--clean` 三模式）覆盖缓存、日志、临时文件、Time Machine 快照与开发工具缓存；
-- 本地数据库（`scripts/cleanup-opencode.sh`）只是其中一个对象：**仅在用户点名或该库明显偏大时处理**，不是每次清理的固定步骤；事务内删旧会话 + 清孤儿 snapshot + `VACUUM`；
-- 用户数据（聊天记录、浏览器配置、虚拟机镜像、iOS 设备备份、邮件附件）**只报告大小与路径**，不代删；
-- agent 执行环境没有 TTY，`sudo` 三步（`/tmp`、`/var/folders`、Time Machine）交给用户在自己的终端跑；不可逆操作前先给 `.backup` 备份命令。
+- 一条流程不分叉：只读测量 → 分类报告 → **用户勾选最终清理项** → 只跑勾选项 → 前后对比复核；
+- macOS 磁盘（`scripts/mac_cleanup.sh`，查询 / `--list` / `--clean --dry-run` / `--clean --only <ids>`）覆盖缓存、日志、临时文件、Time Machine 快照与开发工具缓存；清理项编码是勾选单位，`--only/--skip` 决定这次到底删什么；
+- 本地数据库（`scripts/cleanup-opencode.sh`）只是其中一个对象：**用户勾选或点名才处理**，不是每次清理的固定步骤；事务内删旧会话 + 清孤儿 snapshot + `VACUUM`；
+- 用户数据（聊天记录、浏览器配置、虚拟机镜像、iOS 设备备份、邮件附件）**只报告大小与路径**，不代删，也不进勾选清单；
+- agent 执行环境没有 TTY，`sudo` 两步（`/tmp`、Time Machine 快照）交给用户在自己的终端跑；不可逆操作前先给 `.backup` 备份命令。
 
 细节见 `references/cleanup.md`（清理项与阈值、`/var/folders` 定向、数据库安全边界、手动清单）。
 
