@@ -315,7 +315,7 @@ sequenceDiagram
     G-->>PF: 分支 / tag / CI 事实
     H-->>PF: 平台 / CLI / Release 是否存在
     PF-->>A: STATE、TARGET_TAG、Release 计划、后效
-    A->>A: changelog.sh 汇总变更说明（BODY 冻结）
+    A->>A: changelog.sh 原文层 + 模型中文摘要层（BODY 冻结）
     A-->>U: 计划卡：版本源 / 说明 / Release / 后效
     U-->>A: 从选项中选择（一次问全）
     A->>G: tag -a -F TAG_MSG → push
@@ -329,7 +329,7 @@ sequenceDiagram
     A-->>U: 逐项回执（Release + 每项后效独立结论）
 ```
 
-关键点：**确认只有一次**，但计划卡里必须包含 tag 注记的完整正文——tag 推送后正文不可改，这是唯一能反悔的时机。这一次确认是**带选项的提问**（`按此发版（tag + Release）` / `只打 tag，不建 Release` / `取消` / `改 tag 名或说明`，外加「写不写 CHANGELOG」），不是等用户回一句「可以」。正文在确认时**落盘冻结**，后面即使主干因 CHANGELOG PR 前移，打 tag 与建 Release 都复用这份文件，不重算。
+关键点：**确认只有一次**，但计划卡里必须包含 tag 注记的完整正文——tag 推送后正文不可改，这是唯一能反悔的时机。这一次确认是**带选项的提问**（`按此发版（tag + Release）` / `只打 tag，不建 Release` / `取消` / `改 tag 名或说明`，外加「写不写 CHANGELOG」），不是等用户回一句「可以」。正文在确认时**落盘冻结**，后面即使主干因 CHANGELOG PR 前移，打 tag 与建 Release 都复用这份文件，不重算。正文里**摘要层**是模型写的中文导读，**原文层**折叠保留、内容未被改写，两层一起冻结——所以用户看到的和推送出去的是逐字节同一份。
 
 ### 预检：把仓库事实查清楚
 
@@ -412,16 +412,16 @@ bash skills/git-kit/scripts/release-preflight.sh --version 1.1.0 --version-file 
 
 **探测不到 ≠ 没有后效。** 报告写「未检测到可校验的后效」，不写「无后效」，也不把没探到的东西当失败。探测只看**未注释**的行——workflow / `.gitlab-ci.yml` 头部注释常提到 `tags:` / `release:` / `npm publish`，注释不算后效。GitHub 之外的平台不再一律标「流水状态未知」：GitLab 用 `glab ci list --ref <tag>` 跟踪；Gitea/未知平台才标「流水状态未知」，并给选项「继续按可得信息出回执 / 停止，人工核对后再跑」。
 
-### 变更说明：tag 注记与 Release body 的唯一来源
+### 变更说明：两层，tag 注记与 Release body 的唯一来源
 
-注记正文由 `scripts/changelog.sh` 从 Conventional Commits 汇总，`tag` 与 `release` **共用同一实现**；`release` 里同一份输出（`BODY`）既进 tag 注记，也直接作为平台 Release 的 body：
+说明分两层：**原文层**由 `scripts/changelog.sh` 从 Conventional Commits 汇总（确定性、可审计、可 grep），**摘要层**由模型在原文层之上写中文导读（面向普通用户）。`tag` 与 `release` **共用同一实现**，同一份 `BODY`（摘要层 + 折叠的原文层）既进 tag 注记，也直接作为平台 Release 的 body：
 
 ```bash
 bash skills/git-kit/scripts/changelog.sh --from v0.1.4 --to origin/main --link-to v0.1.5   # 常规
 bash skills/git-kit/scripts/changelog.sh --to v0.1.0                                        # 首个版本
 ```
 
-写进仓库文件（由上面的可选分支调用，`--version` 同时决定小节标题 `## [v1.1.0] - 2026-10-22`）：
+写进仓库文件（由上面的可选分支调用；**只写原文层，不掺摘要**，`--version` 同时决定小节标题 `## [v1.1.0] - 2026-10-22`）：
 
 ```bash
 bash skills/git-kit/scripts/changelog.sh --from v0.1.4 --to origin/main \
@@ -434,25 +434,48 @@ bash skills/git-kit/scripts/changelog.sh --from v0.1.4 --to origin/main \
 
 规则：按 type 分组、固定章节顺序、带 scope 的标 `**scope**:`、`!:` 或正文含 `BREAKING CHANGE` 的只进 Breaking 组（**breaking 判定先于类型过滤**，`chore!:` 不会丢）、过滤 `chore(release)` / `docs(changelog)` 这类版本记录提交、默认不收 `chore/ci/build/test/style`（`--all` 开启）、末尾附 compare 链接。
 
-输出即 `BODY`（Release body）；tag 注记在它前面加一行 `release: <tag>`：
+`BODY` 的完整形态（Release body 原样；tag 注记在它前面加一行 `release: <tag>`）：
 
-```
+```markdown
+## 本次发布
+
+新增磁盘清理技能；release 流程不再假设版本清单格式。
+
+### 新增
+- 新增 disk-cleanup 技能，可按项目勾选要清理的内容（#45）
+
+<details><summary>原始变更记录（自动生成，未改写）</summary>
+
 ### Fixes
 
 - **commands-dsh**: add read fallback for handoff command (#33)
 
 **Full Changelog**: https://github.com/morehao/ai-kit/compare/v0.1.4...v0.1.5
+</details>
 ```
 
+摘要层的硬约束：每条都能对上原文层至少一条 commit；摘要里的版本号 / issue 号必须在原文层里找得到（有自检命令）；只归类转述、不评价；概述 1 句、每组 ≤5 条；中文为主，技能名 / 命令 / 路径保留原文；原文层**必须折叠保留**（审计与复核靠它）。
+
+拼装：原文层由脚本产出，摘要层由模型读出原文后写出，最后合成一份冻结文件：
+
 ```bash
-BODY="$(mktemp)"       # 纯变更说明：tag 注记正文 + Release body
+RAW="$(mktemp)"        # 原文层（脚本原样输出）
+SUMMARY="$(mktemp)"    # 摘要层（模型写的 Markdown）
+BODY="$(mktemp)"       # tag 注记正文 + Release body
 TAG_MSG="$(mktemp)"    # tag 注记：首行 + 空行 + BODY
-bash skills/git-kit/scripts/changelog.sh --from "${LATEST_TAG}" --to "${BASE_REF}" --link-to "${TARGET_TAG}" > "$BODY"
+bash skills/git-kit/scripts/changelog.sh --from "${LATEST_TAG}" --to "${BASE_REF}" --link-to "${TARGET_TAG}" > "$RAW"
+# ① 读 $RAW 写摘要层到 $SUMMARY（用写文件工具，不用 shell 拼中文）
+# ② 自检：摘要里的版本号 / issue 号必须能在 $RAW 里找到
+grep -oE 'v?[0-9]+(\.[0-9]+)+|#[0-9]+' "$SUMMARY" | sort -u | while read -r tok; do
+  grep -qF "$tok" "$RAW" || echo "⚠️ 摘要含原文没有的标识：${tok}" >&2
+done
+# ③ 拼装（$RAW 为空时只保留摘要层）
+{ cat "$SUMMARY"; echo; echo '<details><summary>原始变更记录（自动生成，未改写）</summary>'; echo; cat "$RAW"; echo; echo '</details>'; } > "$BODY"
 { echo "release: ${TARGET_TAG}"; echo; cat "$BODY"; } > "$TAG_MSG"
 git tag -a --cleanup=verbatim "${TARGET_TAG}" -F "$TAG_MSG" "${BASE_REF}"
 ```
 
-因为 tag 不可改，**说明必须在打 tag 前给用户过目**；用户可以改写或精简到只剩首行。正文在计划卡阶段就**落盘冻结**：即使之后（可选）合入了 CHANGELOG PR 让主干前移，打 tag 与建 Release 仍用这份已确认的文件，不重新生成——否则 `docs(changelog)` 提交会混进正文，且与 `CHANGELOG.md` 对不上。
+因为 tag 不可改，**说明必须在打 tag 前给用户过目**；用户可以改写或精简到只剩首行。正文在计划卡阶段就**落盘冻结**：即使之后（可选）合入了 CHANGELOG PR 让主干前移，打 tag 与建 Release 仍用这份已确认的文件，不重新生成——否则 `docs(changelog)` 提交会混进正文，且与 `CHANGELOG.md` 对不上。`TAGGED` 重跑同理：正文**从 tag 注记读回**（`git for-each-ref --format='%(contents)'`），不重新生成，否则模型重写摘要会让 Release body 与已推送的 tag 漂移。
 
 ### 失败矩阵
 
