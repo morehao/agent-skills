@@ -145,12 +145,14 @@ cat "$NOTES"          # 作为计划卡正文展示；决策走下面的选项
 
 ```bash
 git fetch ${REMOTE} --tags
-git tag -a "${TARGET_TAG}" -F "$NOTES" "${BASE_REF}"
+git tag -a --cleanup=verbatim "${TARGET_TAG}" -F "$NOTES" "${BASE_REF}"
 git push ${REMOTE} "${TARGET_TAG}"
 echo "TAG_PUSH_OK"
 ```
 
 注记正文 = 首行 `release: <TARGET_TAG>` + 步骤 1 的变更说明（含已确认的 compare 链接）；首个版本省掉 `--from`。
+
+**`--cleanup=verbatim` 不可省**：`git tag -F` 默认按 `strip` 清理，会把 `### Features` 这类以 `#` 开头的行当注释整行删掉（`changelog.sh` 输出的正是 Markdown 小标题，已在临时仓库复现）。少了这个参数，注记正文会丢结构，即使正文文件本身完好。
 
 `STATE=TAGGED` 时不重复打，直接进步骤 4（此时步骤 2 的 CHANGELOG 分支也不再提供——tag 已固定）。若这次是重跑、步骤 1 没生成 `${NOTES}`，先按步骤 1 的命令现生成一份（`--to` 用当前的 `BASE_REF`），否则步骤 4 的 `gh release create` 会拿到空路径。
 
