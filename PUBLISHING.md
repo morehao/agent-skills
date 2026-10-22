@@ -49,9 +49,9 @@
 
 > **稳定分支不接受直接提交，发版升版本也不例外。** 升版本走 `git-kit`：`commit-push`（起点是稳定分支时自动建工作分支）→ `pr-create` → `pr-merge` 合并到 `main`。规则单一定义在 `skills/git-kit/references/stable-branch.md`；打 tag 侧的约束见 `skills/git-kit/references/tag.md`「发版约束」。
 >
-> **合并之后那一步用 `/git/release`**（git-kit 的 `release` 分支）：它只做 `pr-merge` 之后的部分——只读预检 → 一次计划卡确认 → 打注记 tag → 逐个跟踪 tag 触发的后效并出回执。它不改版本号、不开无关 PR；可选「写 `CHANGELOG.md`」——选了就为这个文件开 `docs/changelog-<tag>` 分支走一次 PR，且必须在打 tag 前合入（不选则完全不碰工作区）。`STATE=TAGGED` 表示 tag 已在（重跑只做跟踪校验），`BLOCKED` 表示有阻断项（版本没领先 tag / tag 不在主干 / tag 与版本不一致），按 `BLOCKERS` 处理——多数情况先走升版本 PR。手动 `git tag` 仍有效，两者共用同一份 `tag.md`「发版约束」。
+> **合并之后那一步用 `/git/release`**（git-kit 的 `release` 分支）：它只做 `pr-merge` 之后的部分——只读预检 → 一次计划卡确认 → 打注记 tag → **默认创建 GitHub Release**（body 复用同一份变更说明；CI 已建则只校验）→ 逐个跟踪其他后效并出回执。它不改版本号、不开无关 PR；可选「写 `CHANGELOG.md`」——选了就为这个文件开 `docs/changelog-<tag>` 分支走一次 PR，且必须在打 tag 前合入（不选则完全不碰工作区）。`STATE=TAGGED` 表示 tag 已在（重跑会补建缺失的 Release 或只做校验），`BLOCKED` 表示有阻断项（版本没领先 tag / tag 不在主干 / tag 与版本不一致），按 `BLOCKERS` 处理——多数情况先走升版本 PR。手动 `git tag` 仍有效，两者共用同一份 `tag.md`「发版约束」。
 >
-> **后效按仓库探测，不写死**：git-kit 会探测本仓 tag 触发了哪些 workflow、是否发 npm、是否建 GitHub Release，再逐个校验。本仓的后效恰好是「`release.yml` + npm」，所以回执里会有 npm 那一行；换成 Go/容器/静态站仓库，同一流程只会报告它实际探测到的部分。
+> **后效按仓库探测，不写死**：git-kit 会探测本仓 tag 触发了哪些 workflow、是否发 npm、是否由 CI 建 Release，再逐个校验。本仓的后效是「`release.yml` + npm」，Release 则由流程默认创建（CI 不建），所以回执里会有 Release 行与 npm 行；换成 Go/容器/静态站仓库，同一流程只会报告它实际探测到的部分。
 
 1. **升版本**：改 `commands-dsh/package.json` 的 `version`（如 `0.1.1` → `0.2.0`），如有需要同步 `commands-dsh/README.md`；**在分支上提交**并 push，再开 PR 合并到 `main`（`/git/commit-push` → `/git/pr-create` → `/git/pr-merge`）。
 2. **打 tag**（在**合并后**的 `main` 最新提交上打；去掉 `v` 前缀，与 package.json 版本一致）：

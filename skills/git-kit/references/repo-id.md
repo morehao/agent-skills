@@ -11,6 +11,8 @@ Expected the "[HOST/]OWNER/[NAMESPACE/]REPO" format, got "origin".       # glab
 
 ## 解析 `<repo-id>`
 
+**唯一实现是 `scripts/lib/remote.sh`**（`git_remote_host` / `git_remote_path` / `git_remote_slug` / `git_remote_platform`），`release-preflight.sh` 与 `changelog.sh` 都 source 它；本文只描述规则，不要在别处再写一套正则。
+
 一次解析，供后续所有 gh/glab 命令复用（`<目标仓库>` 是远端名，如 `origin`/`upstream`）：
 
 ```bash

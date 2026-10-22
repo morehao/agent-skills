@@ -202,19 +202,33 @@ sequenceDiagram
 
 ## 发版：tag 与 release
 
-发版段只覆盖 `pr-merge` **之后**的事：版本号已经在稳定分支上了，剩下的工作是打 tag、盯住 tag 触发的后效、给出回执。
+发版段只覆盖 `pr-merge` **之后**的事：版本号已经在稳定分支上了，剩下的工作是打 tag、建平台 Release、盯住 tag 触发的其他后效、给出回执。
 
 ### 两个词的边界
 
 | | `tag` | `release` |
 |---|---|---|
 | 起点 | 任意分支、任意时机 | 稳定分支（`pr-merge` 之后） |
-| 做什么 | 打 annotated tag 并推送 | 打 tag → 跟踪 tag 触发的后效 → 逐项校验 → 回执 |
+| 做什么 | 打 annotated tag 并推送 | 打 tag → **创建/校验平台 Release** → 跟踪其他后效 → 逐项校验 → 回执 |
 | 版本来源 | 用户指定或从分支名推断 | 从稳定分支的 `package.json` 读，或以 tag 为源 |
-| 结束标志 | `TAG_PUSH_OK` | `STATE` + 每项后效的独立结论 |
-| 不做 | 发布、验证 | 改版本号、建无关分支、开无关 PR、回合并（写 `CHANGELOG.md` 的唯一例外见下） |
+| 平台 Release | **不创建** | **默认创建**（GitHub 用 `gh`、GitLab 用 `glab`；CI 已建则只校验） |
+| 结束标志 | `TAG_PUSH_OK` | `STATE` + Release 结论 + 每项后效的独立结论 |
+| 不做 | 发布、验证 | 改版本号、建无关分支、开无关 PR、回合并、删 Release（写 `CHANGELOG.md` 的唯一例外见下） |
 
-一句话：**`tag` 是动作，`release` 是流程**。只想打个标签用 `tag`；想打完还知道"发出去没有"用 `release`。
+一句话：**`tag` 是动作，`release` 是流程**。只想打个标签用 `tag`；要 tag + 平台 Release（默认建，不用额外确认）+ 发布结果校验，用 `release`。
+
+### Release 是默认交付物
+
+预检先探测「这台机器能不能建、CI 会不会建、现在已有没已有」，再决定动作；用户不需要先回答「要不要建」：
+
+| 探测结果 | 默认动作 |
+|---|---|
+| `RELEASE_PLATFORM=github\|gitlab` + `RELEASE_CLI_READY=yes` + `EFFECT_RELEASE=none` | 由本流程 `gh release create` / `glab release create` |
+| `EFFECT_RELEASE=workflow` | 不重复建，等 CI 结束后只校验 notes |
+| `RELEASE_EXISTS=yes` | 只校验，不覆盖人工补过的 notes |
+| 平台未知 / CLI 缺失 / 未登录 | 不建；打 tag 照常完成，回执给可复制的手动命令 |
+
+显式降级只有一种：用户在确认题里选「只打 tag，不建 Release」。Release 的 body 就是 tag 注记正文（去掉首行 `release: <tag>`），同一份冻结文件，不在两处各生成一次。
 
 ### 状态机
 
@@ -227,7 +241,7 @@ stateDiagram-v2
     [*] --> NEEDS_TAG: 无可读清单且未给 tag 参数
     [*] --> BLOCKED: 版本未领先或 tag 不在主干
     READY --> TAGGED: 打 tag 并推送
-    TAGGED --> TAGGED: 重跑只做跟踪与校验（幂等）
+    TAGGED --> TAGGED: 补建/校验 Release（幂等）
     NEEDS_TAG --> READY: 补 tag 参数
     BLOCKED --> READY: 先走升版本 PR，再重新预检
     TAGGED --> [*]: 出回执
@@ -235,8 +249,8 @@ stateDiagram-v2
 
 | STATE | 含义 | 下一步 |
 |---|---|---|
-| `READY` | 版本已领先、目标 tag 不存在 | 从选项确认计划卡 → 打 tag |
-| `TAGGED` | tag 已在（可能刚打完，也可能之前打过） | 跳过打 tag，只跟踪与校验 |
+| `READY` | 版本已领先、目标 tag 不存在 | 从选项确认计划卡（tag + Release）→ 打 tag → 建 Release |
+| `TAGGED` | tag 已在（可能刚打完，也可能之前打过） | 跳过打 tag；Release 缺失则补建、已存在则只校验，再跟踪 |
 | `NEEDS_TAG` | 没有可读的版本清单，也没给 `--tag` | 用选项索取目标 tag（`v0.1.0` / `v1.0.0` / 自定义） |
 | `BLOCKED` | 有阻断项 | 按 `BLOCKERS` 给对应选项，通常先走升版本 PR |
 
@@ -245,7 +259,7 @@ stateDiagram-v2
 `release` 全程只有一次确认，但**需要用户决定的每一处都必须落成带选项的提问**，而不是打印一段现状等人用自然语言回答。规则见 `skills/git-kit/references/ask-options.md`，要点：
 
 - **汇报归汇报，决策归决策**：计划卡、预检结果、回执照常打印；决策另起一题，带选项。
-- **一次问全**：发版确认一次问三题——是否按此打 tag / 写不写 `CHANGELOG.md` / GitHub Release 谁创建（后者仅未探测到时问）。
+- **一次问全**：发版确认一次问两题——是否按此发版（tag + Release，默认建）／ 写不写 `CHANGELOG.md`。Release 不是独立一题：只有**无法自动创建**时，题面才改成「按此发版（tag，附手动创建命令）」或「停止，先处理 CLI/登录」。
 - **选项写法**：推荐项放第一位并标 `（推荐）`，每项一句话说后果，永远留 `自定义` 兜底；长内容（注记正文）留在提问前的正文里。
 - **阻断也给选项**：`BLOCKED` 不是「说明完就结束」，而是「升 patch / minor / major / 只跟踪现有 tag」这类可选项。
 - **不替用户选**：没选或取消就停在当前状态，报告已做 / 未做 / 下一条命令。
@@ -290,31 +304,36 @@ sequenceDiagram
     participant A as git-kit
     participant PF as release-preflight.sh
     participant G as git
+    participant H as 平台 API（gh/glab）
     participant CI as CI（tag 触发）
-    participant E as 产物（npm / Release）
+    participant E as 其他产物（npm / 镜像）
 
     U->>A: 发版
     A->>PF: 只读预检
-    PF->>G: 读远端稳定分支的版本、tag 列表、workflow 配置
-    G-->>PF: 分支 / tag / workflow 事实
-    PF-->>A: STATE、TARGET_TAG、探测到的后效
-    A->>A: changelog.sh 汇总变更说明
-    A-->>U: 计划卡：版本 / tag / 说明 / 后效
+    PF->>G: 读远端稳定分支、tag 列表、CI 配置
+    PF->>H: 查 Release 是否已存在
+    G-->>PF: 分支 / tag / CI 事实
+    H-->>PF: 平台 / CLI / Release 是否存在
+    PF-->>A: STATE、TARGET_TAG、Release 计划、后效
+    A->>A: changelog.sh 汇总变更说明（BODY 冻结）
+    A-->>U: 计划卡：版本 / tag / 说明 / Release / 后效
     U-->>A: 从选项中选择（一次问全）
-    A->>G: tag -a -F 注记 → push
+    A->>G: tag -a -F TAG_MSG → push
+    A->>H: release create（不存在且非 CI 负责）
+    H-->>A: 已创建 / 已存在 / 失败
     G-->>CI: tag 推送事件
-    A->>CI: 按 headBranch == tag 过滤 run
-    CI-->>A: 各个 workflow 的结论
+    A->>CI: 查 workflow / pipeline 结论
+    CI-->>A: 各流水结论
     A->>E: 仅对探测到的产物做校验
     E-->>A: 可见 / 不可见 / 查不了
-    A-->>U: 逐项回执（每一项独立结论）
+    A-->>U: 逐项回执（Release + 每项后效独立结论）
 ```
 
-关键点：**确认只有一次**，但计划卡里必须包含 tag 注记的完整正文——tag 推送后正文不可改，这是唯一能反悔的时机。这一次确认是**带选项的提问**（打 tag / 取消 / 改写说明，外加「写不写 CHANGELOG」「Release 谁创建」），不是等用户回一句「可以」。正文在确认时**落盘冻结**，后面即使主干因 CHANGELOG PR 前移，打 tag 也复用这份文件，不重算。
+关键点：**确认只有一次**，但计划卡里必须包含 tag 注记的完整正文——tag 推送后正文不可改，这是唯一能反悔的时机。这一次确认是**带选项的提问**（`按此发版（tag + Release）` / `只打 tag，不建 Release` / `取消` / `改 tag 名或说明`，外加「写不写 CHANGELOG」），不是等用户回一句「可以」。正文在确认时**落盘冻结**，后面即使主干因 CHANGELOG PR 前移，打 tag 与建 Release 都复用这份文件，不重算。
 
 ### 预检：把仓库事实查清楚
 
-预检**只读**：不写文件、不切分支、不打 tag。
+预检**只读**：不写文件、不切分支、不打 tag、不创建 Release。
 
 ```bash
 # 在仓库根执行（脚本自行定位 git 顶层）
@@ -322,17 +341,23 @@ bash skills/git-kit/scripts/release-preflight.sh
 bash skills/git-kit/scripts/release-preflight.sh --tag v1.1.0   # 无可读版本清单时
 ```
 
-选项有 `--remote`、`--pkg`、`--tag`、`--no-fetch`、`--no-npm`；退出码 `0` 可继续 / `2` 有阻断项 / `1` 参数或环境错误。
+选项有 `--remote`、`--pkg`、`--tag`、`--no-fetch`、`--no-npm`、`--no-release-check`（跳过远端 Release 查询）、`--platform`（覆盖平台判定，自建域名/夹具用）；退出码 `0` 可继续 / `2` 有阻断项 / `1` 参数或环境错误。
 
 | 输出 | 含义 |
 |---|---|
+| `HOST` / `REPO_ID` | 从远端 URL 解析出的 host 与 `[HOST/]OWNER[/NAMESPACE]/REPO` |
+| `RELEASE_PLATFORM` | `github` / `gitlab` / `gitea` / `unknown` |
+| `RELEASE_CLI` / `RELEASE_CLI_READY` | 本平台 CLI（`gh`/`glab`/`none`）与登录状态 |
+| `EFFECT_RELEASE` | `workflow`（CI 会建）/ `none`（本流程默认建） |
+| `RELEASE_EXISTS` / `RELEASE_PRERELEASE` | 目标 tag 的 Release 是否已存在；版本是否预发布 |
+| `CI_SYSTEM` / `GITLAB_TAG_CI` | 本仓 CI 体系；GitLab 是否有 tag 触发流水 |
 | `VERSION_SOURCE` | `manifest`（读 `package.json`）或 `tag`（以 tag 为版本源） |
 | `PKG_VERSION` / `TARGET_TAG` | 当前版本、将要打的 tag |
 | `PKG_CANDIDATES` | 多包仓库里可选的发布包（配 `--pkg` 指定） |
 | `TAG_EXISTS` / `TAG_ON_BASE` | tag 是否已存在、是否在稳定分支历史上 |
 | `LATEST_SEMVER` | 最新 tag 能否参与版本比较（`v` 前缀不是判据） |
-| `TAG_WORKFLOWS` | `on: tags:` 的 workflow 列表（空 = 未检测到） |
-| `EFFECT_NPM` / `EFFECT_GH_RELEASE` | 是否探测到对应后效 |
+| `TAG_WORKFLOWS` | GitHub 下 `on: tags:` 的 workflow 列表（空 = 未检测到） |
+| `EFFECT_NPM` | 是否探测到 npm 发布后效 |
 | `NPM_PUBLISHED` | `yes` / `no` / `unknown` / `skipped` |
 | `COMMITS` / `TOTAL_COMMITS` | 变更说明收录数 / 区间总提交数 |
 | `STATE` / `WARN` / `BLOCKERS` | 流程状态、非阻断提醒、阻断项 |
@@ -346,7 +371,10 @@ bash skills/git-kit/scripts/release-preflight.sh --tag v1.1.0   # 无可读版�
 | 阻断 | `tag-not-on-base` | tag 打错分支：给选项 `停止`（推荐）/ `授权删 tag 重打`（不可逆） |
 | 阻断 | `tag-version-mismatch` | 给选项 `先升版本到 <tag 版本>`（推荐）/ `改用清单版本作 tag` / `停止` |
 | 提醒 | `npm-unknown` | 查不了（网络/缓存），不是"未发布" |
-| 提醒 | `gh-missing` | 无法跟踪流水：给选项「继续只做产物校验（推荐）/ 停止」 |
+| 提醒 | `release-cli-missing` | 本平台 CLI 不在 PATH：Release 降级为手动，打 tag 照常 |
+| 提醒 | `release-auth-missing` | CLI 未登录该 host：同上，提示先登录 |
+| 提醒 | `release-host-unknown` | 自建/非 GitHub/GitLab：不猜 API，只给手动命令 |
+| 提醒 | `release-check-unknown` | 查询 Release 失败：不能断言不存在，`TAGGED` 时不冒险创建 |
 | 提醒 | `dirty-worktree` | 不阻断：打 tag 不碰工作区 |
 | 提醒 | `latest-tag-not-semver` | tag 无法与版本比较（守卫跳过），改由计划卡的 tag 确认兜底 |
 | 提醒 | `multiple-publish-packages` | 按 `PKG_CANDIDATES` 用 `--pkg` 指定发布包 |
@@ -356,26 +384,26 @@ bash skills/git-kit/scripts/release-preflight.sh --tag v1.1.0   # 无可读版�
 
 "发版"在不同仓库意味着不同的事。git-kit 只保证**tag 已推送、指向稳定分支、版本一致**；之后发生什么一律按仓库事实探测：
 
-| 信号 | 探测依据 | 校验 |
+| 信号 | 探测依据 | 校验 / 动作 |
 |---|---|---|
-| 发布流水 | workflow 的 `on:` 段含 `tags:` | 每个 workflow 的 run 结论（按 `headBranch == tag` 匹配） |
+| 发布流水 | GitHub：workflow 的 `on:` 段含 `tags:`；GitLab：`.gitlab-ci.yml` 含 `CI_COMMIT_TAG` | 每个 workflow / pipeline 的结论（GitHub 按 `headBranch == tag`，GitLab 按 `--ref <tag>`） |
 | npm | `package.json` 有 `publishConfig`，或 workflow 含 `npm publish` | `npm view <name>@<version>` |
-| GitHub Release | tag workflow 含 `action-gh-release` / `gh release create` | `gh release view <tag>` + notes 非空 |
+| 平台 Release | GitHub：tag workflow 含 `action-gh-release` / `gh release create`；GitLab：`.gitlab-ci.yml` 含 `release:` / `glab release create` | CI 建则 `gh/glab release view` 校验 notes；CI 不建则**本流程默认创建** |
 | 镜像 / 文档站 / 部署 | **不探测** | 标「未检测到」；需跟踪时用选项问「继续（推荐）/ 指定产物与校验方式」 |
 
 三种仓库跑同一套流程的结果：
 
-| 仓库形态 | `TAG_WORKFLOWS` | `EFFECT_NPM` | 回执里出现的行 |
-|---|---|---|---|
-| npm 包（本仓） | `release.yml` | `yes` | 流水 ✅ + npm ✅ |
-| 容器镜像 | `image.yml` | `no` | 只有流水 |
-| 无 workflow | 空 | `no` | 明确写「未检测到 tag 触发的发布流水；tag 即交付物」 |
+| 仓库形态 | `TAG_WORKFLOWS` | `EFFECT_NPM` | `EFFECT_RELEASE` | 回执里出现的行 |
+|---|---|---|---|---|
+| npm 包（本仓） | `release.yml` | `yes` | `none` | Release ✅ + 流水 ✅ + npm ✅ |
+| 容器镜像 | `image.yml` | `no` | `none` | Release ✅ + 流水 ✅ |
+| 无 workflow | 空 | `no` | `none` | Release ✅ + 明确写「未检测到 tag 触发的发布流水」 |
 
-**探测不到 ≠ 没有后效。** 报告写「未检测到可校验的后效」，不写「无后效」，也不把没探到的东西当失败。探测只看**未注释**的行——workflow 头部注释常提到 `tags:` / `npm publish`，注释不算后效。非 GitHub 平台（GitLab/Gitea）不猜流水状态：标「流水状态未知」，并给选项「继续按可得信息出回执 / 停止，人工核对后再跑」。
+**探测不到 ≠ 没有后效。** 报告写「未检测到可校验的后效」，不写「无后效」，也不把没探到的东西当失败。探测只看**未注释**的行——workflow / `.gitlab-ci.yml` 头部注释常提到 `tags:` / `release:` / `npm publish`，注释不算后效。GitHub 之外的平台不再一律标「流水状态未知」：GitLab 用 `glab ci list --ref <tag>` 跟踪；Gitea/未知平台才标「流水状态未知」，并给选项「继续按可得信息出回执 / 停止，人工核对后再跑」。
 
-### 变更说明：tag 注记的唯一来源
+### 变更说明：tag 注记与 Release body 的唯一来源
 
-注记正文由 `scripts/changelog.sh` 从 Conventional Commits 汇总，`tag` 与 `release` **共用同一实现**：
+注记正文由 `scripts/changelog.sh` 从 Conventional Commits 汇总，`tag` 与 `release` **共用同一实现**；`release` 里同一份输出（`BODY`）既进 tag 注记，也直接作为平台 Release 的 body：
 
 ```bash
 bash skills/git-kit/scripts/changelog.sh --from v0.1.4 --to origin/main --link-to v0.1.5   # 常规
@@ -391,15 +419,13 @@ bash skills/git-kit/scripts/changelog.sh --from v0.1.4 --to origin/main \
 
 退出码：`0` 已写入 ／ `3` 该版本已记录（跳过）／ `4` 无变更可记录。文件不存在会新建并带 `# Changelog` 抬头；已存在则插入到首个 `## ` 小节之前，旧记录保持原样。
 
-`--link-to` 决定 compare 链接的右端，应指向**即将打的 tag**：`--to origin/main` 是远端跟踪名，直接拼进 GitHub 链接必然 404（脚本会兜底剥掉远端前缀，但指向 tag 才是发布语义）。收录上限默认 300 条，区间更长时向 stderr 告警，不会静默截断。
+`--link-to` 决定 compare 链接的右端，应指向**即将打的 tag**：`--to origin/main` 是远端跟踪名，直接拼进 compare 链接必然 404（脚本会兜底剥掉远端前缀，但指向 tag 才是发布语义）。链接格式按平台生成：GitHub/Gitea 用 `/compare/`，GitLab 用 `/-/compare/`；平台未知则不生成链接（不猜 URL）。`--repo-url` / `--platform` 可覆盖远端判定，便于自建实例与夹具。收录上限默认 300 条，区间更长时向 stderr 告警，不会静默截断。
 
 规则：按 type 分组、固定章节顺序、带 scope 的标 `**scope**:`、`!:` 或正文含 `BREAKING CHANGE` 的只进 Breaking 组（**breaking 判定先于类型过滤**，`chore!:` 不会丢）、过滤 `chore(release)` / `docs(changelog)` 这类版本记录提交、默认不收 `chore/ci/build/test/style`（`--all` 开启）、末尾附 compare 链接。
 
-输出直接成为 tag 正文：
+输出即 `BODY`（Release body）；tag 注记在它前面加一行 `release: <tag>`：
 
 ```
-release: v0.1.5
-
 ### Fixes
 
 - **commands-dsh**: add read fallback for handoff command (#33)
@@ -408,21 +434,27 @@ release: v0.1.5
 ```
 
 ```bash
-NOTES="$(mktemp)"
-{ echo "release: ${TARGET_TAG}"; echo; \
-  bash skills/git-kit/scripts/changelog.sh --from "${LATEST_TAG}" --to "${BASE_REF}" --link-to "${TARGET_TAG}"; } > "$NOTES"
-git tag -a "${TARGET_TAG}" -F "$NOTES" "${BASE_REF}"
+BODY="$(mktemp)"       # 纯变更说明：tag 注记正文 + Release body
+TAG_MSG="$(mktemp)"    # tag 注记：首行 + 空行 + BODY
+bash skills/git-kit/scripts/changelog.sh --from "${LATEST_TAG}" --to "${BASE_REF}" --link-to "${TARGET_TAG}" > "$BODY"
+{ echo "release: ${TARGET_TAG}"; echo; cat "$BODY"; } > "$TAG_MSG"
+git tag -a --cleanup=verbatim "${TARGET_TAG}" -F "$TAG_MSG" "${BASE_REF}"
 ```
 
-因为 tag 不可改，**说明必须在打 tag 前给用户过目**；用户可以改写或精简到只剩首行。正文在计划卡阶段就**落盘冻结**：即使之后（可选）合入了 CHANGELOG PR 让主干前移，打 tag 仍用这份已确认的文件，不重新生成——否则 `docs(changelog)` 提交会混进正文，且与 `CHANGELOG.md` 对不上。
+因为 tag 不可改，**说明必须在打 tag 前给用户过目**；用户可以改写或精简到只剩首行。正文在计划卡阶段就**落盘冻结**：即使之后（可选）合入了 CHANGELOG PR 让主干前移，打 tag 与建 Release 仍用这份已确认的文件，不重新生成——否则 `docs(changelog)` 提交会混进正文，且与 `CHANGELOG.md` 对不上。
 
 ### 失败矩阵
 
 | 情况 | 处理 |
 |---|---|
 | 版本没领先 tag | `BLOCKED`：给选项「升 patch / minor / major / 只跟踪现有 tag」，再走升版本 PR，release 里不改版本 |
-| tag 已存在且正确 | `TAGGED`，跳过打 tag，只跟踪与校验（重跑幂等） |
-| workflow 失败 | **不删 tag 重打**（tag 不可变）：给 run 链接 + 选项「只报告 / 重跑 / 下个版本」 |
+| tag 已存在且正确 | `TAGGED`，跳过打 tag；Release 缺失则补建、已存在则只校验（重跑幂等） |
+| Release 已存在 | 只校验 notes 非空，**不覆盖**（GitLab 的 `release create` 是更新语义，所以先 view 再决定建不建） |
+| `TAGGED` + Release 缺失 | 默认补建；补建前仍要确认 tag 在远端 |
+| Release 创建失败 | 不重试、不删 tag：⚠️ + 原始报错 + 选项「只报告 / 重试 / 跳过」 |
+| CLI 缺失 / 未登录 / 平台未知 | 只打 tag，回执给可复制的手动命令；不算发版失败 |
+| CI 声称会建 Release 但缺失 | 流水跟踪完给选项「由本流程补建 Release / 只报告」 |
+| workflow 失败 | **不删 tag 重打**（tag 不可变）：给 run 链接 + 选项「只报告 / 重跑（仅 GitHub）/ 下个版本」 |
 | workflow 仍在跑 | 可中止；重跑从 `TAGGED` 继续跟踪，不会重复打 tag |
 | npm / Release 查不了 | 报「未知」，不并入成功也不判失败 |
 | tag 打错分支 | `STATE=BLOCKED` + `tag-not-on-base`；给选项「停止 / 授权删除重打」（不可逆） |
@@ -430,10 +462,11 @@ git tag -a "${TARGET_TAG}" -F "$NOTES" "${BASE_REF}"
 
 ### 发版段的边界
 
-- **不做**：改 `package.json`、改代码、删/重打 tag、force push、`npm unpublish`（只能 `deprecate`）、改 workflow、代跑发布脚本
-- **唯一例外**：用户选择写 `CHANGELOG.md` 时，建**一个** `docs/changelog-<tag>` 分支并走一次 `pr-create` → `pr-merge`；不选则完全不碰工作区
-- **不假设**：不内置"发版必须发 npm"这类判断；npm 只是探测到才校验的一项后效
-- **不替代**：`tag`（任意分支打标签）、`pr-merge`（合并本身）
+- **两个远端写操作**：推送 tag + 创建平台 Release。Release 只由「平台支持 + CLI 已登录 + CI 不负责 + 用户没选只打 tag」触发，不额外越界
+- **不做**：改 `package.json`、改代码、删/重打 tag、force push、删 Release、改 Release notes（用户明确要求补 notes 时先问）、`npm unpublish`（只能 `deprecate`）、改 workflow、代跑发布脚本
+- **唯一越界写文件**：用户选择写 `CHANGELOG.md` 时，建**一个** `docs/changelog-<tag>` 分支并走一次 `pr-create` → `pr-merge`；不选则完全不碰工作区
+- **不假设**：不内置"发版必须发 npm"这类判断；npm 只是探测到才校验的一项后效。也不假设 Release 一定由 CI 建或一定由本流程建——按探测结果与用户选择
+- **不替代**：`tag`（任意分支打标签，不建 Release）、`pr-merge`（合并本身）
 
 ## 维护类分支
 
@@ -470,9 +503,11 @@ git tag -a "${TARGET_TAG}" -F "$NOTES" "${BASE_REF}"
 1. **"release 会顺手把版本号升了"** —— 不会。升版本属于前置 PR，release 只读取它。
 2. **"发版一定要发 npm"** —— 那是本仓的后效，不是通用规律；Go / 容器 / 静态站仓库的同一流程不会出现 npm 那一行。
 3. **"tag 打错了，改一下"** —— tag 推送后不可编辑，只能删了重打，且需要用户授权；所以注记正文与目标 sha 都要在推送前确认。
-4. **"没检测到发布流水就是没发出去"** —— 只说明本仓没有 `tags:` 触发的 workflow，或者发布走的是别的方式（手动、外部流水）；报告只呈现事实。
+4. **"没检测到发布流水就是没发出去"** —— 只说明本仓没有 tag 触发的 workflow/pipeline，或者发布走的是别的方式（手动、外部流水）；报告只呈现事实。
 5. **"npm 查不到就是发布失败"** —— 可能是缓存/网络导致查不了（`NPM_PUBLISHED=unknown`），两者要分开报。
-6. **"把预检结果打印出来，然后问『要不要发版』"** —— 这是开放式追问，等于把「有哪些选择、各自代价」丢回给用户。该给的是选项：按此打 tag / 取消 / 改说明，外加 CHANGELOG 与 Release 两题（见 `references/ask-options.md`）。
+6. **"Release 是额外的可选项，默认不建"** —— 反面。Release 是默认交付物：能建就建（不需要额外确认），只有用户显式选「只打 tag」或平台/CLI 不可用才降级。
+7. **"CI 会建 Release，所以本流程什么都不用管"** —— 探测到 `EFFECT_RELEASE=workflow` 只是不重复建；流水失败导致 Release 缺失时仍要给「补建」选项，不能静默放过。
+8. **"把预检结果打印出来，然后问『要不要发版』"** —— 这是开放式追问，等于把「有哪些选择、各自代价」丢回给用户。该给的是选项：按此发版（tag + Release）/ 只打 tag / 取消 / 改说明，外加 CHANGELOG 一题（见 `references/ask-options.md`）。
 
 ## 参考
 

@@ -58,6 +58,7 @@
 - tag 指向 `<目标仓库>/<branch>` 的远端最新提交，不受本地分支状态影响
 - 打 tag 不改任何文件/提交，**不切换当前分支**，无需工作区干净
 - tag 已存在（本地或远端）→ 停并报告，`git tag` 默认拒绝覆盖、`git push` 也会被拒，不伪造成功
+- **本分支不创建平台 Release**：GitHub/GitLab Release 是 `release` 分支的默认交付物（tag 注记正文直接复用为 Release body）。只要标签就走这里；要 Release 走 `release`
 
 ## 验收标准
 
