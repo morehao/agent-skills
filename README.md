@@ -26,6 +26,9 @@ ai-kit/
 │   ├── cordis.patch.yml
 │   ├── lib/index.js
 │   └── README.md
+├── docs/                      # 说明文档：git-kit 工作流解释（含 Mermaid / SVG 图）
+│   ├── git-kit.md             #   入口与路由、提交→PR→合并、发版（tag / release）
+│   └── assets/                #   图（SVG）
 ├── scripts/
 │   └── dsh-install.sh         # dsh 一键接入：软链 skills + 注册 commands-dsh 插件
 └── skills/                    # 技能（opencode 与 dsh 共用）
@@ -73,6 +76,7 @@ ai-kit/
 | `commands-opencode/git/pr-create` | 基于代码差异向目标仓库创建或更新 PR/MR（自动识别 gh/glab） |
 | `commands-opencode/git/pr-merge` | 按编号合并 PR/MR，删除原分支（head 为稳定分支时保留），切回主干并更新代码（自动识别 gh/glab） |
 | `commands-opencode/git/tag` | 查看最新 tag 与来源分支，选择要打 tag 的分支与版本号，构建注记 tag 并推送 |
+| `commands-opencode/git/release` | pr-merge 之后的发布段：打 tag → 跟踪该仓库 tag 触发的后效并逐项校验 |
 | `commands-opencode/git/commit-push` | 基于代码变更自动生成 commit message 并执行提交推送 |
 | `commands-opencode/git/slim` | 将当前 git 仓库瘦身为浅克隆，默认保留 30 天历史 |
 | `commands-opencode/git/star-classify` | 拉取并分类自己的 GitHub star 仓库，输出中文分组清单 |
@@ -82,7 +86,7 @@ ai-kit/
 
 ## dsh 接入（可选）
 
-`commands-dsh/` 以 **dsh 原生命令**形式暴露 git-kit 工作流与跨会话交接：`/git-message`、`/git-commit-push`、`/git-branch`、`/git-pr-create`、`/git-pr-merge`、`/git-tag`、`/git-slim`、`/git-star-classify`、`/handoff`。插件是**自包含意图表**（一行声明 = 命令名 + 对应 skill 分支 key，`skill` 省略时默认 git-kit），命令执行时向当前 agent 注入一条加载对应 skill（git-kit / handoff）并按其分支执行的指令——与 opencode 入口共用同一 skill、单一真源，编辑 `skills/git-kit/` 或 `skills/handoff/` 即同步生效（改插件 `lib/index.js` 需重启 dsh）。
+`commands-dsh/` 以 **dsh 原生命令**形式暴露 git-kit 工作流与跨会话交接：`/git-message`、`/git-commit-push`、`/git-branch`、`/git-pr-create`、`/git-pr-merge`、`/git-release`、`/git-tag`、`/git-slim`、`/git-star-classify`、`/handoff`。插件是**自包含意图表**（一行声明 = 命令名 + 对应 skill 分支 key，`skill` 省略时默认 git-kit），命令执行时向当前 agent 注入一条加载对应 skill（git-kit / handoff）并按其分支执行的指令——与 opencode 入口共用同一 skill、单一真源，编辑 `skills/git-kit/` 或 `skills/handoff/` 即同步生效（改插件 `lib/index.js` 需重启 dsh）。
 
 一键接入（幂等，可重复执行）：
 
@@ -122,6 +126,12 @@ dsh 侧技能目录约定（`skills/` 是**全局**的，软链后所有项目�
 卸载：`dsh plugin --profile <profile> remove @morehao/dsh-commands`，再删除对应的 skill 软链（`rm ~/.dsh/skills/<name>`）即可。（旧版曾以 `dsh-git-commands` 或 `@morehao/dsh-git-commands` 安装过：对应 `dsh plugin --profile <profile> remove dsh-git-commands` / `dsh plugin --profile <profile> remove @morehao/dsh-git-commands`。）
 
 详见 [commands-dsh/README.md](commands-dsh/README.md)。
+
+## 文档
+
+工作流的解释性文档：[`docs/git-kit.md`](docs/git-kit.md)——三条入口与一个实现、意图路由、九个分支、稳定分支的唯一定义、`commit-push` → `pr-create` → `pr-merge`（含 head 去留）、发版段（状态机 / 发布时序 / 后效探测 / 变更说明）。
+
+> `skills/git-kit/SKILL.md` 是给模型看的操作指令，`docs/` 是给人看的说明，两者不互相替代。
 
 ## 用法说明
 

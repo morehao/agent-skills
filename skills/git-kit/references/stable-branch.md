@@ -1,4 +1,4 @@
-# 稳定分支（git-kit 唯一定义，commit-push / pr-merge / tag 共用）
+# 稳定分支（git-kit 唯一定义，commit-push / pr-merge / tag / release 共用）
 
 **git-kit 内所有「稳定分支」判断只用这一份定义**，各分支只决定「命中后怎么办」，不再各自复述判定表。
 
@@ -23,6 +23,7 @@
 | `commit-push` | 提交推送 | **不直接提交**，先自动建工作分支再提交（`references/commit-push.md`） |
 | `pr-merge` | 合并 PR/MR | head 为稳定分支 → `KEEP`，**一律保留不删**（`references/pr-merge.md`） |
 | `tag` | 打版本 tag | **优先**作为 tag 来源分支（偏好，非禁止）（`references/tag.md`） |
+| `release` | 发布段（打 tag + 跟踪后效） | 以**远端**稳定分支为发布基准：tag 指向它、版本号读它（`references/release.md`） |
 
 **无例外**：发版升版本（改 `commands-dsh/package.json` 的 `version`）**同样不直接提交稳定分支**——走 `commit-push` 建分支 → PR → 合并 `main`，合并后再打 tag（顺序与守卫见 `references/tag.md`「发版约束」与 `PUBLISHING.md`）。
 

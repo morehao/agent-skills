@@ -49,6 +49,7 @@
 - `/git/pr-create [目标分支]` → 基于差异创建/更新 PR/MR（默认探测 main/master）
 - `/git/pr-merge [编号]` → 合并 PR/MR（无编号时探测当前分支关联的 PR/MR 并确认），删除原分支（head 为稳定分支时保留），切回主干并更新（默认 squash）
 - `/git/tag [tag名或分支名]` → 探测最新 tag 与来源分支，选择分支与版本号后打注记 tag 并推送
+- `/git/release` → pr-merge 之后的发布段：在已合并的稳定分支上打 tag，跟踪该仓库 tag 触发的后效（流水 / npm / Release 等）并逐项校验（只打标签用 `/git/tag`）
 - `/git/commit-push` → 分析当前变更自动提交并推送
 - `/git/slim [天数]` → 瘦身当前仓库（默认保留 30 天历史）
 - `/git/star-classify` → 拉取并分类自己的 GitHub star 仓库
