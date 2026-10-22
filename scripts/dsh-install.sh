@@ -1,23 +1,24 @@
 #!/usr/bin/env bash
 # dsh 接入安装脚本（幂等，可重复执行）：
 #   1) 把 ai-kit/skills/* 软链到 dsh 用户技能目录（$DSH_HOME/skills，默认 ~/.dsh/skills，全局生效）
-#   2) 把 commands-dsh 插件注册进 dsh profile
+#   2) 把 dsh 命令插件（npm 包 @morehao/dsh-commands，源码在另一仓 morehao/dsh-commands）注册进 dsh profile
 #
-# 用法：./scripts/dsh-install.sh [--profile <name>] [--skills-only] [--npm]
+# 用法：./scripts/dsh-install.sh [--profile <name>] [--skills-only] [--plugin-link <path>]
 #
 #   --profile <name>   dsh profile 名。默认取 $DSH_PROFILE；未设置时，若 $DSH_HOME/profiles
 #                      下只有一个 profile 就自动选用它，多个或零个则报错要求显式指定。
 #                      （早期版本硬编码 web，与实际安装不符时会凭空造出一个 profile，已修。）
 #   --skills-only      只做第 1 步（软链 skills），跳过插件注册；不需要 dsh CLI，也不碰 profile。
-#   --npm              第 2 步装已发布的 npm 包 @morehao/dsh-commands，而非本地 link:（等价 DSH_USE_NPM=1）。
+#   --plugin-link <path>
+#                      第 2 步用 link: 接入指定路径的插件源码（插件仓开发调试时用）。
+#                      不传则装 npm 上的 @morehao/dsh-commands。脚本**不猜**插件仓位置。
 #   -h, --help         显示帮助。
 #
 # 环境变量：
 #   DSH_HOME      dsh 配置根，默认 ~/.dsh
 #   DSH_PROFILE   默认 profile 名
-#   DSH_USE_NPM   =1 等价 --npm
 #
-# 本脚本默认是「开发/本地接入」方式（link: 真软链，源码改动即生效；改插件 lib/index.js 需重启 dsh）。
+# 插件默认从 npm 安装（插件源码在另一仓，本仓只出技能）；改插件源码要即时生效时用 --plugin-link。
 # 技能软链是热加载的：新增后 dsh 立即看到，不需要重启。
 #
 # 卸载：dsh plugin --profile <profile> remove @morehao/dsh-commands（bundles 会自动摘除），
@@ -31,7 +32,7 @@ DSH_HOME_DIR="${DSH_HOME:-$HOME/.dsh}"
 PROFILES_DIR="$DSH_HOME_DIR/profiles"
 PROFILE="${DSH_PROFILE:-}"
 SKILLS_ONLY=0
-USE_NPM="${DSH_USE_NPM:-0}"
+PLUGIN_LINK=""
 
 usage() {
   cat <<'EOF'
@@ -40,18 +41,18 @@ usage() {
   --profile <name>   dsh profile 名。默认取 $DSH_PROFILE；未设置时，若 $DSH_HOME/profiles
                      下只有一个 profile 就自动选用它，多个或零个则报错要求显式指定。
   --skills-only      只软链 skills 到 $DSH_HOME/skills，跳过插件注册（不需要 dsh CLI）。
-  --npm              插件装已发布的 @morehao/dsh-commands，而非本地 link:（等价 DSH_USE_NPM=1）。
+  --plugin-link <path>
+                     插件用 link:<path> 接入（插件仓开发调试）；默认装 npm 包。
   -h, --help         显示本帮助。
 
 环境变量:
   DSH_HOME      dsh 配置根，默认 ~/.dsh
   DSH_PROFILE   默认 profile 名
-  DSH_USE_NPM   =1 等价 --npm
 
 示例:
   ./scripts/dsh-install.sh --skills-only              # 只挂技能，最常用的安全子集
   ./scripts/dsh-install.sh --profile desktop          # 指定 profile 全量接入
-  DSH_USE_NPM=1 ./scripts/dsh-install.sh              # 插件走 npm 已发布包
+  ./scripts/dsh-install.sh --plugin-link ~/path/to/dsh-commands  # 插件仓源码即时生效
 EOF
 }
 
@@ -73,8 +74,16 @@ while [ $# -gt 0 ]; do
       SKILLS_ONLY=1
       shift
       ;;
-    --npm)
-      USE_NPM=1
+    --plugin-link)
+      if [ $# -lt 2 ]; then
+        echo "错误：--plugin-link 需要一个路径参数" >&2
+        exit 2
+      fi
+      PLUGIN_LINK="$2"
+      shift 2
+      ;;
+    --plugin-link=*)
+      PLUGIN_LINK="${1#*=}"
       shift
       ;;
     -h|--help)
@@ -247,12 +256,17 @@ for old_name in "dsh-git-commands" "@morehao/dsh-git-commands"; do
   fi
 done
 
-if [ "$USE_NPM" = "1" ]; then
-  echo "==> 安装已发布 npm 包 @morehao/dsh-commands（skills 仍由本仓库软链提供）"
-  "$DSH_BIN" plugin --profile "$PROFILE" add "@morehao/dsh-commands"
+if [ -n "$PLUGIN_LINK" ]; then
+  # 插件仓开发调试：显式传参，脚本不猜插件仓位置（它在另一个仓库）。
+  if [ ! -f "$PLUGIN_LINK/package.json" ]; then
+    echo "错误：$PLUGIN_LINK 下没有 package.json，不像是插件包目录" >&2
+    exit 2
+  fi
+  echo "==> 安装开发 link: $PLUGIN_LINK"
+  "$DSH_BIN" plugin --profile "$PROFILE" add "link:$PLUGIN_LINK"
 else
-  echo "==> 安装开发 link: $REPO_ROOT/commands-dsh"
-  "$DSH_BIN" plugin --profile "$PROFILE" add "link:$REPO_ROOT/commands-dsh"
+  echo "==> 安装 npm 包 @morehao/dsh-commands（skills 仍由本仓库软链提供）"
+  "$DSH_BIN" plugin --profile "$PROFILE" add "@morehao/dsh-commands"
 fi
 
 cat <<DONE

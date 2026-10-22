@@ -1,9 +1,0 @@
-{
-  "name": "ai-kit",
-  "private": true,
-  "description": "个人 AI 编码工具扩展集中仓（skills / opencode 指令 / dsh 命令）。仅 commands-dsh 子包发布到 npm；打 vX.Y.Z tag 时经 OIDC（Trusted Publishing）自动发布。",
-  "packageManager": "pnpm@11.21.0",
-  "workspaces": [
-    "commands-dsh"
-  ]
-}

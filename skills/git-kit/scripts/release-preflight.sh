@@ -77,7 +77,7 @@ if [ -n "$PKG_DIR" ]; then
     /*) PKG_ABS="$PKG_DIR" ;;
     *) PKG_ABS="${ROOT}/${PKG_DIR}" ;;
   esac
-  [ -f "${PKG_ABS}/package.json" ] || die "--pkg ${PKG_DIR} 下没有 package.json（相对仓库根传入，如 commands-dsh）"
+  [ -f "${PKG_ABS}/package.json" ] || die "--pkg ${PKG_DIR} 下没有 package.json（相对仓库根传入，如 packages/foo）"
   case "$PKG_ABS" in
     "$ROOT"/*) PKG_DIR="${PKG_ABS#"$ROOT"/}" ;;
     *) die "--pkg 必须指向仓库内的目录：${PKG_DIR}" ;;
