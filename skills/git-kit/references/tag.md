@@ -21,7 +21,7 @@
    - 选择含 `release` 的分支且分支名带版本号时，候选 tag 优先从分支名推断（如 `release/2.0.0`、`release-v2.0` → `v2.0.0`），作为第 1 个候选
    - 用户可选候选或自定义（如 `v1.3.0-beta.1`）
    - **校验不冲突**：`git tag -l <tag>` 与 `git ls-remote --tags <目标仓库> <tag>` 均须无输出；冲突则提示换名，不覆盖已有 tag
-6. **生成注记正文并确认**：用 `scripts/changelog.sh`（与 `release` 共用同一实现）从上一个 tag 汇总变更，作为注记正文。下文用 `PREV_TAG`（上一个 tag；首个 tag 时为空）、`REMOTE`、`BRANCH`、`TAG` 指代已确认的值：
+6. **生成注记正文（两层）并确认**：`scripts/changelog.sh`（与 `release` 共用同一实现）产出**原文层**，你在原文层之上写**摘要层**（中文、面向普通用户），两层拼成一份注记正文。下文用 `PREV_TAG`（上一个 tag；首个 tag 时为空）、`REMOTE`、`BRANCH`、`TAG` 指代已确认的值：
 
    ```bash
    bash scripts/changelog.sh --from "${PREV_TAG}" --to "${REMOTE}/${BRANCH}" --link-to "${TAG}"   # 首个 tag 省略 --from
@@ -29,16 +29,40 @@
 
    `--link-to` 让 compare 链接右端指向**即将打的 tag**；`--to` 是 `origin/main` 这类远端跟踪名，直接塞进链接会得到 404。
 
-   展示 `<tag>` @ `<branch>` @ `<sha> <subject>` **和完整注记正文**让用户确认——tag 一旦推送就不能改正文，必须在推送前定稿。用户可改写、精简，或只要首行 `release: <tag>`。若还要把变更写进 `CHANGELOG.md`，那是 `release` 分支的可选动作（本分支不写文件）。
-7. **构建并推送**（同一 bash 链式，防半途）：
+   摘要层与 `release` 是同一套硬约束（细则、自检与拼装命令见 `references/release.md` 步骤 1 的 `RAW`/`SUMMARY`/`BODY`/`TAG_MSG` 变量）：每条能对上原文层至少一条 commit；摘要里的版本号 / issue 号必须在原文层找得到；只归类转述、不评价；概述 1 句、每组 ≤5 条；中文为主，技能名 / 命令 / 路径保留原文；**原文层必须折叠保留**。
+
+   目标形态（`BODY` = 摘要层 + 原文层折叠块；`NOTES` = `release: <tag>` + 空行 + `BODY`）：
+
+   ```markdown
+   release: v1.2.0
+
+   ## 本次发布
+
+   <1 句话概述>
+
+   ### 新增
+   - ...
+
+   ### 改进
+   - ...
+
+   <details><summary>原始变更记录（自动生成，未改写）</summary>
+
+   ### Features
+   - ...（changelog.sh 原样输出，含 compare 链接）
+   </details>
+   ```
+
+   展示 `<tag>` @ `<branch>` @ `<sha> <subject>` **和完整注记正文**让用户确认——tag 一旦推送就不能改正文，必须在推送前定稿。用户可改写、精简，或只要首行 `release: <tag>`。若还要把变更写进 `CHANGELOG.md`，那是 `release` 分支的可选动作（本分支不写文件，`CHANGELOG.md` 也只放原文层、不掺摘要）。
+7. **构建并推送**（同一 bash 链式，防半途；**用第 6 步已确认并冻结的 `${BODY}`**，不要重跑 `changelog.sh`——重算会让推送内容与用户确认的那份不一致）：
 
    ```bash
    NOTES="$(mktemp)"
-   { echo "release: ${TAG}"; echo; bash scripts/changelog.sh --from "${PREV_TAG}" --to "${REMOTE}/${BRANCH}" --link-to "${TAG}"; } > "$NOTES"
+   { echo "release: ${TAG}"; echo; cat "$BODY"; } > "$NOTES"
    git fetch ${REMOTE} --tags && git tag -a --cleanup=verbatim "${TAG}" -F "$NOTES" "${REMOTE}/${BRANCH}" && git push ${REMOTE} "${TAG}" && echo "TAG_PUSH_OK"
    ```
 
-   **`--cleanup=verbatim` 不可省**：`git tag -F` 默认按 `strip` 清理，会把以 `#` 开头的行当注释删掉，`changelog.sh` 产出的 `### Features` 等 Markdown 小标题会整行消失（已在临时仓库复现）。`-m` 单行注记不受影响，走 `-F` 的文件必须带上。
+   **`--cleanup=verbatim` 不可省**：`git tag -F` 默认按 `strip` 清理，会把以 `#` 开头的行当注释删掉，`changelog.sh` 产出的 `### Features` 等 Markdown 小标题会整行消失（已在临时仓库复现）。`-m` 单行注记不受影响，走 `-F` 的文件必须带上。同理，摘要层里的 `## 本次发布` 与 `<details>` 也依赖这个参数才不会被吃掉。
 8. **验证**：输出出现 `TAG_PUSH_OK`，且 `git ls-remote --tags <目标仓库> <tag>` 与本地 `git tag -l <tag>` 均可见
 
 ## 发版约束（目标仓库的 `v*` tag 会触发发布时必读）
@@ -55,7 +79,7 @@
 ## 注意事项
 
 - 只打**注记 tag**（`-a` 带消息/作者/日期）；轻量 tag 无这些信息，不适合发版
-- 注记正文是「这版改了什么」的唯一机读载体，由 `scripts/changelog.sh` 从 Conventional Commits 汇总，**推送前必须确认**（tag 不可改）
+- 注记正文是「这版改了什么」的唯一机读载体：**原文层**由 `scripts/changelog.sh` 从 Conventional Commits 汇总（可审计），**摘要层**由模型在其上写中文导读（面向普通用户）；两层都要在推送前确认（tag 不可改）
 - tag 指向 `<目标仓库>/<branch>` 的远端最新提交，不受本地分支状态影响
 - 打 tag 不改任何文件/提交，**不切换当前分支**，无需工作区干净
 - tag 已存在（本地或远端）→ 停并报告，`git tag` 默认拒绝覆盖、`git push` 也会被拒，不伪造成功

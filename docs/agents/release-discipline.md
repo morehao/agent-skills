@@ -17,6 +17,6 @@
 | `NEEDS_TARGET` | 先读仓库定目标版本，再带 `--version` / `--tag` 重跑 |
 | `BLOCKED` | 按 `BLOCKERS` 停（含多版本线 `target-tag-ambiguous`） |
 
-变更说明由 `scripts/changelog.sh` 从 Conventional Commits 汇总，tag 推送前必须确认（tag 不可改）。脚本细节与平台探测方式见 [技能内部规则](skill-internals.md#git-kit)。
+变更说明两层：`scripts/changelog.sh` 的**原文层**（Conventional Commits 汇总，可审计）+ 模型的**中文摘要层**（普通用户可读，原文折叠保留）；tag 推送前必须确认（tag 不可改），`TAGGED` 重跑从注记读回、不重新生成。脚本细节与平台探测方式见 [技能内部规则](skill-internals.md#git-kit)。
 
 **不再使用 changesets。**

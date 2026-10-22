@@ -10,7 +10,7 @@ Git 工作流（message / commit-push / branch / pr-create / pr-merge / tag / re
 
 版本源由**读仓库判定**：`references/version-conventions.md` 给出 11 类主流约定的先验与现成命令——字面常量型给 `--version` + `--version-file` 边界回查并回报行号；派生/注入型只给 `--tag`；CI 硬校验版本的仓库加 `--require-version-match`。脚本里**没有任何清单格式知识**，只做「tag 样式推断 / 版本比较 / 可选回查」三件通用事，原生支持无 `package.json` 的仓库。
 
-平台能力（`gh`/`glab`、是否已登录）与后效（workflow / GitLab pipeline / `EFFECT_HINTS` 发布步骤 + 可选 `--probe-url` 产物探测）都按仓库**探测**；事实由只读脚本 `scripts/release-preflight.sh` 给出 `STATE=READY|TAGGED|NEEDS_TARGET|BLOCKED` 与 `RELEASE_PLATFORM|RELEASE_CLI_READY|RELEASE_EXISTS|EFFECT_RELEASE`。测试：`scripts/tests/release-preflight-test.sh` / `release-verify-test.sh`（临时仓 + 桩，不需要 node）。变更说明由 `scripts/changelog.sh` 从 Conventional Commits 汇总，`tag` 与 `release` 共用，既作 annotated tag 注记正文也作 Release body（推送前必须确认，tag 不可改）。
+平台能力（`gh`/`glab`、是否已登录）与后效（workflow / GitLab pipeline / `EFFECT_HINTS` 发布步骤 + 可选 `--probe-url` 产物探测）都按仓库**探测**；事实由只读脚本 `scripts/release-preflight.sh` 给出 `STATE=READY|TAGGED|NEEDS_TARGET|BLOCKED` 与 `RELEASE_PLATFORM|RELEASE_CLI_READY|RELEASE_EXISTS|EFFECT_RELEASE`。测试：`scripts/tests/release-preflight-test.sh` / `release-verify-test.sh`（临时仓 + 桩，不需要 node）。变更说明分两层：`scripts/changelog.sh` 从 Conventional Commits 汇总**原文层**（确定性、可审计），模型在其上写**中文摘要层**（面向普通用户）；两层拼成同一份正文，`tag` 与 `release` 共用，既作 annotated tag 注记正文也作 Release body（推送前必须确认，tag 不可改；`TAGGED` 重跑从注记读回、不重算）。
 
 发版纪律单独成篇，见 [发版纪律](release-discipline.md)。
 

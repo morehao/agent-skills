@@ -127,7 +127,7 @@ bash scripts/release-preflight.sh --version 1.0.9 --version-file package.json --
            | tag（VERSION_ORIGIN=tag）
   版本     <VERSION>（自 <LATEST_TAG> 起 N 个提交：feat a / fix b / breaking c）
   tag      <TARGET_TAG> @ <BASE_REF> 的 <sha>（注记 tag，正文见下方变更说明）
-  说明     变更说明全文（进 tag 注记，也是 Release body 的来源）
+  说明     变更说明全文（中文摘要层 + 折叠的原文层；进 tag 注记，也是 Release body 的来源）
   Release  <github|gitlab>：<将由本流程创建 | 由 CI 创建后校验 | 无法自动创建：<原因>>
            title = <TARGET_TAG>；body = 上方说明；预发布：<是|否>
   CHANGELOG <有：<文件>，已记录/未记录 | 无此文件> → 作为下文第 ② 题的选项呈现
@@ -136,20 +136,75 @@ bash scripts/release-preflight.sh --version 1.0.9 --version-file package.json --
   校验     逐个后效给结论；未检测到的不猜
 ```
 
-变更说明由 `scripts/changelog.sh`（与 `tag` 共用）从 Conventional Commits 生成，**必须在打 tag 前展示给用户过目**——注记正文推送后不可修改。生成后**立刻落盘冻结**，后续不再重新生成（否则步骤 2 的 CHANGELOG 合并提交会混进正文，与 `CHANGELOG.md` 也对不上）。正文拆两份：
+变更说明分**两层**：`scripts/changelog.sh`（与 `tag` 共用）产出的**原文层**（确定性、可审计），以及你在原文层之上写的**摘要层**（中文、面向普通用户）。两层拼成一份正文，**必须在打 tag 前展示给用户过目**——注记正文推送后不可修改。生成后**立刻落盘冻结**，后续不再重新生成（否则步骤 2 的 CHANGELOG 合并提交会混进正文，与 `CHANGELOG.md` 也对不上）。
+
+目标形态（`TAG_MSG` = 首行 + 空行 + `BODY`；`BODY` = 摘要层 + 原文层折叠块）：
+
+```markdown
+release: v1.2.0
+
+## 本次发布
+
+新增磁盘清理技能；release 流程不再假设版本清单格式。
+
+### 新增
+- 新增 disk-cleanup 技能，可按项目勾选要清理的内容（#45）
+
+### 改进
+- git-kit：版本源改为「读仓库判定」，不再内置清单格式（#43）
+
+<details><summary>原始变更记录（自动生成，未改写）</summary>
+
+### Features
+- **disk-cleanup**: add disk cleanup skill with user-selected cleanup items (#45)
+- **git-kit**: generalize release version source and probe artifacts (#43)
+
+**Full Changelog**: https://github.com/morehao/ai-kit/compare/v0.1.7...v1.2.0
+</details>
+```
+
+摘要层的硬约束（不满足就重写，不是建议）：
+
+| 约束 | 原因 |
+|---|---|
+| 每条必须能对上原文层至少一条 commit | 防编造条目 |
+| 摘要里的版本号 / issue 号 / 数字必须能在原文层里找到 | 防幻觉，下面有自检命令 |
+| 只归类转述，不评价、不营销（「大幅优化」「重磅」） | 原文没有的强度不替它加 |
+| 概述 1 句；每组 ≤5 条，超了按主题合并 | 控制体积，逼出取舍 |
+| 中文为主；技能名 / 命令 / 路径 / 包名 / scope 保留原文 | 可搜索性 |
+| 章节按 `新增 / 改进 / 修复 / 破坏性变更`，空组不出现 | 读者是普通用户，不是 maintainer |
+| 原文层**必须保留**并折叠 | 审计、grep、复核都靠它 |
 
 ```bash
-BODY="$(mktemp)"       # 纯变更说明：tag 注记正文 + Release body
+RAW="$(mktemp)"        # 原文层：changelog.sh 的原样输出
+SUMMARY="$(mktemp)"    # 摘要层：你写的 Markdown（## 本次发布 + 各组）
+BODY="$(mktemp)"       # tag 注记正文 + Release body
 TAG_MSG="$(mktemp)"    # tag 注记：首行 release: <tag> + 空行 + BODY
-bash scripts/changelog.sh --from "${LATEST_TAG}" --to "${BASE_REF}" --link-to "${TARGET_TAG}" > "$BODY"
-if [ -s "$BODY" ]; then
-  { echo "release: ${TARGET_TAG}"; echo; cat "$BODY"; } > "$TAG_MSG"
+
+bash scripts/changelog.sh --from "${LATEST_TAG}" --to "${BASE_REF}" --link-to "${TARGET_TAG}" > "$RAW"
+
+# ① 读 $RAW，把摘要层写进 $SUMMARY（用写文件的工具，不要用 shell 拼中文正文）
+#    $RAW 为空 = 区间内没有用户可感知的变更：只写「## 本次发布」+ 一句「本次无可感知变更」
+# ② 自检：摘要里出现的版本号 / issue 号必须在原文层里找得到
+grep -oE 'v?[0-9]+(\.[0-9]+)+|#[0-9]+' "$SUMMARY" | sort -u | while read -r tok; do
+  grep -qF "$tok" "$RAW" || echo "⚠️ 摘要含原文没有的标识：${tok}" >&2
+done
+# ③ 拼装（原文层非空才加折叠块）
+if [ -s "$RAW" ]; then
+  {
+    cat "$SUMMARY"; echo
+    echo '<details><summary>原始变更记录（自动生成，未改写）</summary>'; echo
+    cat "$RAW"
+    echo; echo '</details>'
+  } > "$BODY"
 else
-  # 无用户可感知变更：正文仍要有一行，Release body 才不会为空
-  printf 'release: %s\n' "${TARGET_TAG}" | tee "$TAG_MSG" > "$BODY"
+  cp "$SUMMARY" "$BODY"
 fi
-cat "$BODY"            # 作为计划卡正文展示；决策走下面的选项
+{ echo "release: ${TARGET_TAG}"; echo; cat "$BODY"; } > "$TAG_MSG"
+cat "$TAG_MSG"         # 作为计划卡正文展示；决策走下面的选项
 ```
+
+摘要层文件若写不进系统临时目录（部分工具把写入范围限制在工作区），改用 `$(git rev-parse --git-dir)/` 下的路径——`.git/` 不进版本控制，也不会让工作区变脏。
 
 首个版本去掉 `--from`。**`--link-to` 不可省**：`--to` 是 `origin/main` 这类远端跟踪名，直接塞进 compare 链接会得到 404；`--link-to` 指向即将打的 tag，推送后链接即有效。compare 链接按平台生成（GitHub/Gitea `/compare/`、GitLab `/-/compare/`；平台未知则不生成链接）。
 
@@ -230,7 +285,18 @@ echo "TAG_PUSH_OK"
 
 **`--cleanup=verbatim` 不可省**：`git tag -F` 默认按 `strip` 清理，会把 `### Features` 这类以 `#` 开头的行当注释整行删掉（`changelog.sh` 输出的正是 Markdown 小标题，已在临时仓库复现）。少了这个参数，注记正文会丢结构，即使正文文件本身完好。
 
-`STATE=TAGGED` 时不重复打，直接进步骤 4。若这次是重跑、本会话没有 `${BODY}`，先按步骤 1 的命令现生成一份（`--to` 用当前的 `BASE_REF`，不需要 `TAG_MSG`），否则 Release body 会是空的。
+`STATE=TAGGED` 时不重复打，直接进步骤 4。若这次是重跑、本会话没有 `${BODY}`，**从 tag 注记读回**，不要重新生成——正文含模型写的摘要层，重算必然与已推送的 tag 漂移：
+
+```bash
+git fetch "${REMOTE}" --tags
+# for-each-ref 会在注记正文后再补一个换行，先去掉尾部空行，读回才与 BODY 逐字一致
+git for-each-ref --format='%(contents)' "refs/tags/${TARGET_TAG}" \
+  | awk '{l[NR]=$0} END{n=NR; while(n>0 && l[n]=="") n--; for(i=1;i<=n;i++) print l[i]}' > "$TAG_MSG"
+tail -n +2 "$TAG_MSG" | sed '1{/^$/d;}' > "$BODY"   # 去掉首行 release: <tag> 及其后的空行
+[ -s "$BODY" ] && echo "BODY_FROM_TAG"
+```
+
+注记确实只有首行（历史上用 `-m` 打过单行 tag）时才退回按步骤 1 现生成原文层；此时**没有摘要层**，回执要注明「注记无正文，Release body 由脚本原文生成」。
 
 ### 4. 创建/校验 Release，再跟踪其他后效
 
@@ -477,6 +543,7 @@ Release 行的其他形态，各自独立、不合并成一句「发布成功」
 - `VERSION_ORIGIN=tag` 时：计划卡已写明「版本以 tag 为准」，且流程没有编造版本号
 - 无论版本源：`LATEST_SEMVER=yes` 时 `<TARGET_TAG>` 必须严格领先 `LATEST_TAG`；多版本线（`TAG_PREFIX_COUNT>1`）必须由用户显式给出完整 `--tag`
 - tag 注记非空且含变更说明（`git for-each-ref --format='%(contents)' refs/tags/<tag>` 可读），首行为 `release: <tag>`
+- 变更说明两层齐全：**摘要层**在前（中文概述 + 分组，无空组、每组 ≤5 条），**原文层**以 `<details>` 折叠**原样**保留；摘要里的版本号 / issue 号均能在原文层找到；`TAGGED` 重跑时 `BODY` 从注记读回，与已推送内容逐字一致
 - Release 项有明确结论：已创建 / 已存在 / 由 CI 创建 / 用户跳过 / 无法创建（含原因与手动命令）/ 创建失败；**已创建或已存在时 notes 非空**
 - 每个探测到的后效都有独立结论（成功 / 失败 / 未知），没有一个被静默跳过
 - 每个需要用户决定的场合都落成了**带选项的提问**（含推荐项与自定义兜底），没有开放式追问、没有「打印现状等人回复」
