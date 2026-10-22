@@ -210,7 +210,7 @@ sequenceDiagram
 |---|---|---|
 | 起点 | 任意分支、任意时机 | 稳定分支（`pr-merge` 之后） |
 | 做什么 | 打 annotated tag 并推送 | 打 tag → **创建/校验平台 Release** → 跟踪其他后效 → 逐项校验 → 回执 |
-| 版本来源 | 用户指定或从分支名推断 | 从稳定分支的 `package.json` 读，或以 tag 为源 |
+| 版本来源 | 用户指定或从分支名推断 | 读仓库判定版本源文件（`--version` + `--version-file` 回查），或直接以 tag 为源 |
 | 平台 Release | **不创建** | **默认创建**（GitHub 用 `gh`、GitLab 用 `glab`；CI 已建则只校验） |
 | 结束标志 | `TAG_PUSH_OK` | `STATE` + Release 结论 + 每项后效的独立结论 |
 | 不做 | 发布、验证 | 改版本号、建无关分支、开无关 PR、回合并、删 Release（写 `CHANGELOG.md` 的唯一例外见下） |
@@ -236,14 +236,14 @@ sequenceDiagram
 
 ```mermaid
 stateDiagram-v2
+    [*] --> NEEDS_TARGET: 没给目标版本
     [*] --> READY: 版本已领先最新 tag，目标 tag 尚不存在
     [*] --> TAGGED: 目标 tag 已存在
-    [*] --> NEEDS_TAG: 无可读清单且未给 tag 参数
-    [*] --> BLOCKED: 版本未领先或 tag 不在主干
+    [*] --> BLOCKED: 未领先 / 多线未指定 / tag 不在主干
+    NEEDS_TARGET --> READY: 定目标版本后重跑
     READY --> TAGGED: 打 tag 并推送
     TAGGED --> TAGGED: 补建/校验 Release（幂等）
-    NEEDS_TAG --> READY: 补 tag 参数
-    BLOCKED --> READY: 先走升版本 PR，再重新预检
+    BLOCKED --> READY: 升版本 PR 或补显式 tag
     TAGGED --> [*]: 出回执
 ```
 
@@ -251,8 +251,8 @@ stateDiagram-v2
 |---|---|---|
 | `READY` | 版本已领先、目标 tag 不存在 | 从选项确认计划卡（tag + Release）→ 打 tag → 建 Release |
 | `TAGGED` | tag 已在（可能刚打完，也可能之前打过） | 跳过打 tag；Release 缺失则补建、已存在则只校验，再跟踪 |
-| `NEEDS_TAG` | 没有可读的版本清单，也没给 `--tag` | 用选项索取目标 tag（`v0.1.0` / `v1.0.0` / 自定义） |
-| `BLOCKED` | 有阻断项 | 按 `BLOCKERS` 给对应选项，通常先走升版本 PR |
+| `NEEDS_TARGET` | 既没 `--version` 也没 `--tag` | **读仓库**定目标版本（脚本不认识任何清单格式，先验见 `version-conventions.md`），再带输入重跑；不是让用户凭空报 tag |
+| `BLOCKED` | 有阻断项 | 按 `BLOCKERS` 给对应选项，通常先走升版本 PR，或补一个显式 `--tag` |
 
 ### 决策点：给选项，不出填空题
 
@@ -306,7 +306,7 @@ sequenceDiagram
     participant G as git
     participant H as 平台 API（gh/glab）
     participant CI as CI（tag 触发）
-    participant E as 其他产物（npm / 镜像）
+    participant E as 发布产物（包仓库 / 镜像 / 部署）
 
     U->>A: 发版
     A->>PF: 只读预检
@@ -316,7 +316,7 @@ sequenceDiagram
     H-->>PF: 平台 / CLI / Release 是否存在
     PF-->>A: STATE、TARGET_TAG、Release 计划、后效
     A->>A: changelog.sh 汇总变更说明（BODY 冻结）
-    A-->>U: 计划卡：版本 / tag / 说明 / Release / 后效
+    A-->>U: 计划卡：版本源 / 说明 / Release / 后效
     U-->>A: 从选项中选择（一次问全）
     A->>G: tag -a -F TAG_MSG → push
     A->>H: release create（不存在且非 CI 负责）
@@ -337,11 +337,16 @@ sequenceDiagram
 
 ```bash
 # 在仓库根执行（脚本自行定位 git 顶层）
-bash skills/git-kit/scripts/release-preflight.sh
-bash skills/git-kit/scripts/release-preflight.sh --tag v1.1.0   # 无可读版本清单时
+bash skills/git-kit/scripts/release-preflight.sh                                  # 只拿事实
+bash skills/git-kit/scripts/release-preflight.sh --version 1.1.0 --version-file <版本源文件>
+bash skills/git-kit/scripts/release-preflight.sh --tag v1.1.0                     # 注入型/无清单：tag 即版本源
+bash skills/git-kit/scripts/release-preflight.sh --version 1.1.0 --version-file package.json --require-version-match
+                                                                                  # CI 硬校验版本的仓库才加严格模式
 ```
 
-选项有 `--remote`、`--pkg`、`--tag`、`--no-fetch`、`--no-npm`、`--no-release-check`（跳过远端 Release 查询）、`--platform`（覆盖平台判定，自建域名/夹具用）；退出码 `0` 可继续 / `2` 有阻断项 / `1` 参数或环境错误。
+选项有 `--remote`、`--version` / `--version-file`、`--tag`、`--require-version-match`（回查失败即阻断）、`--changelog`（指定 CHANGELOG 路径）、`--no-fetch`、`--no-release-check`（跳过远端 Release 查询）、`--platform`（覆盖平台判定，自建域名/夹具用）；退出码 `0` 可继续 / `2` 有阻断项 / `1` 参数或环境错误。
+
+**脚本不认识任何版本清单格式**：哪种仓库属于哪类版本约定（npm / Cargo / Go 注入 / setuptools-scm / `${revision}` / Dart `+build` / Helm 双版本…）由调用方读仓库判断，先验与每类现成命令在 `references/version-conventions.md`。脚本只做三件通用事：从已有 tag 推断命名样式、比较版本大小、可选回查（边界匹配 + 回报行号 + 失败给 `VERSION_FILE_HINT`）。
 
 | 输出 | 含义 |
 |---|---|
@@ -351,33 +356,39 @@ bash skills/git-kit/scripts/release-preflight.sh --tag v1.1.0   # 无可读版�
 | `EFFECT_RELEASE` | `workflow`（CI 会建）/ `none`（本流程默认建） |
 | `RELEASE_EXISTS` / `RELEASE_PRERELEASE` | 目标 tag 的 Release 是否已存在；版本是否预发布 |
 | `CI_SYSTEM` / `GITLAB_TAG_CI` | 本仓 CI 体系；GitLab 是否有 tag 触发流水 |
-| `VERSION_SOURCE` | `manifest`（读 `package.json`）或 `tag`（以 tag 为版本源） |
-| `PKG_VERSION` / `TARGET_TAG` | 当前版本、将要打的 tag |
-| `PKG_CANDIDATES` | 多包仓库里可选的发布包（配 `--pkg` 指定） |
+| `VERSION_ORIGIN` | `declared`（给了 `--version`）/ `tag`（以 tag 为源）/ `none`（未给 → `NEEDS_TARGET`） |
+| `VERSION` / `VERSION_FILE` / `VERSION_IN_FILE` | 目标版本、声明的版本源文件、该文件里是否真有这个**完整 token**（`1.2.3` 不命中 `1.2.3+45`） |
+| `VERSION_FILE_LINE` / `VERSION_FILE_TEXT` / `VERSION_FILE_HINT` | 命中行号 / 该行原文（计划卡直接贴）/ 没命中时该文件在稳定分支上的实际版本号 |
+| `TARGET_TAG` / `TAG_PREFIX` / `TAG_PREFIX_COUNT` / `TAG_STYLE` | 将要打的 tag、沿用的前缀（`v` / `demo-` / `sub/v` / 空）、前缀种类数（>1 = 多版本线） |
+| `LATEST_TAG` / `LATEST_TAG_BY_DATE` | 版本号最大的 tag / 时间最新的 tag（两者不同会报 `latest-tag-order-conflict`） |
 | `TAG_EXISTS` / `TAG_ON_BASE` | tag 是否已存在、是否在稳定分支历史上 |
-| `LATEST_SEMVER` | 最新 tag 能否参与版本比较（`v` 前缀不是判据） |
+| `LATEST_SEMVER` | 是否存在可比较的版本 tag（`nightly-*` 之类会被跳过并告警） |
 | `TAG_WORKFLOWS` | GitHub 下 `on: tags:` 的 workflow 列表（空 = 未检测到） |
-| `EFFECT_NPM` | 是否探测到 npm 发布后效 |
-| `NPM_PUBLISHED` | `yes` / `no` / `unknown` / `skipped` |
+| `EFFECT_HINTS` | 像发布步骤的未注释行（`file:line: 原文`）——只是证据，不是结论 |
 | `COMMITS` / `TOTAL_COMMITS` | 变更说明收录数 / 区间总提交数 |
 | `STATE` / `WARN` / `BLOCKERS` | 流程状态、非阻断提醒、阻断项 |
 
-阻断项与提醒性质不同，处置也不同。**阻断项都会让流程停下**：除「无版本源」是 `NEEDS_TAG` 外，其余一律把 `STATE` 置为 `BLOCKED`（`STATE` 才是流程驱动量）：
+阻断项与提醒性质不同，处置也不同。**阻断项都会让流程停下**：除「没给目标版本」是 `NEEDS_TARGET` 外，其余一律把 `STATE` 置为 `BLOCKED`（`STATE` 才是流程驱动量）：
 
 | 类型 | 值 | 处置 |
 |---|---|---|
-| 阻断 | `no-version-source` | 用选项索取 `--tag`（`v0.1.0` / `v1.0.0` / 自定义）或先补版本清单 |
+| 阻断 | `target-version-unset` | 先按「读仓库定目标版本」拿到版本，再带 `--version`/`--tag` 重跑 |
 | 阻断 | `version-not-ahead-of-tag` | 给选项 `升 patch`（推荐）/ `升 minor` / `升 major` / `只跟踪现有 tag`，再走升版本 PR，**不在 release 里改版本号** |
 | 阻断 | `tag-not-on-base` | tag 打错分支：给选项 `停止`（推荐）/ `授权删 tag 重打`（不可逆） |
-| 阻断 | `tag-version-mismatch` | 给选项 `先升版本到 <tag 版本>`（推荐）/ `改用清单版本作 tag` / `停止` |
-| 提醒 | `npm-unknown` | 查不了（网络/缓存），不是"未发布" |
+| 阻断 | `target-tag-ambiguous` | 多条版本线（`TAG_PREFIX_COUNT>1`）却只给了 `--version`：按前缀列候选让用户选线，或让用户给完整 `--tag` |
+| 阻断 | `version-not-in-declared-file` | **仅 `--require-version-match`**：声明值与文件不符，改用 `VERSION_FILE_HINT` 的真实值 / 先合并版本 PR / 去掉严格模式 / 停止 |
+| 阻断 | `tag-version-mismatch` | 给选项 `先升版本到 <tag 版本>`（推荐）/ `改用声明版本作 tag` / `停止` |
+| 提醒 | `version-file-undeclared` | 声明了版本却没给文件：无法回查一致性，计划卡必须标注「未回查」 |
+| 提醒 | `version-declaration-unverified` | 回查没命中（默认不阻断）：多半是派生/注入型仓库，或版本还没合并；看 `VERSION_FILE_HINT` |
+| 提醒 | `version-origin-tag` | 版本以 tag 为准（注入型/无版本文件仓库的常态） |
+| 提醒 | `mixed-tag-prefixes` | tag 有多个不同前缀（多版本线/monorepo 多包）：不猜，要求给完整 tag |
 | 提醒 | `release-cli-missing` | 本平台 CLI 不在 PATH：Release 降级为手动，打 tag 照常 |
 | 提醒 | `release-auth-missing` | CLI 未登录该 host：同上，提示先登录 |
 | 提醒 | `release-host-unknown` | 自建/非 GitHub/GitLab：不猜 API，只给手动命令 |
 | 提醒 | `release-check-unknown` | 查询 Release 失败：不能断言不存在，`TAGGED` 时不冒险创建 |
 | 提醒 | `dirty-worktree` | 不阻断：打 tag 不碰工作区 |
-| 提醒 | `latest-tag-not-semver` | tag 无法与版本比较（守卫跳过），改由计划卡的 tag 确认兜底 |
-| 提醒 | `multiple-publish-packages` | 按 `PKG_CANDIDATES` 用 `--pkg` 指定发布包 |
+| 提醒 | `no-version-like-tags` | 有 tag 但没有一个能解析成版本号：版本比较守卫失效，改由计划卡的 tag 确认兜底 |
+| 提醒 | `latest-tag-order-conflict` | 版本号最大的 tag 不是时间最新的：可能在新/旧版本线间切换 |
 | 提醒 | `commits-truncated` | 变更说明超 300 条，需要时给 `changelog.sh` 加 `--max` |
 
 ### 后效：探测，不假设
@@ -387,17 +398,17 @@ bash skills/git-kit/scripts/release-preflight.sh --tag v1.1.0   # 无可读版�
 | 信号 | 探测依据 | 校验 / 动作 |
 |---|---|---|
 | 发布流水 | GitHub：workflow 的 `on:` 段含 `tags:`；GitLab：`.gitlab-ci.yml` 含 `CI_COMMIT_TAG` | 每个 workflow / pipeline 的结论（GitHub 按 `headBranch == tag`，GitLab 按 `--ref <tag>`） |
-| npm | `package.json` 有 `publishConfig`，或 workflow 含 `npm publish` | `npm view <name>@<version>` |
+| 发布步骤 | `EFFECT_HINTS`：未注释行里出现 `publish` / `upload` / `release create` / `action-gh-release` | 读这几行判断发布到哪；产物有公开地址就 `--probe-url` 探测（2xx/404/未知三档），否则以流水结论为准 |
 | 平台 Release | GitHub：tag workflow 含 `action-gh-release` / `gh release create`；GitLab：`.gitlab-ci.yml` 含 `release:` / `glab release create` | CI 建则 `gh/glab release view` 校验 notes；CI 不建则**本流程默认创建** |
 | 镜像 / 文档站 / 部署 | **不探测** | 标「未检测到」；需跟踪时用选项问「继续（推荐）/ 指定产物与校验方式」 |
 
 三种仓库跑同一套流程的结果：
 
-| 仓库形态 | `TAG_WORKFLOWS` | `EFFECT_NPM` | `EFFECT_RELEASE` | 回执里出现的行 |
+| 仓库形态 | `TAG_WORKFLOWS` | `EFFECT_HINTS` | `EFFECT_RELEASE` | 回执里出现的行 |
 |---|---|---|---|---|
-| npm 包（如插件仓 `morehao/dsh-commands`） | `release.yml` | `yes` | `none` | Release ✅ + 流水 ✅ + npm ✅ |
-| 容器镜像 | `image.yml` | `no` | `none` | Release ✅ + 流水 ✅ |
-| 无 workflow | 空 | `no` | `none` | Release ✅ + 明确写「未检测到 tag 触发的发布流水」 |
+| 发 npm 包的仓（如插件仓 `morehao/dsh-commands`） | `release.yml` | `release.yml:31: npm publish` | `none` | Release ✅ + 流水 ✅ + 产物 ✅（`--probe-url` 或 `--npm-pkg`） |
+| 发容器镜像的仓 | `image.yml` | `image.yml:24: docker push ...` | `none` | Release ✅ + 流水 ✅（产物无公开地址 → 以流水为准） |
+| 无 workflow 的仓 | 空 | 空 | `none` | Release ✅ + 明确写「未检测到 tag 触发的发布流水」 |
 
 **探测不到 ≠ 没有后效。** 报告写「未检测到可校验的后效」，不写「无后效」，也不把没探到的东西当失败。探测只看**未注释**的行——workflow / `.gitlab-ci.yml` 头部注释常提到 `tags:` / `release:` / `npm publish`，注释不算后效。GitHub 之外的平台不再一律标「流水状态未知」：GitLab 用 `glab ci list --ref <tag>` 跟踪；Gitea/未知平台才标「流水状态未知」，并给选项「继续按可得信息出回执 / 停止，人工核对后再跑」。
 
@@ -456,16 +467,17 @@ git tag -a --cleanup=verbatim "${TARGET_TAG}" -F "$TAG_MSG" "${BASE_REF}"
 | CI 声称会建 Release 但缺失 | 流水跟踪完给选项「由本流程补建 Release / 只报告」 |
 | workflow 失败 | **不删 tag 重打**（tag 不可变）：给 run 链接 + 选项「只报告 / 重跑（仅 GitHub）/ 下个版本」 |
 | workflow 仍在跑 | 可中止；重跑从 `TAGGED` 继续跟踪，不会重复打 tag |
-| npm / Release 查不了 | 报「未知」，不并入成功也不判失败 |
+| 产物 / Release 查不了 | 报「未知」，不并入成功也不判失败 |
 | tag 打错分支 | `STATE=BLOCKED` + `tag-not-on-base`；给选项「停止 / 授权删除重打」（不可逆） |
-| `--tag` 与清单版本不一致 | `STATE=BLOCKED` + `tag-version-mismatch`；给选项「先升版本 / 改用清单版本作 tag / 停止」，不静默改目标 |
+| 声明版本不在声明文件里 | `STATE=BLOCKED` + `version-not-in-declared-file`；先回查原文（预检读的是稳定分支上的文件，未合并的改动不算），再给选项 |
+| `--tag` 与声明版本不一致 | `STATE=BLOCKED` + `tag-version-mismatch`；给选项「先升版本 / 改用声明版本作 tag / 停止」，不静默改目标 |
 
 ### 发版段的边界
 
 - **两个远端写操作**：推送 tag + 创建平台 Release。Release 只由「平台支持 + CLI 已登录 + CI 不负责 + 用户没选只打 tag」触发，不额外越界
-- **不做**：改 `package.json`、改代码、删/重打 tag、force push、删 Release、改 Release notes（用户明确要求补 notes 时先问）、`npm unpublish`（只能 `deprecate`）、改 workflow、代跑发布脚本
+- **不做**：改任何版本源文件（不经升版本 PR）、改代码、删/重打 tag、force push、删 Release、改 Release notes（用户明确要求补 notes 时先问）、撤销已发布的包（npm 只能 `deprecate`）、改 workflow、代跑发布脚本
 - **唯一越界写文件**：用户选择写 `CHANGELOG.md` 时，建**一个** `docs/changelog-<tag>` 分支并走一次 `pr-create` → `pr-merge`；不选则完全不碰工作区
-- **不假设**：不内置"发版必须发 npm"这类判断；npm 只是探测到才校验的一项后效。也不假设 Release 一定由 CI 建或一定由本流程建——按探测结果与用户选择
+- **不假设**：不内置"发版必须发 npm"、也不内置"版本一定写在 package.json"这类判断——版本源靠读仓库声明，产物靠 `--probe-url` 现场决定。也不假设 Release 一定由 CI 建或一定由本流程建——按探测结果与用户选择
 - **不替代**：`tag`（任意分支打标签，不建 Release）、`pr-merge`（合并本身）
 
 ## 维护类分支
@@ -485,6 +497,7 @@ git tag -a --cleanup=verbatim "${TARGET_TAG}" -F "$TAG_MSG" "${BASE_REF}"
 | 决策点怎么问（选项形状与推荐项） | `references/ask-options.md` |
 | 某个流程的步骤/验收 | `references/<分支>.md` |
 | 机械动作（预检、变更说明、瘦身） | `scripts/*.sh` |
+| 回归测试（改脚本后必跑） | `scripts/tests/release-preflight-test.sh`、`scripts/tests/release-verify-test.sh`（临时仓 + PATH 桩，不需要 node/网络） |
 | 加一个新入口（新命令） | `commands-opencode/git/*.md`，或 dsh 插件仓（另一仓）的 `lib/index.js`，**只加声明** |
 | 本文档的图 | `docs/assets/`（SVG）或本文内联的 Mermaid 块 |
 
@@ -501,13 +514,14 @@ git tag -a --cleanup=verbatim "${TARGET_TAG}" -F "$TAG_MSG" "${BASE_REF}"
 ### 发版
 
 1. **"release 会顺手把版本号升了"** —— 不会。升版本属于前置 PR，release 只读取它。
-2. **"发版一定要发 npm"** —— 那是「发 npm 的仓库（如插件仓）」的后效，不是通用规律；Go / 容器 / 静态站仓库的同一流程不会出现 npm 那一行。
+2. **"发版一定要发 npm"** —— 那是「发 npm 的仓库（如插件仓）」的后效，不是通用规律；Go / 容器 / 静态站仓库的同一流程不会出现产物那一行。
 3. **"tag 打错了，改一下"** —— tag 推送后不可编辑，只能删了重打，且需要用户授权；所以注记正文与目标 sha 都要在推送前确认。
 4. **"没检测到发布流水就是没发出去"** —— 只说明本仓没有 tag 触发的 workflow/pipeline，或者发布走的是别的方式（手动、外部流水）；报告只呈现事实。
-5. **"npm 查不到就是发布失败"** —— 可能是缓存/网络导致查不了（`NPM_PUBLISHED=unknown`），两者要分开报。
-6. **"Release 是额外的可选项，默认不建"** —— 反面。Release 是默认交付物：能建就建（不需要额外确认），只有用户显式选「只打 tag」或平台/CLI 不可用才降级。
-7. **"CI 会建 Release，所以本流程什么都不用管"** —— 探测到 `EFFECT_RELEASE=workflow` 只是不重复建；流水失败导致 Release 缺失时仍要给「补建」选项，不能静默放过。
-8. **"把预检结果打印出来，然后问『要不要发版』"** —— 这是开放式追问，等于把「有哪些选择、各自代价」丢回给用户。该给的是选项：按此发版（tag + Release）/ 只打 tag / 取消 / 改说明，外加 CHANGELOG 一题（见 `references/ask-options.md`）。
+5. **"产物查不到就是发布失败"** —— 可能是网络/缓存导致查不了（`PROBE_STATUS=unknown`），与「不可见」要分开报。
+6. **"版本号一定在 package.json 里"** —— git-kit 不认识任何清单格式，版本源是**读仓库得出的判断**；脚本只回查「声明的文件里有没有这个版本」，所以 Cargo 仓、无清单仓、`VERSION` 文件仓走的是同一条流程；读不出就让 `--tag` 当版本源，绝不编版本号。
+7. **"Release 是额外的可选项，默认不建"** —— 反面。Release 是默认交付物：能建就建（不需要额外确认），只有用户显式选「只打 tag」或平台/CLI 不可用才降级。
+8. **"CI 会建 Release，所以本流程什么都不用管"** —— 探测到 `EFFECT_RELEASE=workflow` 只是不重复建；流水失败导致 Release 缺失时仍要给「补建」选项，不能静默放过。
+9. **"把预检结果打印出来，然后问『要不要发版』"** —— 这是开放式追问，等于把「有哪些选择、各自代价」丢回给用户。该给的是选项：按此发版（tag + Release）/ 只打 tag / 取消 / 改说明，外加 CHANGELOG 一题（见 `references/ask-options.md`）。
 
 ## 参考
 

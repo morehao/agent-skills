@@ -15,7 +15,7 @@
    - 其余：`<目标仓库>/<branch>` 中 `git log <latest-tag>..<目标仓库>/<branch>` 有提交的分支（比最新 tag 新、值得打 tag）；无 tag 时列出全部远端分支
    - 展示编号让用户选（1/2/3…），也允许用户直接输入分支名；**用选项式提问呈现**（`references/ask-options.md`），不要只列编号等用户回一句话
 5. **候选 tag（让用户选）**：
-   - **先核对发布包版本**：读发布包目录的 `package.json` 的 `version`（`--pkg` 可指定；本仓无发布包时按 tag 为版本源），候选 tag 须与其一致，详见下方「发版约束」
+   - **先核对版本声明**：读仓库确认版本写在哪个文件（由发布脚本/workflow 引用决定，**不凭文件名猜**），候选 tag 须与其值一致；仓库确实不声明版本时以 tag 自身为版本源，详见下方「发版约束」。核对可用 `scripts/release-preflight.sh --version <v> --version-file <路径>` 回查（`VERSION_IN_FILE=yes` 才算一致）
    - 有最新 tag 且为 semver（`v?X.Y.Z`）：按递增档提议 3 个候选 patch/minor/major（如 `v1.2.3` → `v1.2.4` / `v1.3.0` / `v2.0.0`），沿用现有 tag 的 `v` 前缀风格
    - **无 tag**：提议首个版本 `v0.1.0` 与 `v1.0.0`（默认 `v` 前缀）
    - 选择含 `release` 的分支且分支名带版本号时，候选 tag 优先从分支名推断（如 `release/2.0.0`、`release-v2.0` → `v2.0.0`），作为第 1 个候选
@@ -43,13 +43,14 @@
 
 ## 发版约束（目标仓库的 `v*` tag 会触发发布时必读）
 
-若打了 `v*` tag 会触发发布工作流（本仓**没有**发布工作流，发 npm 的仓才需要：如 `.github/workflows/release.yml` → 发布脚本），打 tag 前必须先对齐版本号：
+若打了 `v*` tag 会触发发布流水（有没有、哪条流水，由 `release-preflight.sh` 的 `TAG_WORKFLOWS` / `GITLAB_TAG_CI` 与 `EFFECT_HINTS` 给出），打 tag 前必须先对齐版本号：
 
-- **硬守卫**：tag 版本（去掉 `v` 前缀）必须等于发布包 `package.json` 的 `version`（发布包目录由 `--pkg` 指定；本仓无发布包时按 tag 为版本源），否则发布脚本直接 `exit 1` 拒绝发布。不一致的 tag **不会误发**，但会白占一个 tag 名 + 留一条失败 run（tag 已推送，改名须删除重打）。
-- **顺序**：候选 tag 与当前版本不一致时 → **先升版本**：改 `package.json` 的 `version` → 走 `commit-push`（起点是稳定分支时自动建分支）→ 走 `pr-create` 建 PR → 合并 `main`，**合并后**才在本流程打 tag（tag 指向 `main` 的最新提交，即含升版本的那次合并提交）。发布包所在仓的发版手册（若有 `PUBLISHING.md`）里有「日常发新版」，本仓无发布包则只按本条打 tag。
+- **硬守卫**：tag 版本（去 `v`/前缀）必须等于**该流水读取的版本声明值**。哪个文件是版本源是**读仓库得出的判断**（看发布脚本/workflow 里引用的是哪个文件、哪个字段），git-kit 不内置清单表；仓库不声明版本时以 tag 自身为版本源。不一致的 tag **不会误发**，但会白占一个 tag 名 + 留一条失败 run（tag 已推送，改名须删除重打）。
+- **通用回查**：`scripts/release-preflight.sh --version <v> --version-file <路径>` 会做边界匹配（`1.2.3` 不会命中 `1.2.3+45`）并回报命中行号；发布流水会硬校验版本的仓库加 `--require-version-match`（回查失败即阻断），派生/注入型仓库只给 `--tag` 即可。`--tag` 与 `--version` 不一致会给出 `BLOCKERS=tag-version-mismatch`。各类约定的现成命令见 `references/version-conventions.md`。
+- **顺序**：候选 tag 与当前版本不一致时 → **先升版本**：改版本源文件里的 `version` → 走 `commit-push`（起点是稳定分支时自动建分支）→ 走 `pr-create` 建 PR → 合并 `main`，**合并后**才在本流程打 tag（tag 指向 `main` 的最新提交，即含升版本的那次合并提交）。仓库发版手册（若有 `PUBLISHING.md` / `RELEASING.md`）里有「日常发新版」，没有则只按本条打 tag。
 - 升版本提交**不得**直接落在稳定分支上——发版不构成例外（`references/stable-branch.md`）。
 - **不得**为绕过守卫擅自打不一致的 tag；用户明确要求「只打 tag、不管发布」时才照办，并在报告中写明发布工作流预期会失败。
-- 幂等：npmjs 已存在该版本 → 工作流跳过（exit 0），重复打 tag 不会重复发布。
+- 幂等：发布产物已存在该版本时工作流通常跳过（exit 0），重复打 tag 不会重复发布——失败重跑也按这条如实报告。
 
 ## 注意事项
 
@@ -66,4 +67,4 @@
 - 未真正创建/推送（只列候选/只给文字）即失败，继续执行
 - 任一步报错（网络/权限/tag 冲突/分支不存在）→ 停并完整报告原始报错，不伪造成功
 - 当前分支与工作区保持不变（打 tag 不改文件；升版本属前置的 `commit-push` + `pr-create` 流程，不在本分支内做）
-- 有发布工作流时：tag 版本 == 发布包 `package.json` 版本，或有用户明确的「只打 tag 不发布」授权（见「发版约束」）
+- 有发布流水时：tag 版本 == 版本源文件里的声明值（`VERSION_IN_FILE=yes`），或有用户明确的「只打 tag 不发布」授权（见「发版约束」）

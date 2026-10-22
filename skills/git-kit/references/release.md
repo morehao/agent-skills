@@ -4,7 +4,7 @@
 
 **三条必须守住的边界（否则会把某个仓库或某个平台的习惯当成通用规律）：**
 
-1. **版本来源因仓而异**：有可发布清单（`package.json`）就读它的 `version`；Go/Rust 等没有清单的仓库，**tag 本身就是版本源**，靠 `--tag` 传入。
+1. **版本来源因仓而异，且不由脚本预设**：版本声明在哪个文件里，是**读仓库得出的判断**，不是 git-kit 的内置知识——脚本里没有 `package.json` / `Cargo.toml` / `pyproject.toml` 之类的分支；主流约定与每类的现成命令见 `references/version-conventions.md`。脚本只做三件通用事：**从已有 tag 推断命名样式**（`v` / `demo-` / `sub/v` / `+build`）、**比较版本大小**、**可选回查**（绑定行号的边界匹配，失败默认只提醒，`--require-version-match` 才阻断）。声明不出来就退回 `--tag`，**tag 本身就是版本源**——「仓库没有字面版本」是一等公民，不是异常。
 2. **Release 能力因平台而异**：GitHub 用 `gh`，GitLab 用 `glab`；host、平台、CLI、登录状态、Release 是否已存在全部由预检**探测**。平台未知（自建/非 GitHub/GitLab）时**不猜 API**，降级为「只打 tag + 给手动命令」。
 3. **tag 之后发生什么因仓而异**：npm 包、容器镜像、文档站、CI 建的 Release，或者什么都不做。git-kit **只探测、只跟踪、只如实报告**，绝不断言"发版成功"。
 
@@ -39,7 +39,7 @@ Release 的 title/name = tag 名；body = tag 注记里除首行 `release: <tag>
 |---|---|---|
 | `TAG_WORKFLOWS` | GitHub：`.github/workflows/*.yml` 的 `on:` 段含 `tags:`（`jobs:` 之前） | 每个 workflow 的 run 结论 |
 | `EFFECT_RELEASE` | GitHub：tag workflow 含 `action-gh-release` / `gh release create`；GitLab：`.gitlab-ci.yml` 由 `CI_COMMIT_TAG` 触发且含 `release:` / `glab release create` | CI 建则校验；CI 不建则**默认由本流程创建** |
-| `EFFECT_NPM` | `package.json` 有 `publishConfig`，或任一 workflow 含 `npm publish` | `npm view <name>@<version>` |
+| `EFFECT_HINTS` | 未注释行里出现 `publish` / `upload` / `release create` / `action-gh-release`，输出 `file:line: 原文` | 由你读这几行判断发布到哪；能公开查询的产物用 `--probe-url` 校验，否则以流水结论为准 |
 | `RELEASE_EXISTS` | `gh release view` / `glab release view`（未登录/查不了 → `unknown`） | 决定「创建」还是「只校验」 |
 | 其他（镜像 / 文档站 / 部署） | **不探测** | 记为"未检测到"；确需跟踪时用选项问「继续（推荐）/ 指定产物与校验方式」，不猜 |
 
@@ -51,18 +51,55 @@ Release 的 title/name = tag 名；body = tag 注记里除首行 `release: <tag>
 
 ### 0. 预检（只读）
 
+脚本**只给事实**：远端/平台/CLI、稳定分支、tag 序列与**命名样式**、CI 触发信号、CHANGELOG、提交统计、Release 存在性。它不认识任何版本清单格式——所以「哪个文件是版本源」由你读仓库给出（先验知识见 `references/version-conventions.md`）：
+
 ```bash
-bash scripts/release-preflight.sh              # 无清单仓库加 --tag v1.1.0
+bash scripts/release-preflight.sh                                           # 只拿事实（通常先看一眼）
+bash scripts/release-preflight.sh --version 1.2.3 --version-file Cargo.toml  # 声明版本 + 回查
+bash scripts/release-preflight.sh --tag v1.2.3                              # 注入型/无清单仓库：tag 即版本源
+bash scripts/release-preflight.sh --version 1.0.9 --version-file package.json --require-version-match
+                                                                            # CI 硬校验版本的仓库才加严格模式
 ```
 
-读 `HOST`、`REPO_ID`、`RELEASE_PLATFORM`、`RELEASE_CLI`、`RELEASE_CLI_READY`、`EFFECT_RELEASE`、`RELEASE_EXISTS`、`RELEASE_PRERELEASE`、`CI_SYSTEM`、`GITLAB_TAG_CI`、`VERSION_SOURCE`、`PKG_VERSION`、`PKG_CANDIDATES`、`TARGET_TAG`、`TAG_EXISTS`、`TAG_ON_BASE`、`LATEST_SEMVER`、`CHANGELOG`、`CHANGELOG_HAS_VERSION`、`COMMITS`/`TOTAL_COMMITS`、`TAG_WORKFLOWS`、`EFFECT_NPM`、`NPM_PUBLISHED`、`STATE`、`BLOCKERS`、`WARN`。
+**输入至少要给一个**（`--version` 或 `--tag`）；两个都不给时 `STATE=NEEDS_TARGET`——它说的是「这次要发哪个版本还没定」，与「仓库有没有版本信息」无关。
+
+读 `HOST`、`REPO_ID`、`RELEASE_PLATFORM`、`RELEASE_CLI`、`RELEASE_CLI_READY`、`EFFECT_RELEASE`、`RELEASE_EXISTS`、`RELEASE_PRERELEASE`、`CI_SYSTEM`、`GITLAB_TAG_CI`、`VERSION_ORIGIN`、`VERSION`、`VERSION_FILE`、`VERSION_IN_FILE`、`VERSION_FILE_LINE`、`VERSION_FILE_TEXT`、`VERSION_FILE_HINT`、`LATEST_TAG`、`LATEST_TAG_BY_DATE`、`TAG_STYLE`、`TAG_PREFIX`、`TAG_PREFIX_COUNT`、`LATEST_SEMVER`、`TARGET_TAG`、`TAG_EXISTS`、`TAG_ON_BASE`、`CHANGELOG`、`CHANGELOG_HAS_VERSION`、`COMMITS`/`TOTAL_COMMITS`、`FEAT`/`FIX`/`BREAKING`、`TAG_WORKFLOWS`、`EFFECT_HINTS`、`STATE`、`BLOCKERS`、`WARN`。
 
 | STATE | 含义 | 动作 |
 |---|---|---|
 | `READY` | 目标 tag 尚未存在 | 步骤 1 →（可选 2）→ 3 → 4（默认创建 Release） |
 | `TAGGED` | tag 已存在 | **跳过步骤 2 与 3**：tag 正文不可改，CHANGELOG 也无从补入；直接进步骤 4（**Release 缺失则补建**，重跑即幂等） |
-| `NEEDS_TAG` | 无清单且未给 `--tag` | 停，**用选项**索取目标 tag（`v0.1.0` / `v1.0.0` / 自定义，另可 `先补版本清单`） |
-| `BLOCKED` | 版本没领先 tag / tag 不在稳定分支历史 / `--tag` 与清单版本不一致 | 停，按 `BLOCKERS` **给对应选项**（见步骤 1 的 BLOCKED 选项表），不是「说明完就结束」 |
+| `NEEDS_TARGET` | 既没 `--version` 也没 `--tag` | 先做 **0.1 定目标版本**（读仓库），再带输入重跑；**不是**拿这个状态去问用户要 tag |
+| `BLOCKED` | 版本没领先 tag / tag 不在稳定分支历史 / 多版本线却只给了版本号 / `--tag` 与 `--version` 不一致 /（严格模式下）声明版本不在文件里 | 停，按 `BLOCKERS` **给对应选项**（见步骤 1 的 BLOCKED 选项表），不是「说明完就结束」 |
+
+#### 0.1 定目标版本（读仓库，脚本不替你判断）
+
+脚本不知道版本写在哪个文件，但它**不需要**知道：发版的输入是「这次发哪个版本」，声明文件只是可选证据。三类主题先验（含每一类的现成命令）在 `references/version-conventions.md`：字面常量型、派生/注入型、无版本概念型。
+
+**由你（模型）读仓库，不需要让用户手报版本号**：`--version 1.2.3 --version-file Cargo.toml` 的语义是一句话——「本版版本是 1.2.3，它写在 `Cargo.toml` 里」。脚本不解析这个文件，只做两件通用事：
+
+- **边界匹配回查**：`git show ${BASE_REF}:Cargo.toml` 里是否有这个版本号这个**完整 token**（`1.2.3` 不会命中 `1.2.34` 或 `1.2.3+45`），命中则回报 `VERSION_FILE_LINE` / `VERSION_FILE_TEXT`，让你在计划卡里贴真凭据（例如 Helm 的 `appVersion` 与 `version` 两处）。
+- **失败时给线索**：`VERSION_IN_FILE=no` 时给 `VERSION_FILE_HINT`（该文件在稳定分支上实际是哪个版本号），多数情况下这说明「升版本 PR 还没合并」或「指错了文件」。
+
+1. 先看预检事实：`LATEST_TAG` / `TAG_PREFIX` / `LATEST_SEMVER` / `LATEST_TAG_BY_DATE`，以及 `COMMITS`/`FEAT`/`FIX`/`BREAKING`（用于提议下一个版本号）。
+2. 再读仓库定位版本声明：从 README / PUBLISHING / 发布 workflow 里看发布脚本读的是哪个文件、哪个字段。**不要凭文件名猜**（同名文件可能只是工具配置）。三条与语言无关的取证命令：
+
+   ```bash
+   # ① 发布流水自己引用了哪个文件/字段
+   git grep -n -iE 'version|bump' -- .github/workflows .gitlab-ci.yml 2>/dev/null | head -20
+   # ② 仓库里哪些文件含「你预期的下一版」这个字符串（把 1.2.3 换成推算出的版本）
+   git grep -n -F '1.2.3' -- . ':!*.lock' 2>/dev/null | head -20
+   # ③ 发版文档里怎么写「日常升版本」
+   git grep -n -iE 'version|bump|release' -- README.md CONTRIBUTING.md PUBLISHING.md RELEASING.md 2>/dev/null | head -20
+   ```
+
+3. 声明与回查的分级（这是通用性的关键）：
+   - **字面常量型**（清单里就是 `version = "1.2.3"`）：声明 `--version` + `--version-file`，回查应 `yes`。
+   - **派生 / 注入型**（Go 的 `-ldflags`、Python 的 `setuptools-scm`、Maven 的 `${revision}`、Composer 不写 version）：**只用 `--tag`**，不传 `--version-file`；如果非要用 `--version`，回查失败只是 `WARN=version-declaration-unverified`，不阻断。
+   - **CI 会硬校验版本**（发布脚本版本不符就 `exit 1`）：加 `--require-version-match`，回查失败才 `BLOCKED`。这是**显式声明的严格性**，不是脚本猜出来的。
+   - 文件必须是**稳定分支上已存在**的（预检读 `${BASE_REF}:<path>`；工作区改了但没合并的不算）；`no` 时先看 `VERSION_FILE_HINT`。
+4. 计划卡里必须写出证据：`<文件>:<行号> → <该行原文>`，或「未回查（注入型，真值来自 tag）」。只写结论等于拿猜的当事实。
+5. 多版本线：`TAG_PREFIX_COUNT>1` 时**只给 `--version` 会 BLOCKED/target-tag-ambiguous**（不替你在 `a-v*`/`b-v*` 之间猜）；给完整 `--tag` 即可放行。
 
 `WARN` 不阻断，但决定了 Release 的默认动作：
 
@@ -73,24 +110,29 @@ bash scripts/release-preflight.sh              # 无清单仓库加 --tag v1.1.0
 | `release-host-unknown` | 自建/非 GitHub/GitLab → 不猜 API，只给手动命令 |
 | `release-check-unknown` | 有 CLI 但查询失败 → 不能断言已存在；`TAGGED` 时不冒险创建 |
 | `dirty-worktree` | 不影响打 tag |
-| `npm-unknown` | 查不了而非未发布 |
-| `latest-tag-not-semver` | tag 无法与版本号比较（守卫跳过），改由计划卡的 tag 确认兜底 |
-| `multiple-publish-packages` | 要按 `PKG_CANDIDATES` 用 `--pkg` 指定发布包 |
+| `version-file-undeclared` | 声明了版本却没说它写在哪个文件 → 无法回查一致性，计划卡必须标「未回查」 |
+| `version-declaration-unverified` | 回查没命中（`VERSION_IN_FILE=no`）：多半是派生/注入型仓库，或文件指错、版本还没合并 —— 看 `VERSION_FILE_HINT`；`--require-version-match` 下这条会变成阻断 |
+| `version-origin-tag` | 版本以 tag 为准（注入型/无版本文件仓库的常态，不是缺陷） |
+| `mixed-tag-prefixes` | tag 有多个不同前缀（多版本线 / monorepo 多包）→ 不猜，要求给完整 tag |
+| `no-version-like-tags` | 有 tag 但没有一个能解析成版本号 → 版本比较守卫失效，改由计划卡的 tag 确认兜底 |
+| `latest-tag-order-conflict` | 版本号最大的 tag 不是时间最新的 tag → 可能在新/旧版本线之间切换，如实看一眼 |
 | `commits-truncated` | 变更说明超过 300 条，需要时给 `changelog.sh` 加 `--max` |
 
 ### 1. 唯一一次确认（计划卡 + 选项）
 
 ```
 发布计划
-  版本源   <manifest: <发布包>/package.json | tag>
-  版本     <PKG_VERSION 或 --tag>（自 <LATEST_TAG> 起 N 个提交：feat a / fix b / breaking c）
+  版本源   <文件>:<行号> → <该行原文>（回查 yes）
+           | 未回查（注入型：真值来自 tag；VERSION_FILE_HINT=<稳定分支上的实际值>）
+           | tag（VERSION_ORIGIN=tag）
+  版本     <VERSION>（自 <LATEST_TAG> 起 N 个提交：feat a / fix b / breaking c）
   tag      <TARGET_TAG> @ <BASE_REF> 的 <sha>（注记 tag，正文见下方变更说明）
   说明     变更说明全文（进 tag 注记，也是 Release body 的来源）
   Release  <github|gitlab>：<将由本流程创建 | 由 CI 创建后校验 | 无法自动创建：<原因>>
            title = <TARGET_TAG>；body = 上方说明；预发布：<是|否>
   CHANGELOG <有：<文件>，已记录/未记录 | 无此文件> → 作为下文第 ② 题的选项呈现
   后效     workflow: <TAG_WORKFLOWS 或「未检测到」>
-           npm: <包名 或「未检测到」>
+           发布步骤: <EFFECT_HINTS 原文，或「未检测到」> → 校验方式（流水结论 / --probe-url）
   校验     逐个后效给结论；未检测到的不猜
 ```
 
@@ -118,7 +160,7 @@ cat "$BODY"            # 作为计划卡正文展示；决策走下面的选项
 | `READY` 且 Release 可自动创建 | ① 是否按此发版（tag + Release） | `按此发版（tag + Release）`（推荐）/ `只打 tag，不建 Release` / `取消` / `改 tag 名或说明` |
 | `READY` 但 Release 无法自动创建 | ① 同上 | `按此发版（tag，附手动创建命令）`（推荐）/ `停止，先处理 CLI/登录` / `取消` / `改 tag 名或说明` |
 | `READY` | ② 是否写 `CHANGELOG.md` | `不写，直接打 tag`（推荐，零副作用）/ `写，并走一次分支 + PR` |
-| `NEEDS_TAG` | 目标 tag | `v0.1.0`（推荐，首个版本）/ `v1.0.0` / `自定义` |
+| `NEEDS_TARGET` | 目标版本 | `按 <文件>:<行号> 的 <版本> 发版`（推荐，附原文）/ `以 tag <vX.Y.Z> 为版本源` / `自定义` |
 | `TAGGED` | 无需提问（只补建/校验 Release + 跟踪，重跑幂等） | — |
 
 - `EFFECT_RELEASE=workflow` 时**不问也不建**：由仓库 CI 创建，本流程只校验 notes 非空；若流水失败导致 Release 缺失，在步骤 4 跟踪完再给「补建」选项（见 4.1）。
@@ -131,7 +173,9 @@ cat "$BODY"            # 作为计划卡正文展示；决策走下面的选项
 |---|---|
 | `version-not-ahead-of-tag` | `升 patch 到 <下一版>`（推荐）/ `升 minor 到 <y>` / `升 major 到 <z>` / `只跟踪现有 tag，不发新版本` |
 | `tag-not-on-base` | `停止`（推荐）/ `授权删 tag 重打`（不可逆：正文与目标 sha 都无法改） |
-| `tag-version-mismatch` | `先升版本到 <tag 版本>`（推荐）/ `改用清单版本 <PKG_VERSION> 作 tag` / `停止` |
+| `target-tag-ambiguous` | `打 <某条线> 的 tag <a-vX.Y.Z>`（按已有前缀列候选让用户选）/ `停止` —— 多版本线里不猜 |
+| `version-not-in-declared-file`（仅 `--require-version-match`） | `改用文件里的真实值 <VERSION_FILE_HINT>`（推荐）/ `先合并版本 PR 再重跑` / `去掉 --require-version-match`（派生型仓库）/ `停止` |
+| `tag-version-mismatch` | `先升版本到 <tag 版本>`（推荐）/ `改用声明版本 <VERSION> 作 tag` / `停止` |
 
 除「只跟踪现有 tag」外，升版本都要走 `commit-push` → `pr-create` → `pr-merge`，合并后重新预检（**本流程不改版本号**）。
 
@@ -256,7 +300,7 @@ glab release view "${TARGET_TAG}" -R "${REPO_ID}"
 
 #### 4.2 一次校验（推荐：`release-verify.sh`）
 
-Release 建好/校验后，用一条命令把流水、Release、npm 三件事一次做完（对应 4.3–4.5），**一次出 KEY=VALUE 回执**。首次查询立即执行；流水一到终态就停，不做固定轮次空转。
+Release 建好/校验后，用一条命令把流水、Release、产物三件事一次做完（对应 4.3–4.5），**一次出 KEY=VALUE 回执**。首次查询立即执行；流水一到终态就停，不做固定轮次空转。
 
 ```bash
 bash scripts/release-verify.sh \
@@ -264,15 +308,17 @@ bash scripts/release-verify.sh \
   --tag "${TARGET_TAG}" \
   --repo "${REPO_ID}" \
   --timeout 180 --interval 5
-# 只有 EFFECT_NPM=yes 时才加：--npm-pkg "${PKG_NAME}"
+# 需要验产物可见性时才加（URL 由你从 EFFECT_HINTS / 仓库文档读出）：
+#   --probe-url 'https://registry.npmjs.org/@scope%2Fpkg/%VERSION%'
+#   （npm 仓的便捷别名：--npm-pkg <包名>，内部同义，另带 JSON 体校验与 npm CLI 回退）
 # GitHub 已知 run id 时加 --run-id <id>；GitLab 已知 pipeline 时加 --pipeline <id>
 ```
 
 - 默认 `--timeout 180`（3 分钟）、`--interval 5`（5 秒）；不再固定 15 秒轮询 10 分钟。GitHub 优先 `gh run watch <id> --exit-status`，结束即返回；GitLab 没有 watch 等价物，按 5 秒轮询。
-- `--no-ci` / `--no-release` / `--no-npm` 可单项跳过；不传 `--npm-pkg` 时 npm 记 `skipped`（不猜包名），所以只在 `EFFECT_NPM=yes` 时传。
+- `--no-ci` / `--no-release` / `--no-probe`（旧名 `--no-npm`）可单项跳过；不传 `--probe-url` 也不传 `--npm-pkg` 时产物记 `skipped`（不猜 URL），所以只在确知产物地址时才传。
 - 自动发现取该 tag 最近一次 run（`--workflow` 可限定）；仓库有多个 tag workflow 时，逐个 workflow 各跑一次，或分别传 `--run-id`。
 - 退出码：`0` 全部通过 / `2` 有失败项 / `3` 有查不了的项 / `1` 参数或环境错误。`VERIFY_RESULT` 与 `VERIFY_REASONS` 给出结论。
-- **脚本只读**：Release 只 `view`，不创建、不改 notes；npm 只读 registry；不改 tag。创建/补建仍走 4.1。
+- **脚本只读**：Release 只 `view`，不创建、不改 notes；产物探测只发一次 HTTP GET；不改 tag。创建/补建仍走 4.1。
 - stdout 只有 `KEY=VALUE`，进度与诊断走 stderr；可直接贴进步骤 5 的回执。
 
 回执字段：
@@ -284,12 +330,15 @@ bash scripts/release-verify.sh \
 | `CI_CONCLUSION` / `CI_ID` / `CI_URL` / `CI_WORKFLOW` / `CI_DURATION_S` | 流水细节；GitLab 的 `CI_CONCLUSION` 即 pipeline `status` |
 | `RELEASE_STATUS` | `exists` / `missing` / `unknown` / `skipped` |
 | `RELEASE_TAG` / `RELEASE_URL` / `RELEASE_NOTES_LEN` / `RELEASE_NOTES` | Release 细节；`RELEASE_NOTES=empty` 视为失败 |
-| `NPM_PKG` / `NPM_VERSION` / `NPM_STATUS` / `NPM_SOURCE` | npm 结果；`NPM_SOURCE=registry` 优先，失败回退 `npm-cli` |
+| `PROBE_TARGET` / `PROBE_HTTP` / `PROBE_STATUS` | 通用产物探测：替换占位后的 URL、HTTP 状态码、`visible`/`missing`/`unknown`/`skipped` |
+| `NPM_PKG` / `NPM_VERSION` / `NPM_STATUS` / `NPM_SOURCE` | `--npm-pkg` 别名路径的结果（`npm-cli` 为回退来源）；与 `PROBE_*` 互斥 |
 | `VERIFY_RESULT` / `VERIFY_REASONS` | `pass` / `fail` / `unknown`；原因用逗号分隔 |
 
 `RELEASE_STATUS=missing` 时回到 4.1 的「补建」选项；`CI_STATUS=missing` 只表示没查到 tag 触发的 run，**不判成功**。脚本不可用（缺少 `gh`/`glab`、未登录、自建 host）时按 4.3–4.5 手工执行，结论仍保持成功 / 失败 / 未知三档。
 
-离线回归：`bash scripts/tests/release-verify-test.sh`（用桩代替 `gh`/`glab`/`curl`/`npm`，覆盖两平台成功、失败、watch、回退与降级路径）。
+离线回归：
+- `bash scripts/tests/release-verify-test.sh`（用桩代替 `gh`/`glab`/`curl`/`npm`，覆盖两平台成功、失败、watch、`--probe-url` 的 2xx/404/未知、回退与降级路径）
+- `bash scripts/tests/release-preflight-test.sh`（临时仓夹具，覆盖版本源声明与回查、tag 倒退守卫、前缀/混合前缀、CHANGELOG 任意格式、`EFFECT_HINTS` 只摘未注释行、**无 node 时行为一致**）
 
 #### 4.3 GitHub workflow 跟踪
 
@@ -341,28 +390,27 @@ glab ci list --ref "${TARGET_TAG}" -R "${REPO_ID}" --output json --per-page 20 \
 
 `GITLAB_TAG_CI=no` 时报告「本仓未检测到 tag 触发的 GitLab CI 流水」，不猜。
 
-#### 4.5 npm 与其他产物
+#### 4.5 产物可见性（通用探测，不认识任何生态）
 
-- `EFFECT_NPM=yes`：**优先 registry 单版本端点**（HTTP 状态即可判定，通常约 1 秒）：
+`EFFECT_HINTS` 给的是「哪一行像在发布」，**不是结论**。读那几行判断发布到哪，再决定怎么验：
 
-  ```bash
-  NAME_ENC="$(printf '%s' "${PKG_NAME}" | sed 's#/#%2F#g')"   # @scope/name → @scope%2Fname
-  curl -sS --max-time 10 -o /dev/null -w '%{http_code}' \
-    "https://registry.npmjs.org/${NAME_ENC}/${PKG_VERSION}"
-  ```
+| 情形 | 校验方式 |
+|---|---|
+| 流水里的发布步骤 → 产物无公开查询地址（镜像推送、部署、文档站） | 以流水结论为准（4.3/4.4），回执写「由 workflow 发布，未做产物级校验」 |
+| 产物有公开可查的 URL（包仓库等） | `--probe-url`：2xx 可见 / 404·410 不可见 / 其他未知 |
+| `EFFECT_HINTS=<none>` 且 `TAG_WORKFLOWS=<none>`、`GITLAB_TAG_CI=no` | 写「本仓未检测到 tag 触发的发布流水；tag 与 Release 即交付物」，不做任何成功断言 |
 
-  `200` → 可见；`404` → 不可见；其他状态/网络错误 → 回退 `npm` CLI：
+```bash
+# %VERSION% = tag 去前缀，%TAG% = 完整 tag；URL 按仓库事实拼，不认识的形态就手工拼
+bash scripts/release-verify.sh --platform "${RELEASE_PLATFORM}" --tag "${TARGET_TAG}" \
+  --repo "${REPO_ID}" --probe-url 'https://registry.npmjs.org/@scope%2Fpkg/%VERSION%'
+```
 
-  ```bash
-  npm view "${PKG_NAME}@${PKG_VERSION}" version \
-    --registry https://registry.npmjs.org --cache "$(mktemp -d)"
-  ```
-
-  **`--cache` 不可省**：本机 `~/.npm` 可能被 root 占用（EPERM），那不是「版本不存在」，不能误判成 `no`。回退仍失败记 `unknown`。
-- npm 结论三档：可见 / 不可见 / 查不了（查不了既不算失败也不算成功）。
-- `EFFECT_RELEASE` 已在 4.1 校验，不重复
-- 两者皆 `none` 且 `TAG_WORKFLOWS=<none>`、`GITLAB_TAG_CI=no`：明确写「本仓未检测到 tag 触发的发布流水；tag 与 Release 即交付物」，不做任何成功断言
-- 镜像 / 文档站 / 部署：未探测到就写「未检测到」；确需跟踪时用选项问「继续（推荐）/ 指定产物与校验方式」，不猜
+- 探测只发一次 HTTP GET，不解析响应体；**脚本不内置任何 registry 表**，所以任何包仓库都能套（PyPI `https://pypi.org/pypi/<pkg>/%VERSION%/json`、crates.io `https://crates.io/api/v1/crates/<crate>/%VERSION%` … 形态由你按事实给出）。
+- npm 仓可用便捷别名 `--npm-pkg <包名>`（同义，另带 JSON 体校验与 `npm` CLI 回退；回退必须带 `--cache`，本机 `~/.npm` 被 root 占用是 EPERM 而不是「版本不存在」）。
+- 结论三档，与流水一致：可见 / 不可见 / 查不了（查不了既不算失败也不算成功）。
+- `EFFECT_RELEASE` 已在 4.1 校验，不重复。
+- 未探测到的一律写「未检测到」；确需跟踪时用选项问「继续（推荐）/ 指定产物与校验方式」，不猜。
 
 GitHub 之外的平台不会出现 `gh run list`：GitLab 走 4.4；Gitea/未知平台明确写「流水状态未知」，并给选项 `继续按可得信息出回执`（推荐）/ `停止，人工核对后再跑`。
 
@@ -373,11 +421,11 @@ GitHub 之外的平台不会出现 `gh run list`：GitLab 走 4.4；Gitea/未知
   tag       v1.1.0 → 3f9c2a1（main 上）              ✅
   Release   GitHub v1.1.0                            ✅ 已创建（notes 复用 tag 正文）
   workflow  release.yml                              ✅ success 2m13s
-  npm       @morehao/dsh-commands@1.1.0              ✅ 可见
+  产物      <probe URL>                              ✅ 可见（HTTP 200）
   changelog CHANGELOG.md                             ✅ 已记录 v1.1.0
 ```
 
-回执里的 workflow / Release / npm 三行直接取 4.2 脚本的 `CI_STATUS`、`RELEASE_STATUS`、`NPM_STATUS`（细节用 `CI_DURATION_S` / `RELEASE_URL` / `NPM_SOURCE` / `VERIFY_REASONS`），不必再手工拼。
+回执里的 workflow / Release / 产物三行直接取 4.2 脚本的 `CI_STATUS`、`RELEASE_STATUS`、`PROBE_STATUS`（细节用 `CI_DURATION_S` / `RELEASE_URL` / `PROBE_HTTP` / `VERIFY_REASONS`），不必再手工拼。
 
 Release 行的其他形态，各自独立、不合并成一句「发布成功」：
 
@@ -404,26 +452,30 @@ Release 行的其他形态，各自独立、不合并成一句「发布成功」
 | Release 创建失败 | 不重试、不删；⚠️ + 原始报错 + 选项 `只报告`（推荐）/ `重试` / `跳过` |
 | CI 声称会建 Release 但缺失 | 跟踪完给选项 `由本流程补建 Release`（推荐）/ `只报告` |
 | 平台未知 / CLI 缺失 / 未登录 | 不建；打 tag 照常完成，回执给手动命令与选项 `停止，先处理 CLI/登录`（仅 READY 阶段） |
-| 版本没领先 tag | `STATE=BLOCKED`，给选项 `升 patch`（推荐）/ `升 minor` / `升 major` / `只跟踪现有 tag`，再走升版本 PR |
+| 版本没领先 tag（**与版本源无关，tag 为源时同样生效**） | `STATE=BLOCKED`，给选项 `升 patch`（推荐）/ `升 minor` / `升 major` / `只跟踪现有 tag`，再走升版本 PR |
+| 多版本线里只给了 `--version` | `STATE=BLOCKED` + `BLOCKERS=target-tag-ambiguous`：按 `TAG_PREFIX` 列候选让用户选线，或让用户给完整 `--tag` |
 | tag 不在主干 | `STATE=BLOCKED` + `BLOCKERS=tag-not-on-base`，多为打错分支；给选项 `停止`（推荐）/ `授权删 tag 重打`（不可逆） |
-| `--tag` 与清单版本不一致 | `STATE=BLOCKED` + `BLOCKERS=tag-version-mismatch`，给选项 `先升版本到 <tag 版本>`（推荐）/ `改用清单版本作 tag` / `停止`，**不静默改 tag 目标** |
-| 无清单且无 `--tag` | `STATE=NEEDS_TAG`，用选项索取目标 tag（`v0.1.0` / `v1.0.0` / 自定义） |
+| `--tag` 与声明版本不一致 | `STATE=BLOCKED` + `BLOCKERS=tag-version-mismatch`，给选项 `先升版本到 <tag 版本>`（推荐）/ `改用声明版本作 tag` / `停止`，**不静默改 tag 目标** |
+| 声明版本不在声明文件里 | `VERSION_IN_FILE=no`：默认只 `WARN`，先把 `VERSION_FILE_HINT`/原文给用户看（预检读 `${BASE_REF}:<path>`，未合并的改动不算）；加了 `--require-version-match` 才是 `BLOCKED` |
+| 既无 `--version` 也无 `--tag` | `STATE=NEEDS_TARGET`：先按 0.1 读仓库定目标版本，不是让用户凭空报一个 tag |
 | CHANGELOG PR 未合并 | 停：不打 tag。先合并 PR 再重新预检（否则 tag 指向的提交没有这条记录） |
 | CHANGELOG 已含该版本 | `changelog.sh` 退出码 3，视为完成，不重复写、不重复开 PR |
 | 打完 tag 才发现漏记 | 不改 tag；记到下一个版本，或经用户明确授权后删 tag 重打 |
 
 ## 边界
 
-- **不做**：改 `package.json`、改代码、删 tag、重打 tag、force push、删 Release、改 Release notes（用户明确要求补 notes 时先问）、`npm` 撤销发布（只能 `deprecate`）、改 workflow、代跑发布脚本
+- **不做**：改任何版本源文件（不经升版本 PR）、改代码、删 tag、重打 tag、force push、删 Release、改 Release notes（用户明确要求补 notes 时先问）、撤销已发布的包（npm 只能 `deprecate`，其他生态同理）、改 workflow、代跑发布脚本
 - **两个远端写操作**：推送 tag + 创建 Release。后者只由 4.1 的默认规则触发，不额外越界
 - **唯一越界写文件**：用户在选择里明确要写 `CHANGELOG.md` 时，会建**一个** `docs/changelog-<tag>` 分支并走一次 `pr-create` → `pr-merge`。不选则完全不碰工作区；除 `CHANGELOG.md` 外不改任何文件，且必须合进稳定分支后才打 tag
-- **不假设**：不内置任何"发版必须发 npm"的判断；npm 只是探测到才校验的一个后效。也不假设"Release 一定由 CI 建"或"一定由本流程建"——按探测结果与用户选择
+- **不假设**：不内置任何"发版必须发 npm"或"版本一定在 package.json"的判断；也不判断"仓库有没有版本信息"（那是不可判定的：字面常量 / 派生 / 注入 / 无版本都是一等公民），只认"这次发哪个版本"这个输入。`EFFECT_HINTS` 只是证据，产物校验按 URL 现场决定。也不假设"Release 一定由 CI 建"或"一定由本流程建"——按探测结果与用户选择
 - **不替代**：`tag`（任意分支打标签）、`pr-merge`（合并本身）
 
 ## 验收标准
 
 - 远端存在 `<TARGET_TAG>`，且 `git merge-base --is-ancestor <TARGET_TAG> <BASE_REF>` 成立
-- 版本源为 manifest 时：`<BASE_REF>` 的 `package.json.version == <TARGET_TAG>`（去 `v`）
+- `VERSION_ORIGIN=declared` 时：计划卡里写出了 `<文件>:<行号> → 原文`；`VERSION_IN_FILE=no` 时**必须**同时写出 `VERSION_FILE_HINT` 与「未回查/待用户确认」；加了 `--require-version-match` 时必须是 `yes` 才继续
+- `VERSION_ORIGIN=tag` 时：计划卡已写明「版本以 tag 为准」，且流程没有编造版本号
+- 无论版本源：`LATEST_SEMVER=yes` 时 `<TARGET_TAG>` 必须严格领先 `LATEST_TAG`；多版本线（`TAG_PREFIX_COUNT>1`）必须由用户显式给出完整 `--tag`
 - tag 注记非空且含变更说明（`git for-each-ref --format='%(contents)' refs/tags/<tag>` 可读），首行为 `release: <tag>`
 - Release 项有明确结论：已创建 / 已存在 / 由 CI 创建 / 用户跳过 / 无法创建（含原因与手动命令）/ 创建失败；**已创建或已存在时 notes 非空**
 - 每个探测到的后效都有独立结论（成功 / 失败 / 未知），没有一个被静默跳过
