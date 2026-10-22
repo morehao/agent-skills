@@ -135,7 +135,7 @@ cat "$BODY"            # 作为计划卡正文展示；决策走下面的选项
 
 除「只跟踪现有 tag」外，升版本都要走 `commit-push` → `pr-create` → `pr-merge`，合并后重新预检（**本流程不改版本号**）。
 
-用户选完后**不再中途询问**；后续唯一会再提问的场合是步骤 4 出现失败/超时（见 4.1/4.2/4.3）。
+用户选完后**不再中途询问**；后续唯一会再提问的场合是步骤 4 出现失败/超时（见 4.1/4.3/4.4）。
 
 ### 2. 可选：写 CHANGELOG.md（需要一次分支 + PR）
 
@@ -197,7 +197,7 @@ echo "TAG_PUSH_OK"
 | 条件 | 动作 |
 |---|---|
 | `RELEASE_EXISTS=yes` | **只校验**：读取 tag/body，确认 notes 非空；不覆盖、不 update |
-| `EFFECT_RELEASE=workflow` | 先不建；等 4.2/4.3 的流水结束后校验；缺失时给「补建」选项 |
+| `EFFECT_RELEASE=workflow` | 先不建；等 4.3/4.4 的流水结束后校验；缺失时给「补建」选项 |
 | `EFFECT_RELEASE=none` + 平台 ∈ {github,gitlab} + `RELEASE_CLI_READY=yes` +（`READY` 或 `TAGGED` 且 `RELEASE_EXISTS=no`） | **创建** |
 | `TAGGED` + `RELEASE_EXISTS=unknown` | 不建（标签可能存在人工补过的 Release）；回执标「状态未知」+ 手动命令 |
 | 平台未知 / Gitea / CLI 缺失或未登录 | 不建；回执写原因 + 手动命令 |
@@ -254,15 +254,58 @@ glab release view "${TARGET_TAG}" -R "${REPO_ID}"
   - GitLab：`glab release create "<tag>" --name "<tag>" --notes-file <正文文件>`
   - Gitea/未知平台：在网页上创建，不猜 API。
 
-#### 4.2 GitHub workflow 跟踪
+#### 4.2 一次校验（推荐：`release-verify.sh`）
 
-对 `TAG_WORKFLOWS` 里的**每一个** workflow：
+Release 建好/校验后，用一条命令把流水、Release、npm 三件事一次做完（对应 4.3–4.5），**一次出 KEY=VALUE 回执**。首次查询立即执行；流水一到终态就停，不做固定轮次空转。
 
 ```bash
-gh run list --workflow <file> --limit 20 --json databaseId,headBranch,status,conclusion
+bash scripts/release-verify.sh \
+  --platform "${RELEASE_PLATFORM}" \
+  --tag "${TARGET_TAG}" \
+  --repo "${REPO_ID}" \
+  --timeout 180 --interval 5
+# 只有 EFFECT_NPM=yes 时才加：--npm-pkg "${PKG_NAME}"
+# GitHub 已知 run id 时加 --run-id <id>；GitLab 已知 pipeline 时加 --pipeline <id>
 ```
 
-按 `headBranch == <TARGET_TAG>` 匹配，15 秒一次、最多 10 分钟，逐个给结论：
+- 默认 `--timeout 180`（3 分钟）、`--interval 5`（5 秒）；不再固定 15 秒轮询 10 分钟。GitHub 优先 `gh run watch <id> --exit-status`，结束即返回；GitLab 没有 watch 等价物，按 5 秒轮询。
+- `--no-ci` / `--no-release` / `--no-npm` 可单项跳过；不传 `--npm-pkg` 时 npm 记 `skipped`（不猜包名），所以只在 `EFFECT_NPM=yes` 时传。
+- 自动发现取该 tag 最近一次 run（`--workflow` 可限定）；仓库有多个 tag workflow 时，逐个 workflow 各跑一次，或分别传 `--run-id`。
+- 退出码：`0` 全部通过 / `2` 有失败项 / `3` 有查不了的项 / `1` 参数或环境错误。`VERIFY_RESULT` 与 `VERIFY_REASONS` 给出结论。
+- **脚本只读**：Release 只 `view`，不创建、不改 notes；npm 只读 registry；不改 tag。创建/补建仍走 4.1。
+- stdout 只有 `KEY=VALUE`，进度与诊断走 stderr；可直接贴进步骤 5 的回执。
+
+回执字段：
+
+| KEY | 取值 |
+|---|---|
+| `VERIFY_PLATFORM` / `VERIFY_TAG` / `VERIFY_REPO` | 平台 / tag / repo-id |
+| `CI_STATUS` | `success` / `failure` / `timeout` / `missing` / `unknown` / `skipped` |
+| `CI_CONCLUSION` / `CI_ID` / `CI_URL` / `CI_WORKFLOW` / `CI_DURATION_S` | 流水细节；GitLab 的 `CI_CONCLUSION` 即 pipeline `status` |
+| `RELEASE_STATUS` | `exists` / `missing` / `unknown` / `skipped` |
+| `RELEASE_TAG` / `RELEASE_URL` / `RELEASE_NOTES_LEN` / `RELEASE_NOTES` | Release 细节；`RELEASE_NOTES=empty` 视为失败 |
+| `NPM_PKG` / `NPM_VERSION` / `NPM_STATUS` / `NPM_SOURCE` | npm 结果；`NPM_SOURCE=registry` 优先，失败回退 `npm-cli` |
+| `VERIFY_RESULT` / `VERIFY_REASONS` | `pass` / `fail` / `unknown`；原因用逗号分隔 |
+
+`RELEASE_STATUS=missing` 时回到 4.1 的「补建」选项；`CI_STATUS=missing` 只表示没查到 tag 触发的 run，**不判成功**。脚本不可用（缺少 `gh`/`glab`、未登录、自建 host）时按 4.3–4.5 手工执行，结论仍保持成功 / 失败 / 未知三档。
+
+离线回归：`bash scripts/tests/release-verify-test.sh`（用桩代替 `gh`/`glab`/`curl`/`npm`，覆盖两平台成功、失败、watch、回退与降级路径）。
+
+#### 4.3 GitHub workflow 跟踪
+
+对 `TAG_WORKFLOWS` 里的**每一个** workflow：先**立即**查一次，按 `headBranch == <TARGET_TAG>` 匹配最近一次 run；拿到 run id 后优先 `gh run watch --exit-status`，结束即返回。
+
+```bash
+# 首次立即查（<TARGET_TAG> 替换成实际 tag）
+gh run list --branch "${TARGET_TAG}" --limit 20 \
+  --json databaseId,headBranch,status,conclusion,url,workflowName \
+  --jq 'map(select(.headBranch == "<TARGET_TAG>")) | .[0] | select(. != null) | [.databaseId, .status, .conclusion, .url, .workflowName] | @tsv'
+
+# 已知 run id：watch 到结束；--exit-status 在失败时返回非 0
+gh run watch <id> --repo "${REPO_ID}" --exit-status --interval 5
+```
+
+`gh run watch` 不可用/报错时，退化为每 **5 秒**一次 `gh run view <id> --json status,conclusion,url,workflowName`，总预算 **3 分钟**（`--timeout 180`），到点即停。逐个给结论：
 
 | workflow 结论 | 报告 |
 |---|---|
@@ -271,23 +314,26 @@ gh run list --workflow <file> --limit 20 --json databaseId,headBranch,status,con
 | 超时未结束 | ⏳ 给 run 链接与当前状态 |
 | 匹配不到 run | ⚠️ 说明「该 workflow 未见 tag 触发记录」，不判成功 |
 
+首次查询立即执行；流水结束即返回，不轮满固定次数。
+
 出现 `failure` / 超时 / 匹配不到 run 时，报告完给**一题选项**（`references/ask-options.md`）：`只报告`（推荐）/ `gh run rerun <id>`（仅 failure）/ `下个版本再发`。不自行 rerun，也不因为「重跑一下可能就好了」替用户决定。
 
-#### 4.3 GitLab pipeline 跟踪
+#### 4.4 GitLab pipeline 跟踪
 
-`GITLAB_TAG_CI=yes`（`.gitlab-ci.yml` 由 `CI_COMMIT_TAG` 触发）时：
+`GITLAB_TAG_CI=yes`（`.gitlab-ci.yml` 由 `CI_COMMIT_TAG` 触发）时：首次立即查，之后每 **5 秒**一次，总预算 **3 分钟**。`glab` 没有 `gh run watch` 的等价命令（1.121 实测 `glab ci list` 无 watch 参数），只能轮询。
 
 ```bash
-glab ci list --ref "${TARGET_TAG}" -R "${REPO_ID}" --output json --per-page 20
+glab ci list --ref "${TARGET_TAG}" -R "${REPO_ID}" --output json --per-page 20 \
+  --jq '[.[] | select(.ref == "<TARGET_TAG>")] | .[0] | select(. != null) | {id, status, web_url, duration}'
 ```
 
-取最近一条 pipeline 的 `status` 与 `web_url`：
+用 `--jq` 直接解析 JSON（取 `id` / `status` / `web_url` / `duration`），不要拿文本表格再 `grep`。超时到点即停，给当前 `status`，不判成功。
 
 | status | 报告 |
 |---|---|
 | `success` | ✅ 耗时 t |
 | `failed` / `canceled` | ❌ 给 pipeline 链接 |
-| `running` / `pending` / `created` / `waiting_for_resource` / `preparing` | ⏳ 15 秒一次、最多 10 分钟 |
+| `running` / `pending` / `created` / `waiting_for_resource` / `preparing` | ⏳ 每 5 秒重查、最多 3 分钟 |
 | `skipped` / `manual` | ⏭ 如实说明，不判成功 |
 | 查不到任何 pipeline | ⚠️ 「未见 tag 触发的 pipeline」，不判成功 |
 
@@ -295,14 +341,30 @@ glab ci list --ref "${TARGET_TAG}" -R "${REPO_ID}" --output json --per-page 20
 
 `GITLAB_TAG_CI=no` 时报告「本仓未检测到 tag 触发的 GitLab CI 流水」，不猜。
 
-#### 4.4 npm 与其他产物
+#### 4.5 npm 与其他产物
 
-- `EFFECT_NPM=yes`：`npm view <name>@<version> --registry https://registry.npmjs.org` → 可见 / 不可见 / 查不了（三档，查不了不算失败也不算成功）
+- `EFFECT_NPM=yes`：**优先 registry 单版本端点**（HTTP 状态即可判定，通常约 1 秒）：
+
+  ```bash
+  NAME_ENC="$(printf '%s' "${PKG_NAME}" | sed 's#/#%2F#g')"   # @scope/name → @scope%2Fname
+  curl -sS --max-time 10 -o /dev/null -w '%{http_code}' \
+    "https://registry.npmjs.org/${NAME_ENC}/${PKG_VERSION}"
+  ```
+
+  `200` → 可见；`404` → 不可见；其他状态/网络错误 → 回退 `npm` CLI：
+
+  ```bash
+  npm view "${PKG_NAME}@${PKG_VERSION}" version \
+    --registry https://registry.npmjs.org --cache "$(mktemp -d)"
+  ```
+
+  **`--cache` 不可省**：本机 `~/.npm` 可能被 root 占用（EPERM），那不是「版本不存在」，不能误判成 `no`。回退仍失败记 `unknown`。
+- npm 结论三档：可见 / 不可见 / 查不了（查不了既不算失败也不算成功）。
 - `EFFECT_RELEASE` 已在 4.1 校验，不重复
 - 两者皆 `none` 且 `TAG_WORKFLOWS=<none>`、`GITLAB_TAG_CI=no`：明确写「本仓未检测到 tag 触发的发布流水；tag 与 Release 即交付物」，不做任何成功断言
 - 镜像 / 文档站 / 部署：未探测到就写「未检测到」；确需跟踪时用选项问「继续（推荐）/ 指定产物与校验方式」，不猜
 
-GitHub 之外的平台不会出现 `gh run list`：GitLab 走 4.3；Gitea/未知平台明确写「流水状态未知」，并给选项 `继续按可得信息出回执`（推荐）/ `停止，人工核对后再跑`。
+GitHub 之外的平台不会出现 `gh run list`：GitLab 走 4.4；Gitea/未知平台明确写「流水状态未知」，并给选项 `继续按可得信息出回执`（推荐）/ `停止，人工核对后再跑`。
 
 ### 5. 回执
 
@@ -314,6 +376,8 @@ GitHub 之外的平台不会出现 `gh run list`：GitLab 走 4.3；Gitea/未知
   npm       @morehao/dsh-commands@1.1.0              ✅ 可见
   changelog CHANGELOG.md                             ✅ 已记录 v1.1.0
 ```
+
+回执里的 workflow / Release / npm 三行直接取 4.2 脚本的 `CI_STATUS`、`RELEASE_STATUS`、`NPM_STATUS`（细节用 `CI_DURATION_S` / `RELEASE_URL` / `NPM_SOURCE` / `VERIFY_REASONS`），不必再手工拼。
 
 Release 行的其他形态，各自独立、不合并成一句「发布成功」：
 
