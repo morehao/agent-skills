@@ -20,7 +20,7 @@
 
 - 创建 `<config>/skills` 与 `<config>/command`；
 - 逐个软链 `skills/<name>` → `<config>/skills/<name>`（只遍历目录）；
-- 软链 `commands-opencode/git` → `<config>/command/git`，`commands-opencode/handoff.md` → `<config>/command/handoff.md`；
+- 软链 `commands-opencode/git` → `<config>/command/git`，`commands-opencode/handoff.md` → `<config>/command/handoff.md`，`commands-opencode/cleanup.md` → `<config>/command/cleanup.md`；
 - 清理指向本仓但目标已不存在的悬空软链；
 - 目标已有同名真实目录/文件时跳过，不覆盖；
 - `--check` 只报告问题，问题数 >0 退出 1。
@@ -34,6 +34,7 @@ for name in git-kit handoff project-insight project-wiki svg-maker tech-design; 
 done
 ln -sfn /path/to/ai-kit/commands-opencode/git ~/.config/opencode/command/git
 ln -sfn /path/to/ai-kit/commands-opencode/handoff.md ~/.config/opencode/command/handoff.md
+ln -sfn /path/to/ai-kit/commands-opencode/cleanup.md ~/.config/opencode/command/cleanup.md
 ```
 
 > `mkdir -p` 别省：新机器上 `~/.config/opencode/command/` 通常不存在，直接 `ln` 会失败。

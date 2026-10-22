@@ -64,6 +64,22 @@
 
 `/handoff` 委托 `handoff` skill 的 `print` 分支，逻辑单一真源在 `skills/handoff/`。它只打印一个 Markdown 代码块：复制到新会话即可续跑，有进展后重跑一次刷新交接。命令不写文件、不改仓库，也没有 `/handoff/resume`——恢复靠在新会话粘贴文本。
 
+## Cleanup 指令
+
+| 路径 | 功能 |
+|------|------|
+| `cleanup` | 磁盘空间回收：查询占用 → 按需预览/执行清理，含本地数据库处理（macOS 为主） |
+
+`/cleanup` 委托 `disk-cleanup` skill 的 `cleanup` 分支，逻辑单一真源在 `skills/disk-cleanup/`（`SKILL.md` 流程 + `references/cleanup.md` 清理对象 + `scripts/` 两个执行脚本）。
+
+磁盘清理是一个动作而不是固定清单，所以命令**默认只读**：
+
+- `/cleanup`（无参数）→ **先给编号选项**（只看占用 / 预览 / 实际清理 / 本地数据库 / 取消），不执行任何脚本，也不先「顺手查一下」；
+- `/cleanup 只看占用` → 只读统计并分类报告；
+- `/cleanup 预览` → `--clean --dry-run`，只打印不删除；
+- `/cleanup 执行` → `--clean`，涉及 sudo 的三步交给用户自己的终端；
+- `/cleanup 本地数据库` → 数据库瘦身：先备份、先闭库再执行。
+
 ## 校验
 
 改完指令文件或本 README 后，在仓库根目录运行：

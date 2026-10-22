@@ -1,57 +1,42 @@
 # AGENTS.md
 
-本仓库集中管理个人 AI 编码工具扩展：`commands-opencode/`（opencode 斜杠指令）+ `skills/`（技能，opencode/dsh 共用）。dsh 侧的斜杠命令插件在独立仓 [morehao/dsh-commands](https://github.com/morehao/dsh-commands)（npm 安装；本仓只提供它依赖的技能）。所有说明用**简体中文**。
+本仓库集中管理个人 AI 编码工具扩展：`commands-opencode/`（opencode 斜杠指令）+ `skills/`（技能，opencode / dsh 共用）。dsh 的斜杠命令插件在独立仓 [morehao/dsh-commands](https://github.com/morehao/dsh-commands)（npm 安装；本仓只提供它依赖的技能）。所有说明用**简体中文**。
 
-## 部署方式（任何修改前必读）
+## 硬约束（改动前先过一遍）
 
-- **opencode 侧**：通过**软链接**注册到 `~/.config/opencode/`，本仓是唯一真源。推荐先跑 `./scripts/opencode-install.sh`（幂等：自动建目录、只遍历技能目录、清理悬空软链、不覆盖同名真实目录；选项 `--skills-only` / `--commands-only` / `--check` / `--dry-run`，`OPENCODE_CONFIG` 可覆盖配置根）。它等价于：
-  - `mkdir -p ~/.config/opencode/skills ~/.config/opencode/command`
-  - 对 `skills/` 下每个技能目录 `ln -sfn <ai-kit>/skills/<name> ~/.config/opencode/skills/<name>`
-  - `ln -sfn <ai-kit>/commands-opencode/git ~/.config/opencode/command/git`
-  - `ln -sfn <ai-kit>/commands-opencode/handoff.md ~/.config/opencode/command/handoff.md`
-  - opencode v2.x 同时扫描配置目录下的 `command/` 与 `commands/`（源码 `scan("{command,commands}/**/*.md")`，命令名会剥掉这层前缀），本仓沿用 `command/`。
-- **dsh 侧**：插件在**另一个仓** [morehao/dsh-commands](https://github.com/morehao/dsh-commands)，本仓只提供技能。用 `./scripts/dsh-install.sh` 接入：软链 `skills/*` 到 `$DSH_HOME/skills` + `dsh plugin --profile <profile> add @morehao/dsh-commands`（npm 安装）；插件仓开发调试用 `--plugin-link <插件仓路径>` 走 `link:`（显式传参，脚本不猜路径）。`skills/*` 始终由本仓库软链提供（dsh 不从 node_modules 扫描 skill）。
-  - **profile 由脚本解析，不要写死**：优先级 `--profile <name>` > `$DSH_PROFILE` > 「`$DSH_HOME/profiles` 下**唯一**存在的 profile」。查看实际有哪些 profile 用 `ls ~/.dsh/profiles/`（**桌面版是 `desktop`**）。多个/零个 profile 时脚本报错列出候选，**不会**替你新建（早期版本写死 `web`，正是会凭空造 profile 的坑）。`dsh` CLI 也不要求先在 PATH：脚本会回退到桌面版 app 包内的 `runtime/cli/bin/dsh`（`*/runtime/cli/bin/dsh` 分支会额外提示先退出客户端再登记，避免并发改写 profile 配置）。
-  - **只软链 skills**：`./scripts/dsh-install.sh --skills-only`（零副作用、不需要 `dsh` CLI；也等价于手敲 `mkdir -p "$DSH_HOME/skills"` + 对 `skills/` 下每个技能目录 `ln -sfn <ai-kit>/skills/<name> "$DSH_HOME/skills/<name>"`）。dsh 技能根是**用户级** `~/.dsh/skills`（全局生效），另扫项目级 `<项目根>/.dsh/skills` 与 `~/.agents/skills`。软链注册的技能在 dsh 中带 `linked` 标记且**只读**（禁止编辑/删除）——正合「本仓是唯一真源」。
-  - **技能热加载**：新增/变更软链后无需重启，新会话与技能面板立即生效；只有改插件 `lib/index.js` 才需重启 dsh。
-  - **改脚本时注意 bash 3.2 兼容**（macOS 自带）：不用 `mapfile`/关联数组/`${var,,}`，也不要在 `set -u` 下展开空数组。**变量后紧跟中文等非 ASCII 字符必须写 `${var}`**，否则 bash 3.2 会把该字符并入变量名报 `unbound variable`。
+1. **本仓是唯一真源**：技能与命令通过软链注册到 opencode / dsh，改本仓即生效；不要编辑软链副本。接入语义见 [接入与生效语义](docs/agents/deployment.md)。
+2. **`skills/` 下只允许技能目录**，禁止松散说明文件（`ln -sfn skills/*` 会展开全部条目）。
+3. **升版本不得直接提交稳定分支**（`main` 也不接受直推，发版不构成例外）：改 version → 分支 → PR → 合并 → 打 tag。细则见 [发版纪律](docs/agents/release-discipline.md)。
+4. **过程性文档落 `.dsh/docs/`**，该目录整体被 gitignore、只留本地；需要入库的方案/设计放仓库 `docs/` 或技能目录。
+5. **改脚本按 bash 3.2 写**：不用 `mapfile` / 关联数组 / `${var,,}`；变量后紧跟中文必须写 `${var}`（否则 `unbound variable`）。
 
-**`skills/` 下只允许放技能的目录**（如 `git-kit/`），禁止放置任何松散说明文件。因为 `ln -sfn skills/*` 会展开全部条目，新增的非目录文件会被一并软链过去（`scripts/opencode-install.sh` 只遍历目录，已规避该问题，但约定仍然成立）。根 `README.md` 是入口，安装细节在 `docs/installation.md`。
+## 文档地图（按需加载，别一次全读）
 
-`.gitignore` 忽略了 `.opencode/`、`.superpowers/`、`.dsh/`、`docs/superpowers/`（本地草稿/会话运行态，不入库）。另忽略 `node_modules/`。**注意 `.dsh/` 整体被忽略**：按全局约定落在 `.dsh/docs/` 的过程性文档（specs/plans/notes）因此只留本地，不随仓库分发——需要入库的方案/设计文档请直接放仓库的 `docs/` 或对应技能目录。
+| 要做什么 | 读哪份 |
+|---|---|
+| 接入 opencode / dsh、命令契约、新增命令 | [安装与维护](docs/installation.md) |
+| 技能定位与分工（给人看） | [技能说明](docs/skills.md) |
+| 目录、脚本与三个入口 | [仓库地图](docs/agents/repository-map.md) |
+| 各技能的硬规则与内部结构 | [技能内部规则](docs/agents/skill-internals.md) |
+| 软链 / profile / 热加载 / 工具链归属 | [接入与生效语义](docs/agents/deployment.md) |
+| 发版纪律与 `/git/release` 边界 | [发版纪律](docs/agents/release-discipline.md) |
+| 跑校验、门禁与退出码 | [校验与运行](docs/agents/verification.md) |
+| 写作、命名、Git、脚本约定 | [写作与仓库约定](docs/agents/conventions.md) |
+| git-kit 完整工作流 | [git-kit 工作流](docs/git-kit.md) |
 
-**发布工具链（已迁出）**：本仓**不再有**任何 npm / pnpm / OIDC 构件——`package.json` / `pnpm-workspace.yaml` / `pnpm-lock.yaml` / `.github/workflows/release.yml` / `scripts/ci-publish.sh` / `PUBLISHING.md` 已随插件一起迁到 [morehao/dsh-commands](https://github.com/morehao/dsh-commands)。`git clone` 本仓后用技能不需要 node/pnpm（`skills/project-insight/scripts` 自己的一次性 `npm install` 除外）。
+## 目录速览
 
-**发版纪律仍然适用**（对任何仓库都一样）：**升版本不得直接提交稳定分支**（`main` 也不接受直推，发版不构成例外）→ 改 version → `commit-push` 建分支 → `pr-create` → `pr-merge` 合并 `main` → 再打 tag（规则见 `skills/git-kit/references/stable-branch.md` 与 `tag.md`「发版约束」）。**`pr-merge` 之后走 `/git/release`**：只读预检 → 一次确认 → 打 tag → **默认创建 GitHub/GitLab Release** → 逐个跟踪其他后效（workflow / GitLab pipeline / 产物，**按仓库探测**）并出回执；它**不改版本号、不开无关 PR**，也不假定仓库发 npm、不假定版本写在 `package.json`。`STATE` 为 `READY` 打 tag + 建 Release、`TAGGED` 补建/校验 Release 并跟踪、`NEEDS_TARGET` 先读仓库定目标版本再带 `--version`/`--tag` 重跑、`BLOCKED` 按 `BLOCKERS` 停（含多版本线 `target-tag-ambiguous`）。**不再使用 changesets**。
+- `commands-opencode/` — git 斜杠指令 + `handoff.md` + `cleanup.md`，都是**委托壳**：只加载对应技能并按意图执行，不含逻辑。
+- `scripts/` — `opencode-install.sh` / `dsh-install.sh`（幂等软链接入）、`check-opencode-commands.mjs`（命令契约校验）。
+- `skills/` — git-kit、handoff、project-insight、project-wiki、tech-design、svg-maker、disk-cleanup，逐个详见 [技能内部规则](docs/agents/skill-internals.md)。
+- `docs/` — 给人看的解释性文档；`docs/agents/` 是 agent 的按需加载细则。
 
-## 目录结构速览
+## 常用命令
 
-- `commands-opencode/git/*.md` — opencode 斜杠指令。是**委托壳**，只加载 `git-kit` skill 并按某种意图执行，不含逻辑。另有 `commands-opencode/handoff.md`（`/handoff`），只委托 `handoff` skill 的 `print` 分支。
-- `scripts/dsh-install.sh` — dsh 接入（软链 skills + 装 npm 上的 `@morehao/dsh-commands`），幂等。选项：`--profile <name>` / `--skills-only`（只软链技能、跳过插件）/ `--plugin-link <插件仓路径>`（插件仓开发调试走 `link:`）/ `-h`；`--skills-only` 是零副作用的安全子集。
-- `scripts/opencode-install.sh` — opencode 接入（软链 skills + commands），幂等。选项：`--skills-only` / `--commands-only` / `--check`（只检查，问题数 >0 退出 1）/ `--dry-run` / `-h`；`OPENCODE_CONFIG` 覆盖配置根。只遍历 `skills/` 下的目录，避免松散文件被通配链走，并清理技能/命令改名后的悬空软链。
-- `scripts/check-opencode-commands.mjs` — opencode 命令契约校验：frontmatter 合法字段、`**<branch> 分支**` 对应 `skills/<skill>/references/<branch>.md`、`$ARGUMENTS` 独立成行、两份 README 表格与命令文件一一对应。可选 `--dsh <插件仓路径>` 比对另一仓 `COMMANDS` 表的 branch/skill（不一致判失败，description 差异只提示）。
-- `skills/git-kit/` — Git 工作流（message/commit-push/branch/pr-create/pr-merge/tag/release/slim/star）。**请求分叉点：多文件结构**。`SKILL.md` 只做「意图路由」+「按需加载」指引；真实逻辑在 `references/`（各分支 .md）与 `scripts/`（.sh 脚本）。`release` 只做 **`pr-merge` 之后**的发布段（打 tag → **默认创建 GitHub/GitLab Release** → 跟踪其他后效并逐项校验），**不改版本号、不开无关 PR**；唯一例外是用户选择写 `CHANGELOG.md` 时由 `changelog.sh --write` 写入并走一次分支 + PR（必须在打 tag 前合入，否则 tag 指向的提交没有这条记录）；版本源由**读仓库判定**（`references/version-conventions.md` 给出 11 类主流约定的先验与现成命令：字面常量型 `--version` + `--version-file` 边界回查并回报行号、派生/注入型只给 `--tag`、CI 硬校验版本的仓库加 `--require-version-match`；脚本里**没有任何清单格式知识**，只做「tag 样式推断 / 版本比较 / 可选回查」三件通用事，原生支持无 `package.json` 的仓库）、平台能力（`gh`/`glab`、是否已登录）与后效（workflow / GitLab pipeline / `EFFECT_HINTS` 发布步骤 + 可选 `--probe-url` 产物探测）都按仓库**探测**；事实由 `scripts/release-preflight.sh`（只读）给出 `STATE=READY|TAGGED|NEEDS_TARGET|BLOCKED` 与 `RELEASE_PLATFORM|RELEASE_CLI_READY|RELEASE_EXISTS|EFFECT_RELEASE`；测试 `scripts/tests/release-preflight-test.sh` / `release-verify-test.sh`（临时仓 + 桩，不需要 node）；变更说明由 `scripts/changelog.sh` 从 Conventional Commits 汇总，`tag` 与 `release` 共用，既作 annotated tag 注记正文，也作 Release body（推送前必须确认，tag 不可改）。
-  - `commands-opencode/git/*`、另一仓的 dsh 插件与 `skills/git-kit` **共享同一实现**（互为入口：opencode 斜杠 / dsh 斜杠 / 自然语言）。改命令类的需求应落到 skill 分支，命令只保留意图声明；「命令 → 技能分支」这条契约在 opencode 侧由本仓 `scripts/check-opencode-commands.mjs`、dsh 侧由插件仓的 `scripts/check-skill-contract.mjs` 机械校验。
-- `docs/` — **给人看的**解释性文档（`skills/*/SKILL.md` 是给模型看的操作指令，两者分工不重叠）：`installation.md`（opencode / dsh 接入、契约校验、新增命令）、`skills.md`（技能定位与分工）、[`git-kit.md`](docs/git-kit.md)（入口与路由、九个分支、稳定分支唯一定义、提交→PR→合并、发版段）。`git-kit.md` 刻意保持单篇——它是一条链路读下来的流程文档；图放 `docs/assets/`（分层结构用 SVG，流程/时序/状态用 Mermaid；新画或重排的 SVG 必须跑 `skills/tech-design/scripts/audit-svg-topology.mjs`，Mermaid 必须跑 `skills/tech-design/scripts/check-mermaid.mjs` 且零 warn）。
-- `skills/handoff/` — 跨会话交接，**刻意只有单文件 `SKILL.md`（30 行）**：规则 4 条 + 取证命令 + 输出骨架 5 节，没有 `references/`。把当前会话压成一段可直接粘贴的续跑提示：**只打印、不落盘**；新会话粘贴后先核对分支/工作区/关键文件再继续。命令入口为 opencode `/handoff` 与 dsh `/handoff`（`print` 分支）。**frontmatter 标 `disable-model-invocation: true`**：只允许用户手动调用，模型可见目录里不再出现（dsh 的 skill 工具会直接拒绝加载，故 dsh 侧命令注入带「直接 read `$DSH_HOME/skills/handoff/SKILL.md`」的兜底）。
-- `skills/project-insight/` — 开源项目深度解读。`SKILL.md` 较大（约 50KB），含铁律：真源引用 `文件:行号` 必须经 `scripts/verify-references.mjs` 程序化重定位验证（指纹用**首末行双锚点**，不整段贴码；旧 snippet 格式仅存量兼容），Mermaid 图必须经 `scripts/check-mermaid.mjs` 校验全 `OK`。`[UNVERIFIED]`/`[MERMAID-ERROR]` 一律保留不静默放过。**版本基线**（step 0.5）由 `scripts/select-baseline.mjs` 程序化选定：稳定 tag > 稳定分支（`release*`/`stable*`/`maintenance*`/`1.x`）> 默认分支（main/master/远端 HEAD）> **无 main/master 的兜底矩阵**；选定后的工作树才是 `source_repo` 与引用校验根，脏工作树不静默覆盖（`git worktree` 兜底），基线写进 README 概览一行 + `CHANGELOG.md` 顶部（不进 frontmatter），细则在 `references/version-baseline.md`。参考性内容按需加载在 `references/`（`version-baseline.md` 基线选择、`data-model-guide.md` 五要素成文细则、`errors-and-fixes.md` 查错表、`analysis-guide.md` 深度方法论、`large-repo-workflow.md` 并行流程、`project-types/` 类型规格）。落盘后**不做 git add/commit**。
-- `skills/project-wiki/` — 面向**不读源码的广泛读者**产出项目 Wiki 文档（Markdown 文件：内嵌 Mermaid + 可选 `assets/*.svg`，不依赖渲染服务与外链解析）。与 `project-insight` 的分工是**受众不同**：那边每条论断后跟 `文件:行号` + 锚点指纹，供能读源码的人逐条核验；这边表达手段按**读者成本**排序（散文 → 图 → 表 → 代码），出处**收进章末一行** `> 依据：`（**不写可点击链接**，用 code span），正文**禁止出现任何校验痕迹**（锚点指纹、`Sources:`）。`SKILL.md` 是意图路由 + **七条铁律**（含**代码预算**：非图表代码块每页 ≤3 块、单块 ≤15 行、单页 ≤40 行，超了要么删、要么在页内写一行 `<!-- code-budget: <理由> -->` 显式豁免；第 7 条**快照唯一**：全部校验只对自述的那一个基线成立，校验根与 `--expect-baseline` 必须一起交）；流程为 **0 定基线 → 0.5 版本契约 → 1 落点判定 → 2 模式判定（已有 wiki → 更新模式）/ 后续 3–7**；参考性内容按需加载在 `references/`（`version-contract.md` 单基线契约与陈旧三选一裁决、`landing.md` 落点两模式（独立 `<cwd>/<项目名>-wiki/` 与 KB `{kb_repo}/{分类}/{项目名}-wiki/`，与 project-insight 的 `{分类}/{项目}/` **平级兄弟目录**、零文件名冲突）、`update-flow.md` 版本事件驱动的更新流程、`page-plan.md` 页面规划与产出形态、`page-templates.md` 各类页面骨架与必答问题、`writing-style.md` 读者画像与代码准入三问、`diagrams.md` **图选型**——默认 Mermaid，仅结构/分层、左右对比、回边状态机、节点 ≥12 四类升级 SVG——与 Mermaid 硬约束、`grounding-light.md` 轻量真源 + **严重度与归级判据** + 正文合法声明清单）。**真实性移到作者侧**：`scripts/check-docs.mjs` 是自研门禁（**三档严重度 `error`/`warn`/`note`，语义已冻结**：`--strict` 只提升 warn，**note 在任何模式下都不影响退出码**但必须默认打印；新增检查一律 note，唯一够格升 error 的是落点 `[DOC-DOCROOT-IN-SRC]`，理由写在 grounding-light；覆盖代码预算、依据行路径存在与行号未越界、首页索引一致性、图表复杂度与参与者声明、版本契约与校验根一致性、落点与 KB 索引可达性），其中 `[DOC-SRC-UNPARSED]`/`[DOC-SRC-UNCHECKED]` 是两条**反静默**机制——认不出的引用写法、以及"有引用却没传 `--source-repo`"，都要报出来而不是当作没有引用跳过；引用/代码块/frontmatter 的解析实现是 `scripts/lib/doc-parse.mjs`（单一真源，与预检脚本共用）；`scripts/check-all.mjs` 是**唯一门禁入口**（编排自研门禁 + 复用 project-insight 引擎的 Mermaid 真解析 / SVG 边拓扑审计，因此**无需另行 npm install**），汇总里带 note 计数并提醒"结论是否真的在自述基线上校验过"；`scripts/plan-update.mjs` 是**更新预检（不是门禁）**：`--from <旧ref> --to <新ref>` 出两张清单（受影响页 `[DOC-UPDATE-TOUCHED]`、未覆盖变更面 `[DOC-UPDATE-UNCOVERED]`，并给出行号漂移的真实新行号），`--emit/--against` 做结构指纹前后比对（`[DOC-UPDATE-SHRUNK]`/`[DOC-UPDATE-PAGE-DROPPED]`），退出码只表达"清单有没有产出来"；`scripts/select-baseline.mjs` 是 project-insight 同名脚本的薄壳；回归测试 `scripts/tests/gates-regression.sh`（**45 条断言**，含「故意违规必须被拦住」以及「note 不阻断、`--strict` 下也不阻断」的夹具）。落盘后**不做 git add/commit**。
-- `skills/tech-design/`（原 `tech-design-proposal`，曾用名 `design-doc`）— 技术方案/技术设计文档生成。多文件：`SKILL.md` 只做意图路由（**档位 × 场景 × 专题**三轴：档位定篇幅、场景（单选）定过程义务、专题（可多选）定技术领域加固点；**场景判定前先答「落点」第 0 问**——新系统 / 既有系统的新模块 / 既有系统的既有模块，决定取证对象与义务增量：宿主约束、对宿主的影响、必须谁签）+ 工作流（澄清 → 定档 → 定落点与场景 → 选专题 → **取证 → 按叙事链推理** → 量化 → 撰写 → 自检落盘）+ 交付前自检 + 落盘收尾（含文档状态块：状态/作者/评审人/拍板人；收尾原为 `output.md`，已合并进 SKILL.md，避免两份说法漂移）；参考性内容按需加载在 `references/`（`templates.md` **叙事链 9 问与顺序依赖** + 三档骨架与各节必答项、`scenarios.md` **落点义务增量（A/B/C）** + 六类场景义务包（新建/增量改造/结构重构/替换与迁移/下线与废弃/专项优化：必答项 + 章节增删 + 验收与回滚形态）、`focus-areas.md` 专题加固点与迁移手法手段库、`data-model.md` **数据库设计落法**（正文三张表：实体清单/字段/索引与查询匹配 + 简版 ER 图 + **DDL 只在附录**且为唯一可执行真源）、`quantification.md` 量化与量级估算（含收益口径、可用性预算、最脆弱假设）、`quality-bar.md` 图/代码/论证红线 + 反模式表 + 评审清单）。职责边界：**过程义务归场景**（落点义务 + 迁移/兼容/回滚/等价性验证），**技术必答项归专题**，两者不重复表述。四条硬要求：**事实有据**（既有系统的现状/影响面/调用方/容量水位必须带 `路径:行号`、监控口径或工单号，取不到标 `[待核实]`）、**量化义务**（性能/容量/可用性/成本/收益的论断必须给数字+口径+假设）、**取舍对偶**（每个选型写代价、不该选的场景，并回指目标或约束）、**宁轻勿重**（不适用的章节删掉，不留 N/A）。配图 **Mermaid 与 SVG 均为一等公民**，按图的职责选（结构/映射/对比/回边状态机 → SVG，走 `svg-maker` 产出；时序/线性小图 → Mermaid；节点 ≥12 或含分层/泳道/边界即改用 SVG），同一张图不做双份。`scripts/check-mermaid.mjs`、`scripts/audit-svg-topology.mjs`、`scripts/render-svg-preview.mjs` 均为 project-insight 引擎的薄壳（单一真源）；SVG 结构图新画或重排后必须跑边拓扑审计（唯一能程序化发现「看着对、边连错」的手段），成稿含图必须校验，`[MERMAID-ERROR]` 与审计非 0 不静默放过。
-- `skills/svg-maker/` — 独立 SVG 图表生成（`SKILL.md` + `references/svg-template.md`）。
+```bash
+./scripts/opencode-install.sh              # opencode 接入（--check 只检查）
+./scripts/dsh-install.sh --skills-only     # dsh 只软链技能（零副作用）
+node scripts/check-opencode-commands.mjs   # 命令契约校验
+```
 
-## 运行脚本（project-insight 的 node_modules 不入库）
-
-`skills/project-insight/scripts/` 依赖 `mermaid`、`jsdom`（`select-baseline.mjs` 只用 node 内置模块 + `git`，无 npm 依赖）。`node_modules` 被 gitignore，**首次需在其中 `npm install`**；若本机用 `cp -r` 复制注册而非软链，复制后要在副本的 `scripts/` 重装。校验用 node 直跑（不是打包器）：
-- `node scripts/select-baseline.mjs <本地路径|远端URL> [--ref <ref>] [--package <名>] [--json]`（只读：选基线 + 给落地命令；退出码 2 = 需用户确认/选择）
-- `node scripts/verify-references.mjs <source_repo> <解读.md>...`（首参 = 源码仓库根 = 基线工作树，非知识库仓库）
-- `node scripts/check-mermaid.mjs <解读.md>...`（在 `scripts/` 下）
-- `node skills/project-wiki/scripts/check-all.mjs <输出目录|md...> [--source-repo <源码根>] [--expect-baseline <ref>] [--kb-repo <知识库根>] [--allow-in-repo] [--strict] [--preview]`（project-wiki 的**唯一门禁入口**：编排自研门禁 + 上面的 Mermaid 引擎 + SVG 边拓扑审计；退出码 0 通过（仅有 warn/note）/ 1 存在 error / 2 用法或依赖缺失。**三档严重度**：`--strict` 只提升 warn，note 永不阻断；`--source-repo` 必须指向自述基线的工作树，漏传或 HEAD 不符时它如实降级说明而**不假装通过**）
-- `node skills/project-wiki/scripts/plan-update.mjs <输出目录> --source-repo <源码根> --from <旧ref> --to <新ref> [--emit <快照.json>]` / `... --against <快照.json>`（project-wiki 的**更新预检，不是门禁**：出「受影响页 + 未覆盖变更面」两张清单、给行号漂移的真实新行号、前后比对结构指纹；退出码 0 = 清单已产出，不表达通过与否）
-- `bash skills/project-wiki/scripts/tests/gates-regression.sh`（project-wiki 门禁回归：**45 条断言**，逐条验证「故意违规必须被拦住」与「note 不阻断、`--strict` 下也不阻断」）
-
-## 写作约定
-
-- 中文为主，代码/术语保留英文。
-- 子文档**主题语义命名**（`architecture.md`、`data-model.md`），**不用数字序号前缀**。
-- 标题用 Markdown 天然层级语义式命名，不加 `## 1. X` 这类数字前缀。
-- git-kit 用 Conventional Commits；分支前缀映射见 `skills/git-kit/references/branch.md`（feature/fix/hotfix/refactor/release/experiment/poc 等）。
+参数、退出码与全部门禁清单见 [校验与运行](docs/agents/verification.md)。

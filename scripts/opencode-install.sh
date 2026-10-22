@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # opencode 接入安装脚本（幂等，可重复执行）：
 #   1) 把本仓 skills/* 逐目录软链到 opencode 的 skills 目录
-#   2) 把 commands-opencode/git 与 handoff.md 软链到 opencode 的 command 目录
+#   2) 把 commands-opencode/git、handoff.md 与 cleanup.md 软链到 opencode 的 command 目录
 #
 # 为什么不用通配的 `ln -sfn skills/*`：通配会把 skills/ 下的松散文件也一起链过去，
 # 且不会清理技能改名后留下的悬空软链。本脚本只遍历目录，并先清理「指向本仓但目标已不存在」
@@ -42,7 +42,7 @@ usage() {
 用法: ./scripts/opencode-install.sh [选项]
 
   --skills-only    只软链 skills/ 到 opencode 的 skills 目录。
-  --commands-only  只软链 commands-opencode/{git,handoff.md} 到 command 目录。
+  --commands-only  只软链 commands-opencode/{git,handoff.md,cleanup.md} 到 command 目录。
   --check          只检查不修改：缺失、指向错误、悬空软链都算问题，有问题退出 1。
   --dry-run        只打印将执行的操作。
   -h, --help       显示本帮助。
@@ -238,6 +238,7 @@ if [ "$MODE" != "skills" ]; then
   clean_stale "$COMMAND_DST" "$COMMANDS_SRC"
   link_path "$COMMANDS_SRC/git" "$COMMAND_DST/git" "命令 git/"
   link_path "$COMMANDS_SRC/handoff.md" "$COMMAND_DST/handoff.md" "命令 handoff"
+  link_path "$COMMANDS_SRC/cleanup.md" "$COMMAND_DST/cleanup.md" "命令 cleanup"
 fi
 
 if [ "$CHECK" -eq 1 ]; then
@@ -257,4 +258,4 @@ fi
 if [ "$MODE" != "skills" ]; then
   echo "    命令目录：$COMMAND_DST"
 fi
-echo "    重新打开 opencode 会话（或重启）后即可使用 /git/* 与 /handoff。"
+echo "    重新打开 opencode 会话（或重启）后即可使用 /git/*、/handoff 与 /cleanup。"

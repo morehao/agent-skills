@@ -24,8 +24,8 @@ node scripts/check-opencode-commands.mjs
 
 ## 目录
 
-- `commands-opencode/` — opencode 斜杠指令（`git/*.md` + `handoff.md`）
-- `skills/` — 技能：git-kit、handoff、project-insight、project-wiki、tech-design、svg-maker
+- `commands-opencode/` — opencode 斜杠指令（`git/*.md` + `handoff.md` + `cleanup.md`）
+- `skills/` — 技能：git-kit、handoff、project-insight、project-wiki、tech-design、svg-maker、disk-cleanup
 - `docs/` — 安装、技能、git-kit 工作流
 - `scripts/` — opencode / dsh 接入 + 命令契约校验
 
@@ -43,6 +43,7 @@ node scripts/check-opencode-commands.mjs
 | `/git/slim [天数]` | 仓库瘦身为浅克隆（默认保留 30 天） |
 | `/git/star-classify` | 拉取并分类自己的 GitHub star |
 | `/handoff [范围]` | 把当前会话压成可粘贴的续跑提示（只打印） |
+| `/cleanup [范围]` | 磁盘空间回收与本地数据瘦身：先查询后清理，无参数时给选项 |
 
 参数、用法与「命令 → skill 分支」映射见 [opencode 指令集](commands-opencode/README.md)。
 
@@ -56,6 +57,7 @@ node scripts/check-opencode-commands.mjs
 | [`project-wiki`](skills/project-wiki/SKILL.md) | 面向不读源码的读者写 Wiki：散文 + 图 + 表，代码密度极低 |
 | [`tech-design`](skills/tech-design/SKILL.md) | 技术方案：档位 × 场景 × 专题三轴，取证先于动笔 |
 | [`svg-maker`](skills/svg-maker/SKILL.md) | 生成自包含、可离线打开的 SVG 图 |
+| [`disk-cleanup`](skills/disk-cleanup/SKILL.md) | 磁盘空间回收与本地数据瘦身：先查询后删，用户数据只报告 |
 
 定位、关键规则与相互分工见 [技能说明](docs/skills.md)。
 
@@ -64,9 +66,10 @@ node scripts/check-opencode-commands.mjs
 | 文档 | 内容 |
 |---|---|
 | [安装与维护](docs/installation.md) | opencode / dsh 接入、目录约定、契约校验、新增命令 |
-| [技能说明](docs/skills.md) | 六个技能的定位、关键规则与分工 |
+| [技能说明](docs/skills.md) | 七个技能的定位、关键规则与分工 |
 | [git-kit 工作流](docs/git-kit.md) | 入口与路由、提交 → PR → 合并、发版 |
 | [opencode 指令集](commands-opencode/README.md) | 指令格式、参数、映射与校验 |
+| [AGENTS.md](AGENTS.md) | 给编码 agent 的硬约束与按需加载地图（细则在 [`docs/agents/`](docs/agents/)） |
 
 > `skills/*/SKILL.md` 是给模型看的操作指令，`docs/` 是给人看的解释。
 
