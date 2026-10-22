@@ -115,7 +115,7 @@ async function parseMappingTable(readme) {
 	return mappings;
 }
 
-const COMMAND_NAME = String.raw`(git/[a-z0-9-]+|handoff)`;
+const COMMAND_NAME = String.raw`(git/[a-z0-9-]+|handoff|cleanup)`;
 const LOCAL_README_PATTERN = new RegExp(`^(?:commands-opencode/)?${COMMAND_NAME}$`);
 // 根 README 的命令表用真实斜杠写法（`/git/message <描述>`），也兼容旧的 commands-opencode/... 写法。
 // 必须带 `/` 或 `commands-opencode/` 前缀，避免把技能表里的裸 `handoff` 当成命令。
