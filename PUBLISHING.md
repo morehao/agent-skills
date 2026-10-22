@@ -63,6 +63,7 @@
    - 读 `RELEASE_TAG=v0.2.0` → 校验 `0.2.0 == commands-dsh/package.json.version`（**不一致拒绝发布**）。
    - 若 npmjs 已存在 `0.2.0` → **跳过**（幂等）。
    - 否则 OIDC：`npm publish --provenance --access public --registry https://registry.npmjs.org`。
+   - 失败时**先看 https://status.npmjs.org**：`Package publishing` 降级期间 PUT 会回 `E404 Not found`（令牌交换失败的表现与权限问题相同）。`ci-publish.sh` 已内置 3 次退避重试 + 失败后回读 registry，抖动通常自动过去了；仍失败就等恢复后 `gh run rerun <run-id>`，**不要**为此删 tag 重打。
 
 > 提示：tag 版本与 `package.json` 版本必须一致，否则 `ci-publish.sh` 会以非零退出并阻止发布（这是防误发的守卫）。tag 打在合并后的 `main` 提交上即可——版本号是随 PR 一起进 `main` 的，不需要单独为它破例直推。
 
@@ -127,5 +128,6 @@ npx --yes setup-npm-trusted-publish @morehao/dsh-commands --registry https://reg
 | Trusted Publisher 配不了 | 包还没在 npm 上存在 | 先 `setup-npm-trusted-publish` 发占位包 |
 | OIDC `401/403` | job 缺 `id-token: write` 或设了 `NODE_AUTH_TOKEN` | 加 `id-token: write`；**不要**设 `NODE_AUTH_TOKEN`（会覆盖 OIDC） |
 | OIDC `404 Not found` | workflow 名对不上 | workflow `name:` == `release.yml`（文件名） |
+| OIDC `404 Not found`（workflow 名已对） | npm registry 降级：`Package publishing` 非 operational 时 PUT 直接 404，与权限问题表现相同 | 查 https://status.npmjs.org；`ci-publish.sh` 已重试 3 次，恢复后 `gh run rerun <run-id>`（**tag 不用动**） |
 | OIDC `403 permission denied for this action` | Allowed actions 只允许 stage | 勾选**允许 `npm publish`**（无视「Not recommended」提示） |
 | `npm view`/curl 仍显示旧版本 | npm 读端点 CDN 缓存滞后（1–2 分钟，甚至 404） | 看**单版本端点** `.../pkg/0.1.0`，稍等再确认 |

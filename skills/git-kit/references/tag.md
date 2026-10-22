@@ -35,8 +35,10 @@
    ```bash
    NOTES="$(mktemp)"
    { echo "release: ${TAG}"; echo; bash scripts/changelog.sh --from "${PREV_TAG}" --to "${REMOTE}/${BRANCH}" --link-to "${TAG}"; } > "$NOTES"
-   git fetch ${REMOTE} --tags && git tag -a "${TAG}" -F "$NOTES" "${REMOTE}/${BRANCH}" && git push ${REMOTE} "${TAG}" && echo "TAG_PUSH_OK"
+   git fetch ${REMOTE} --tags && git tag -a --cleanup=verbatim "${TAG}" -F "$NOTES" "${REMOTE}/${BRANCH}" && git push ${REMOTE} "${TAG}" && echo "TAG_PUSH_OK"
    ```
+
+   **`--cleanup=verbatim` 不可省**：`git tag -F` 默认按 `strip` 清理，会把以 `#` 开头的行当注释删掉，`changelog.sh` 产出的 `### Features` 等 Markdown 小标题会整行消失（已在临时仓库复现）。`-m` 单行注记不受影响，走 `-F` 的文件必须带上。
 8. **验证**：输出出现 `TAG_PUSH_OK`，且 `git ls-remote --tags <目标仓库> <tag>` 与本地 `git tag -l <tag>` 均可见
 
 ## 发版约束（目标仓库的 `v*` tag 会触发发布时必读）
