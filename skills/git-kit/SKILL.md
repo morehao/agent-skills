@@ -1,6 +1,6 @@
 ---
 name: git-kit
-description: Git 工作流辅助工具包。当用户要求生成 commit message、提交/推送代码变更、基于中文描述创建/切换分支、面向目标仓库创建/更新 PR/MR、按编号合并 PR/MR 并回主干更新、给分支打版本标签并推送、在已合并的稳定分支上打 tag 并验证发布产物（pr-merge 之后的发布段）、将当前 git 仓库瘦身为浅克隆、或拉取并分类 GitHub star 仓库时使用该 skill（含"写个commit信息""提交一下""开个分支做XX""提个PR""把PR合并掉""打个tag""发版""发个版本""把仓库瘦身""分类我的star"等模糊表述）。
+description: Git 工作流辅助工具包。当用户要求生成 commit message、提交/推送代码变更、基于中文描述创建/切换分支、面向目标仓库创建/更新 PR/MR、按编号合并 PR/MR 并回主干更新、给分支打版本标签并推送、在已合并的稳定分支上打 tag 并默认创建 GitHub/GitLab Release（pr-merge 之后的发布段）、将当前 git 仓库瘦身为浅克隆、或拉取并分类 GitHub star 仓库时使用该 skill（含"写个commit信息""提交一下""开个分支做XX""提个PR""把PR合并掉""打个tag""发版""发个版本""把仓库瘦身""分类我的star"等模糊表述）。
 ---
 
 # Git Kit
@@ -21,14 +21,14 @@ Git 常见操作的统一入口。先按「意图路由」理解用户要做什�
 | `pr-create` | 创建/更新 PR/MR（"提PR""创建合并请求""更新MR"） | `references/pr-create.md` |
 | `pr-merge` | 合并 PR/MR 并回主干更新（"合并PR""合并MR""merge PR""把PR合掉""合入主干"）；命中后 head 为稳定分支时保留不删 | `references/pr-merge.md` |
 | `tag` | 只给分支打版本标签并推送（"打tag""打个tag""打标签""release tag""给分支打标签"） | `references/tag.md` |
-| `release` | `pr-merge` 之后的发布段（"发版""发个版本""发布新版本""上线这个版本""走一遍release流程"）；从已合并的稳定分支打 tag → 跟踪该仓库 tag 触发的后效并逐项校验（不假定是 npm） | `references/release.md` |
+| `release` | `pr-merge` 之后的发布段（"发版""发个版本""发布新版本""上线这个版本""走一遍release流程"）；从已合并的稳定分支打 tag → **默认创建 GitHub/GitLab Release** → 跟踪其他后效并逐项校验（不假定是 npm） | `references/release.md` |
 | `slim` | 仓库瘦身/浅克隆/减小体积（"瘦身""清理git历史""shallow clone"） | `references/slim.md` |
 | `star-classify` | 拉取并分类自己 star 的 GitHub 仓库（"分类我的star""把我star的仓库整理成清单"） | `references/star-classify.md` |
 
 **模糊请求直接按意图覆盖交叉处理：**
 - 既说"提交"又说"推送" → `commit-push`（含生成 message）；只说"信息/文案"或明确"不提交" → `commit-message`。
 - PR/MR 相关：**"合并请求"作 GitLab 术语（名词）** → `pr-create`；**"合并"作动词**（合并XX/合入XX/merge）→ `pr-merge`。
-- **`tag` 与 `release` 的分界**：`tag` 只给分支打标签就结束（任意分支、任意时机）；`release` 是 `pr-merge` **之后**的发布段——版本号已在稳定分支上，它负责打 tag、跟踪该仓库 tag 触发的后效（发布流水 / npm / Release 等，按探测结果）并出回执。用户要「升版本/开 PR/合并」时不属于 `release`，走 `commit-push` + `pr-create` + `pr-merge`。
+- **`tag` 与 `release` 的分界**：`tag` 只给分支打标签就结束（任意分支、任意时机，不建平台 Release）；`release` 是 `pr-merge` **之后**的发布段——版本号已在稳定分支上，它负责打 tag、**默认创建 GitHub/GitLab Release**、跟踪其他后效（发布流水 / npm 等，按探测结果）并出回执。用户要「升版本/开 PR/合并」时不属于 `release`，走 `commit-push` + `pr-create` + `pr-merge`。
 - 未命中任何信号 → 停止并询问用户具体要做的 Git 操作，不擅自动手。
 
 **参数约定**（从用户消息提取，优先于任何上下文）：
@@ -52,6 +52,6 @@ Git 常见操作的统一入口。先按「意图路由」理解用户要做什�
 - `pr-create`：先 `read references/repo-id.md`（gh/glab 的仓库参数规则），再 `read references/pr-create.md`。
 - `pr-merge`：先 `read references/stable-branch.md`（判定 head 是否保留）与 `read references/repo-id.md`（gh/glab 的仓库参数规则），再 `read references/pr-merge.md`。
 - `tag`：先 `read references/stable-branch.md`（候选分支的稳定分支偏好），再 `read references/tag.md`（含「发版约束」：版本号对齐与升版本顺序），并用 `scripts/changelog.sh --link-to <tag>` 生成注记正文（推送前让用户确认）。
-- `release`：先 `read references/ask-options.md`（**决策点一律用选项式提问**，不打印现状等人用自然语言回答），再 `read references/release.md`（发布段流程与计划卡），再 `read references/tag.md`「发版约束」（版本对齐与注记 tag），运行 `scripts/release-preflight.sh` 做只读预检（返回 `STATE` 决定是打 tag、只验证、还是索取版本；`BLOCKERS` 非空即停，`WARN` 只如实报告），用 `scripts/changelog.sh --link-to <tag>` 生成**并落盘**变更说明（进 tag 注记，推送前过目；之后不再重算）。若用户选择把变更写进 `CHANGELOG.md`：`changelog.sh --from <上个 tag> --to <BASE_REF> --version <tag> --link-to <tag> --write CHANGELOG.md` → 开 `docs/changelog-<tag>` 分支 → `pr-create` → `pr-merge` → 重新预检，再打 tag（正文仍用先前冻结那份）。
+- `release`：先 `read references/ask-options.md`（**决策点一律用选项式提问**，不打印现状等人用自然语言回答），再 `read references/release.md`（发布段流程与计划卡），再 `read references/tag.md`「发版约束」（版本对齐与注记 tag），运行 `scripts/release-preflight.sh` 做只读预检（返回 `STATE` 决定是打 tag、只验证、还是索取版本；同时给出 `RELEASE_PLATFORM` / `RELEASE_CLI_READY` / `RELEASE_EXISTS` 决定 Release 是创建还是只校验；`BLOCKERS` 非空即停，`WARN` 只如实报告），用 `scripts/changelog.sh --link-to <tag>` 生成**并落盘**变更说明（`BODY` 进 tag 注记与 Release body，推送前过目；之后不再重算）；**Release 默认由流程创建**（`EFFECT_RELEASE=workflow` 时只校验，不重复建）。若用户选择把变更写进 `CHANGELOG.md`：`changelog.sh --from <上个 tag> --to <BASE_REF> --version <tag> --link-to <tag> --write CHANGELOG.md` → 开 `docs/changelog-<tag>` 分支 → `pr-create` → `pr-merge` → 重新预检，再打 tag（正文仍用先前冻结那份）。
 - `slim`：`read references/slim.md`，按其中指引运行 `scripts/git-slim.sh`（脚本为单一真源，与 `/git/slim` 命令共用）。
 - `star-classify`：`read references/star-classify.md`，按其中指引运行 `scripts/git-star.sh`。

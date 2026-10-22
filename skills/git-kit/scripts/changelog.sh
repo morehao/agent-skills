@@ -9,7 +9,12 @@
 #   bash changelog.sh --from <tag> --to <ref>         # 常规：上一个 tag 到目标
 #   bash changelog.sh --from v1.0.0 --to origin/main --all --no-link
 #
-# 输出为 Markdown 片段，直接用于：annotated tag 的注记正文、GitHub Release notes、PR body。
+# 输出为 Markdown 片段，直接用于：annotated tag 的注记正文、GitHub/GitLab Release notes、PR body。
+#
+# compare 链接按远端平台生成（解析规则见 scripts/lib/remote.sh）：
+#   GitHub/Gitea  https://<host>/<slug>/compare/<from>...<to>
+#   GitLab        https://<host>/<slug>/-/compare/<from>...<to>
+#   平台未知      不生成链接（不猜 URL）
 #
 # 写进 CHANGELOG.md（可选，由 release 的「是否记录 CHANGELOG」分支调用）：
 #   bash changelog.sh --from <tag> --to <ref> --version v1.1.0 --write CHANGELOG.md
@@ -21,12 +26,18 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/remote.sh
+. "${SCRIPT_DIR}/lib/remote.sh"
+
 FROM=""
 TO=""
 MAX=300
 INCLUDE_MINOR=0
 WITH_LINK=1
 REMOTE=""
+REPO_URL=""
+PLATFORM_OVERRIDE=""
 LINK_TO=""
 VERSION=""
 WRITE=""
@@ -42,6 +53,8 @@ usage() {
   --no-link        不追加 compare 链接
   --link-to <ref>  compare 链接右端（默认把 --to 的 <远端>/ 前缀剥掉）
   --remote <名>    用于生成 compare 链接的远端（默认 upstream → origin）
+  --repo-url <url> 覆盖远端 URL（自建/夹具用；与 --remote 互斥，优先本参数）
+  --platform <p>   覆盖平台判定：github|gitlab|gitea|unknown（unknown = 不生成链接）
   --version <v>    版本号；用于 CHANGELOG 小节标题（与 --write 搭配）
   --write <path>   把结果写进 CHANGELOG 文件（插入到首个 `## ` 小节之前）
   --date <Y-M-D>   标题里的日期（默认今天，便于测试）
@@ -60,6 +73,8 @@ while [ $# -gt 0 ]; do
     --no-link) WITH_LINK=0; shift ;;
     --link-to) LINK_TO="${2:-}"; shift 2 ;;
     --remote) REMOTE="${2:-}"; shift 2 ;;
+    --repo-url) REPO_URL="${2:-}"; shift 2 ;;
+    --platform) PLATFORM_OVERRIDE="${2:-}"; shift 2 ;;
     --version) VERSION="${2:-}"; shift 2 ;;
     --write) WRITE="${2:-}"; shift 2 ;;
     --date) DATE="${2:-}"; shift 2 ;;
@@ -67,6 +82,11 @@ while [ $# -gt 0 ]; do
     *) die "未知参数 $1（-h 查看用法）" ;;
   esac
 done
+
+case "$PLATFORM_OVERRIDE" in
+  ''|github|gitlab|gitea|unknown) ;;
+  *) die "--platform 只接受 github|gitlab|gitea|unknown（当前：${PLATFORM_OVERRIDE}）" ;;
+esac
 
 [ -n "$TO" ] || die "缺少 --to <ref>"
 case "$MAX" in ''|*[!0-9]*) die "--max 需要正整数（当前：${MAX}）" ;; esac
@@ -159,22 +179,25 @@ if [ -z "$NOTES" ]; then
   exit 0
 fi
 
-# 可选：GitHub compare 链接
+# 可选：平台 compare 链接（GitHub/Gitea 用 /compare/，GitLab 用 /-/compare/）
 LINK=""
 if [ "$WITH_LINK" -eq 1 ] && [ -n "$FROM" ]; then
-  if [ -z "$REMOTE" ]; then
-    if git remote get-url upstream >/dev/null 2>&1; then REMOTE=upstream; else REMOTE=origin; fi
+  URL="$REPO_URL"
+  if [ -z "$URL" ]; then
+    if [ -z "$REMOTE" ]; then
+      if git remote get-url upstream >/dev/null 2>&1; then REMOTE=upstream; else REMOTE=origin; fi
+    fi
+    URL="$(git remote get-url "$REMOTE" 2>/dev/null || true)"
   fi
-  URL="$(git remote get-url "$REMOTE" 2>/dev/null || true)"
-  SLUG=""
-  case "$URL" in
-    git@github.com:*) SLUG="${URL#git@github.com:}" ;;
-    https://github.com/*) SLUG="${URL#https://github.com/}" ;;
-    ssh://git@github.com/*) SLUG="${URL#ssh://git@github.com/}" ;;
-  esac
-  SLUG="${SLUG%.git}"
+  HOST="$(git_remote_host "$URL")"
+  SLUG="$(git_remote_path "$URL")"
+  if [ -n "$PLATFORM_OVERRIDE" ]; then
+    PLATFORM="$PLATFORM_OVERRIDE"
+  else
+    PLATFORM="$(git_remote_platform "$HOST")"
+  fi
   # 右端：--link-to 优先；否则剥掉 `<远端>/` 前缀。
-  # GitHub compare 不认 `origin/main` 这类远端跟踪名，直接用会把链接打成 404。
+  # compare 链接不认 `origin/main` 这类远端跟踪名，直接用会把链接打成 404。
   RIGHT="$LINK_TO"
   if [ -z "$RIGHT" ]; then
     RIGHT="$TO"
@@ -184,10 +207,22 @@ if [ "$WITH_LINK" -eq 1 ] && [ -n "$FROM" ]; then
       esac
     done
   fi
-  if [ -n "$SLUG" ] && [ -n "$RIGHT" ]; then
-    LINK="
+  if [ -n "$HOST" ] && [ -n "$SLUG" ] && [ -n "$RIGHT" ]; then
+    case "$PLATFORM" in
+      github|gitea)
+        LINK="
 
-**Full Changelog**: https://github.com/${SLUG}/compare/${FROM}...${RIGHT}"
+**Full Changelog**: https://${HOST}/${SLUG}/compare/${FROM}...${RIGHT}"
+        ;;
+      gitlab)
+        LINK="
+
+**Full Changelog**: https://${HOST}/${SLUG}/-/compare/${FROM}...${RIGHT}"
+        ;;
+      *)
+        # 平台未知：不猜 URL，正文只留版本号（宁可少一条链接，也不给 404）
+        ;;
+    esac
   fi
 fi
 

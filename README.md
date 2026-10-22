@@ -32,7 +32,7 @@ ai-kit/
 ├── scripts/
 │   └── dsh-install.sh         # dsh 一键接入：软链 skills + 注册 commands-dsh 插件
 └── skills/                    # 技能（opencode 与 dsh 共用）
-    ├── git-kit/               # Git 工作流辅助（message/commit-push/branch/pr-create/pr-merge/tag/slim/star）
+    ├── git-kit/               # Git 工作流辅助（message/commit-push/branch/pr-create/pr-merge/tag/release/slim/star）
     │   ├── references/        # 拆分的辅助逻辑
     │   └── scripts/           # 附带脚本
     ├── handoff/               # 跨会话交接：把当前会话压成可粘贴的续跑提示（只打印）
@@ -76,7 +76,7 @@ ai-kit/
 | `commands-opencode/git/pr-create` | 基于代码差异向目标仓库创建或更新 PR/MR（自动识别 gh/glab） |
 | `commands-opencode/git/pr-merge` | 按编号合并 PR/MR，删除原分支（head 为稳定分支时保留），切回主干并更新代码（自动识别 gh/glab） |
 | `commands-opencode/git/tag` | 查看最新 tag 与来源分支，选择要打 tag 的分支与版本号，构建注记 tag 并推送 |
-| `commands-opencode/git/release` | pr-merge 之后的发布段：打 tag → 跟踪该仓库 tag 触发的后效并逐项校验 |
+| `commands-opencode/git/release` | pr-merge 之后的发布段：打 tag → 默认创建 GitHub/GitLab Release → 跟踪其他后效并逐项校验 |
 | `commands-opencode/git/commit-push` | 基于代码变更自动生成 commit message 并执行提交推送 |
 | `commands-opencode/git/slim` | 将当前 git 仓库瘦身为浅克隆，默认保留 30 天历史 |
 | `commands-opencode/git/star-classify` | 拉取并分类自己的 GitHub star 仓库，输出中文分组清单 |

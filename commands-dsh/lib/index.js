@@ -72,7 +72,7 @@ const COMMANDS = [
 	{
 		name: "git-release",
 		branch: "release",
-		description: "pr-merge 之后的发布段：在已合并的稳定分支上打 tag → 跟踪该仓库 tag 触发的后效并逐项校验（只打标签用 /git-tag）"
+		description: "pr-merge 之后的发布段：在已合并的稳定分支上打 tag → 默认创建 GitHub/GitLab Release → 跟踪其他后效并逐项校验（只打标签用 /git-tag）"
 	},
 	{
 		name: "git-tag",

@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # release 预检（只读）：pr-merge 之后的发布段所需事实。
 #
-# 起点假设：版本号已经随 PR 合并进稳定分支，工作由「打 tag → 跟踪发布后效」构成。
+# 起点假设：版本号已经随 PR 合并进稳定分支，工作由「打 tag → 创建/校验 Release → 跟踪发布后效」构成。
 #
-# 两条设计前提（避免把某个仓库的习惯当成通用规律）：
+# 三条设计前提（避免把某个仓库的习惯当成通用规律）：
 #   1. 版本来源因仓而异：Node 包读 package.json；Go/Rust/无清单仓库以 tag 本身为准。
-#   2. tag 之后的后效因仓而异：npm 包、容器镜像、文档站、GitHub Release，或什么都不做。
+#   2. 平台因仓而异：GitHub 用 gh、GitLab 用 glab；host/平台/CLI 从远端 URL 与 PATH 探测。
+#      Release 是默认交付物，所以这里要给出「能不能建、要不要建、现在已经有没有」。
+#   3. tag 之后的后效因仓而异：npm 包、容器镜像、文档站、CI 的 Release，或什么都不做。
 #      本脚本只**探测**后效，不假设；探测不到一律写「未检测到」，不当成「没有后效」。
 #
-# 不写文件、不切分支、不打 tag。默认 fetch 远端分支与 tag。
+# 不写文件、不切分支、不打 tag、不创建 Release。默认 fetch 远端分支与 tag；
+# Release 存在性查询需要 gh/glab 已登录，查不了记 unknown（不是「不存在」）。
 #
 # 另探测仓库是否维护 CHANGELOG.md（只读判断，不写）：决定计划卡里是否询问「要不要记录变更」。
 #
@@ -26,29 +29,44 @@ usage() {
   --tag <vX.Y.Z>   目标 tag；仓库没有可读的版本清单时**必需**（Go/Rust 等以 tag 为版本源）
   --no-fetch       跳过 fetch
   --no-npm         跳过 npm 已发布校验（结果记 unknown）
+  --no-release-check  跳过远端 Release 存在性查询（RELEASE_EXISTS=unknown）
+  --platform <p>   覆盖平台判定：github|gitlab|gitea|unknown（自建域名/夹具用）
   -h, --help
 EOF
 }
 
 die() { echo "错误：$*" >&2; exit 1; }
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/remote.sh
+. "${SCRIPT_DIR}/lib/remote.sh"
+
 REMOTE=""
 PKG_DIR=""
 EXPLICIT_TAG=""
+PLATFORM_OVERRIDE=""
 DO_FETCH=1
 DO_NPM=1
+DO_RELEASE_CHECK=1
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --remote) REMOTE="${2:-}"; shift 2 ;;
     --pkg) PKG_DIR="${2:-}"; shift 2 ;;
     --tag) EXPLICIT_TAG="${2:-}"; shift 2 ;;
+    --platform) PLATFORM_OVERRIDE="${2:-}"; shift 2 ;;
     --no-fetch) DO_FETCH=0; shift ;;
     --no-npm) DO_NPM=0; shift ;;
+    --no-release-check) DO_RELEASE_CHECK=0; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "未知参数 $1（-h 查看用法）" ;;
   esac
 done
+
+case "$PLATFORM_OVERRIDE" in
+  ''|github|gitlab|gitea|unknown) ;;
+  *) die "--platform 只接受 github|gitlab|gitea|unknown（当前：${PLATFORM_OVERRIDE}）" ;;
+esac
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || die "当前目录不在 git 仓库内"
 cd "$ROOT"
@@ -71,6 +89,36 @@ if [ -z "$REMOTE" ]; then
   if git remote get-url upstream >/dev/null 2>&1; then REMOTE=upstream; else REMOTE=origin; fi
 fi
 git remote get-url "$REMOTE" >/dev/null 2>&1 || die "远端 ${REMOTE} 不存在（release 需要可推送的远端）"
+
+# ---------- 平台与 Release 能力（host 解析的唯一真源：scripts/lib/remote.sh） ----------
+REMOTE_URL="$(git remote get-url "$REMOTE")"
+HOST="$(git_remote_host "$REMOTE_URL")"
+if [ -n "$HOST" ]; then
+  REPO_ID="$(git_remote_slug "$REMOTE_URL")"
+else
+  # 本地/无 host 远端没有 repo-id（gh/glab 都喂不了），留空由调用方降级。
+  REPO_ID=""
+fi
+if [ -n "$PLATFORM_OVERRIDE" ]; then
+  RELEASE_PLATFORM="$PLATFORM_OVERRIDE"
+else
+  RELEASE_PLATFORM="$(git_remote_platform "$HOST")"
+fi
+
+# 按平台选 CLI，不跨平台混用：GitHub 只认 gh、GitLab 只认 glab。
+RELEASE_CLI=none
+case "$RELEASE_PLATFORM" in
+  github) if command -v gh >/dev/null 2>&1; then RELEASE_CLI=gh; fi ;;
+  gitlab) if command -v glab >/dev/null 2>&1; then RELEASE_CLI=glab; fi ;;
+esac
+
+# 认证状态决定「能否查询/创建 Release」；查不了记 unknown，不当成「不存在」。
+RELEASE_CLI_READY=no
+if [ "$RELEASE_CLI" = gh ]; then
+  if gh auth status --hostname "$HOST" >/dev/null 2>&1; then RELEASE_CLI_READY=yes; fi
+elif [ "$RELEASE_CLI" = glab ]; then
+  if glab auth status --hostname "$HOST" >/dev/null 2>&1; then RELEASE_CLI_READY=yes; fi
+fi
 
 if [ "$DO_FETCH" -eq 1 ]; then
   git fetch --quiet "$REMOTE" --tags --prune || die "fetch ${REMOTE} 失败（网络/权限），可加 --no-fetch 用本地引用继续"
@@ -208,6 +256,10 @@ if [ -n "$TARGET_TAG" ] && git rev-parse -q --verify "refs/tags/${TARGET_TAG}" >
   if git merge-base --is-ancestor "refs/tags/${TARGET_TAG}" "$BASE_REF" 2>/dev/null; then TAG_ON_BASE=yes; fi
 fi
 
+# 版本号含 `-` 视为预发布（v1.0.0-rc.1）；GitHub Release 用 --prerelease，GitLab 无对应概念。
+RELEASE_PRERELEASE=no
+case "$TARGET_TAG" in *-*) RELEASE_PRERELEASE=yes ;; esac
+
 # ---------- CHANGELOG 维护情况（只读探测，决定计划卡要不要问） ----------
 CHANGELOG_FILE=""
 for c in CHANGELOG.md Changelog.md CHANGELOG CHANGELOG.rst; do
@@ -253,10 +305,62 @@ if grep -rhE 'npm publish' "${ROOT}/.github/workflows" 2>/dev/null | grep -vE '^
   EFFECT_NPM=yes
 fi
 
-EFFECT_GH_RELEASE=no
-if [ -n "$TAG_WORKFLOWS" ] && grep -rhE 'action-gh-release|gh release create' "${ROOT}/.github/workflows" 2>/dev/null | grep -vE '^[[:space:]]*#' | grep -q .; then
-  EFFECT_GH_RELEASE=yes
+# Release 是否由 CI 负责创建：探测依据按平台分叉，只看未注释的行。
+#   GitHub：tag workflow 里出现 action-gh-release / gh release create
+#   GitLab：.gitlab-ci.yml 由 CI_COMMIT_TAG 触发，且含 release: 或 glab release create
+EFFECT_RELEASE=none
+if [ "$RELEASE_PLATFORM" = github ]; then
+  if [ -n "$TAG_WORKFLOWS" ] && grep -rhE 'action-gh-release|gh release create' "${ROOT}/.github/workflows" 2>/dev/null | grep -vE '^[[:space:]]*#' | grep -q .; then
+    EFFECT_RELEASE=workflow
+  fi
+elif [ "$RELEASE_PLATFORM" = gitlab ]; then
+  if [ -f "${ROOT}/.gitlab-ci.yml" ] \
+     && grep -vE '^[[:space:]]*#' "${ROOT}/.gitlab-ci.yml" | grep -q 'CI_COMMIT_TAG' \
+     && grep -vE '^[[:space:]]*#' "${ROOT}/.gitlab-ci.yml" | grep -qE '^[[:space:]]*release:[[:space:]]*$|glab release create'; then
+    EFFECT_RELEASE=workflow
+  fi
 fi
+
+# CI 体系与 GitLab 的 tag 流水信号（供步骤 4 决定怎么跟踪）
+CI_SYSTEM=""
+if [ -d "${ROOT}/.github/workflows" ]; then CI_SYSTEM=github; fi
+if [ -f "${ROOT}/.gitlab-ci.yml" ]; then
+  if [ -z "$CI_SYSTEM" ]; then CI_SYSTEM=gitlab; else CI_SYSTEM="${CI_SYSTEM},gitlab"; fi
+fi
+[ -n "$CI_SYSTEM" ] || CI_SYSTEM=none
+GITLAB_TAG_CI=no
+if [ -f "${ROOT}/.gitlab-ci.yml" ] && grep -vE '^[[:space:]]*#' "${ROOT}/.gitlab-ci.yml" | grep -q 'CI_COMMIT_TAG'; then
+  GITLAB_TAG_CI=yes
+fi
+
+# Release 现在到底存不存在：能查就查，查不了记 unknown（不是「不存在」）。
+# 未认证/CLI 缺失时绝不查询，避免把权限错误当成「要新建」。
+RELEASE_EXISTS=unknown
+if [ "$DO_RELEASE_CHECK" -eq 1 ] && [ -n "$TARGET_TAG" ] && [ "$RELEASE_CLI_READY" = yes ]; then
+  if [ "$RELEASE_CLI" = gh ]; then
+    if REL_OUT="$(gh release view "$TARGET_TAG" --repo "$REPO_ID" 2>&1)"; then
+      RELEASE_EXISTS=yes
+    else
+      case "$REL_OUT" in
+        *"not found"*|*"Not Found"*|*404*) RELEASE_EXISTS=no ;;
+        *) RELEASE_EXISTS=unknown ;;
+      esac
+    fi
+  elif [ "$RELEASE_CLI" = glab ]; then
+    if REL_OUT="$(glab release view "$TARGET_TAG" -R "$REPO_ID" 2>&1)"; then
+      RELEASE_EXISTS=yes
+    else
+      case "$REL_OUT" in
+        *"not found"*|*"Not Found"*|*404*) RELEASE_EXISTS=no ;;
+        *) RELEASE_EXISTS=unknown ;;
+      esac
+    fi
+  fi
+fi
+
+# 兼容别名：旧字段只表达「GitHub 的 CI 会建 Release」，请用 EFFECT_RELEASE。
+EFFECT_GH_RELEASE=no
+if [ "$EFFECT_RELEASE" = workflow ] && [ "$RELEASE_PLATFORM" = github ]; then EFFECT_GH_RELEASE=yes; fi
 
 # npm 后效：只有仓库确实发 npm 且能定位包名时才查。
 # 用独立缓存目录：本机 ~/.npm 可能被 root 占用（EPERM），那不是「版本不存在」，不能误判成 no。
@@ -327,12 +431,29 @@ fi
 if [ -n "$PKG_CANDIDATES" ]; then add_warn "multiple-publish-packages"; fi
 if [ "${TOTAL_COMMITS:-0}" -gt 300 ]; then add_warn "commits-truncated"; fi
 if [ "$NPM_PUBLISHED" = "unknown" ]; then add_warn "npm-unknown"; fi
-if ! command -v gh >/dev/null 2>&1; then add_warn "gh-missing"; fi
+# Release 能力相关提醒：都不阻断，只影响「建 / 校验 / 手动」的选择。
+if [ "$RELEASE_PLATFORM" = "unknown" ]; then add_warn "release-host-unknown"; fi
+if [ "$RELEASE_PLATFORM" != "unknown" ] && [ "$RELEASE_CLI" = "none" ]; then add_warn "release-cli-missing"; fi
+if [ "$RELEASE_CLI" != "none" ] && [ "$RELEASE_CLI_READY" = "no" ]; then add_warn "release-auth-missing"; fi
+if [ "$DO_RELEASE_CHECK" -eq 1 ] && [ "$RELEASE_CLI_READY" = "yes" ] && [ "$RELEASE_EXISTS" = "unknown" ]; then
+  add_warn "release-check-unknown"
+fi
 if [ -n "$(git status --porcelain)" ]; then add_warn "dirty-worktree"; fi
 
 # ---------- 输出 ----------
 echo "ROOT=${ROOT}"
 echo "REMOTE=${REMOTE}"
+echo "REMOTE_URL=${REMOTE_URL}"
+echo "HOST=${HOST:-<none>}"
+echo "REPO_ID=${REPO_ID:-<none>}"
+echo "RELEASE_PLATFORM=${RELEASE_PLATFORM}"
+echo "RELEASE_CLI=${RELEASE_CLI}"
+echo "RELEASE_CLI_READY=${RELEASE_CLI_READY}"
+echo "EFFECT_RELEASE=${EFFECT_RELEASE}"
+echo "RELEASE_EXISTS=${RELEASE_EXISTS}"
+echo "RELEASE_PRERELEASE=${RELEASE_PRERELEASE}"
+echo "CI_SYSTEM=${CI_SYSTEM}"
+echo "GITLAB_TAG_CI=${GITLAB_TAG_CI}"
 echo "BASE=${BASE}"
 echo "BASE_REF=${BASE_REF}"
 echo "VERSION_SOURCE=${VERSION_SOURCE}"
