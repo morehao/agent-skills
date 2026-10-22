@@ -513,5 +513,5 @@ git tag -a --cleanup=verbatim "${TARGET_TAG}" -F "$TAG_MSG" "${BASE_REF}"
 
 - 操作指令（模型侧）：[`skills/git-kit/SKILL.md`](../skills/git-kit/SKILL.md)
 - 分支细节：`skills/git-kit/references/`（`stable-branch.md`、`commit-format.md`、`tag.md`、`release.md` 等）
-- 脚本：`skills/git-kit/scripts/`（`release-preflight.sh`、`changelog.sh`、`git-slim.sh`、`git-star.sh`）
+- 脚本：`skills/git-kit/scripts/`（`release-preflight.sh`、`release-verify.sh`、`changelog.sh`、`git-slim.sh`、`git-star.sh`）
 - 本仓的 npm 发布流程：[`PUBLISHING.md`](../PUBLISHING.md)
