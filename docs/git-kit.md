@@ -235,10 +235,28 @@ stateDiagram-v2
 
 | STATE | 含义 | 下一步 |
 |---|---|---|
-| `READY` | 版本已领先、目标 tag 不存在 | 确认计划卡 → 打 tag |
+| `READY` | 版本已领先、目标 tag 不存在 | 从选项确认计划卡 → 打 tag |
 | `TAGGED` | tag 已在（可能刚打完，也可能之前打过） | 跳过打 tag，只跟踪与校验 |
-| `NEEDS_TAG` | 没有可读的版本清单，也没给 `--tag` | 向用户索取目标 tag |
-| `BLOCKED` | 有阻断项 | 按 `BLOCKERS` 逐条处理，通常先走升版本 PR |
+| `NEEDS_TAG` | 没有可读的版本清单，也没给 `--tag` | 用选项索取目标 tag（`v0.1.0` / `v1.0.0` / 自定义） |
+| `BLOCKED` | 有阻断项 | 按 `BLOCKERS` 给对应选项，通常先走升版本 PR |
+
+### 决策点：给选项，不出填空题
+
+`release` 全程只有一次确认，但**需要用户决定的每一处都必须落成带选项的提问**，而不是打印一段现状等人用自然语言回答。规则见 `skills/git-kit/references/ask-options.md`，要点：
+
+- **汇报归汇报，决策归决策**：计划卡、预检结果、回执照常打印；决策另起一题，带选项。
+- **一次问全**：发版确认一次问三题——是否按此打 tag / 写不写 `CHANGELOG.md` / GitHub Release 谁创建（后者仅未探测到时问）。
+- **选项写法**：推荐项放第一位并标 `（推荐）`，每项一句话说后果，永远留 `自定义` 兜底；长内容（注记正文）留在提问前的正文里。
+- **阻断也给选项**：`BLOCKED` 不是「说明完就结束」，而是「升 patch / minor / major / 只跟踪现有 tag」这类可选项。
+- **不替用户选**：没选或取消就停在当前状态，报告已做 / 未做 / 下一条命令。
+
+| 场景 | 标准选项形状 |
+|---|---|
+| 确认执行 | `按此执行（推荐）` / `取消` / `改参数（自定义）` |
+| 二选一副作用 | `不做（推荐，零副作用）` / `做（写明代价）` |
+| 版本取值 | `patch` / `minor` / `major` / `自定义` |
+| 失败后处置 | `只报告（推荐）` / `重跑` / `下个版本` |
+| 不可逆操作 | `停止（推荐）` / `授权执行（写明不可逆后果）` |
 
 ### 可选的 CHANGELOG.md：唯一一次越界
 
@@ -246,7 +264,7 @@ stateDiagram-v2
 
 ```mermaid
 flowchart TD
-    P[计划卡] --> Q{写 CHANGELOG.md}
+    P[计划卡] --> Q{选：写 CHANGELOG.md？}
     Q -->|不写| T[打 tag]
     Q -->|写| A[建分支 docs/changelog-版本]
     A --> B[changelog.sh --write]
@@ -282,7 +300,7 @@ sequenceDiagram
     PF-->>A: STATE、TARGET_TAG、探测到的后效
     A->>A: changelog.sh 汇总变更说明
     A-->>U: 计划卡：版本 / tag / 说明 / 后效
-    U-->>A: 确认（唯一一次）
+    U-->>A: 从选项中选择（一次问全）
     A->>G: tag -a -F 注记 → push
     G-->>CI: tag 推送事件
     A->>CI: 按 headBranch == tag 过滤 run
@@ -292,7 +310,7 @@ sequenceDiagram
     A-->>U: 逐项回执（每一项独立结论）
 ```
 
-关键点：**确认只有一次**，但计划卡里必须包含 tag 注记的完整正文——tag 推送后正文不可改，这是唯一能反悔的时机。正文在确认时**落盘冻结**，后面即使主干因 CHANGELOG PR 前移，打 tag 也复用这份文件，不重算。
+关键点：**确认只有一次**，但计划卡里必须包含 tag 注记的完整正文——tag 推送后正文不可改，这是唯一能反悔的时机。这一次确认是**带选项的提问**（打 tag / 取消 / 改写说明，外加「写不写 CHANGELOG」「Release 谁创建」），不是等用户回一句「可以」。正文在确认时**落盘冻结**，后面即使主干因 CHANGELOG PR 前移，打 tag 也复用这份文件，不重算。
 
 ### 预检：把仓库事实查清楚
 
@@ -323,14 +341,14 @@ bash skills/git-kit/scripts/release-preflight.sh --tag v1.1.0   # 无可读版�
 
 | 类型 | 值 | 处置 |
 |---|---|---|
-| 阻断 | `no-version-source` | 索取 `--tag` 或先补版本清单 |
-| 阻断 | `version-not-ahead-of-tag` | 先走升版本 PR，**不在 release 里改版本号** |
-| 阻断 | `tag-not-on-base` | tag 打错分支，删除重打需用户显式授权 |
-| 阻断 | `tag-version-mismatch` | `--tag` 与清单版本不一致：改 tag 或先升版本 |
+| 阻断 | `no-version-source` | 用选项索取 `--tag`（`v0.1.0` / `v1.0.0` / 自定义）或先补版本清单 |
+| 阻断 | `version-not-ahead-of-tag` | 给选项 `升 patch`（推荐）/ `升 minor` / `升 major` / `只跟踪现有 tag`，再走升版本 PR，**不在 release 里改版本号** |
+| 阻断 | `tag-not-on-base` | tag 打错分支：给选项 `停止`（推荐）/ `授权删 tag 重打`（不可逆） |
+| 阻断 | `tag-version-mismatch` | 给选项 `先升版本到 <tag 版本>`（推荐）/ `改用清单版本作 tag` / `停止` |
 | 提醒 | `npm-unknown` | 查不了（网络/缓存），不是"未发布" |
-| 提醒 | `gh-missing` | 无法跟踪流水，需人工确认 |
+| 提醒 | `gh-missing` | 无法跟踪流水：给选项「继续只做产物校验（推荐）/ 停止」 |
 | 提醒 | `dirty-worktree` | 不阻断：打 tag 不碰工作区 |
-| 提醒 | `latest-tag-not-semver` | tag 无法与版本比较（守卫跳过），需人工确认 |
+| 提醒 | `latest-tag-not-semver` | tag 无法与版本比较（守卫跳过），改由计划卡的 tag 确认兜底 |
 | 提醒 | `multiple-publish-packages` | 按 `PKG_CANDIDATES` 用 `--pkg` 指定发布包 |
 | 提醒 | `commits-truncated` | 变更说明超 300 条，需要时给 `changelog.sh` 加 `--max` |
 
@@ -343,7 +361,7 @@ bash skills/git-kit/scripts/release-preflight.sh --tag v1.1.0   # 无可读版�
 | 发布流水 | workflow 的 `on:` 段含 `tags:` | 每个 workflow 的 run 结论（按 `headBranch == tag` 匹配） |
 | npm | `package.json` 有 `publishConfig`，或 workflow 含 `npm publish` | `npm view <name>@<version>` |
 | GitHub Release | tag workflow 含 `action-gh-release` / `gh release create` | `gh release view <tag>` + notes 非空 |
-| 镜像 / 文档站 / 部署 | **不探测** | 标「未检测到」，由人确认 |
+| 镜像 / 文档站 / 部署 | **不探测** | 标「未检测到」；需跟踪时用选项问「继续（推荐）/ 指定产物与校验方式」 |
 
 三种仓库跑同一套流程的结果：
 
@@ -353,7 +371,7 @@ bash skills/git-kit/scripts/release-preflight.sh --tag v1.1.0   # 无可读版�
 | 容器镜像 | `image.yml` | `no` | 只有流水 |
 | 无 workflow | 空 | `no` | 明确写「未检测到 tag 触发的发布流水；tag 即交付物」 |
 
-**探测不到 ≠ 没有后效。** 报告写「未检测到可校验的后效」，不写「无后效」，也不把没探到的东西当失败。探测只看**未注释**的行——workflow 头部注释常提到 `tags:` / `npm publish`，注释不算后效。非 GitHub 平台（GitLab/Gitea）不猜流水状态，标「需人工确认」。
+**探测不到 ≠ 没有后效。** 报告写「未检测到可校验的后效」，不写「无后效」，也不把没探到的东西当失败。探测只看**未注释**的行——workflow 头部注释常提到 `tags:` / `npm publish`，注释不算后效。非 GitHub 平台（GitLab/Gitea）不猜流水状态：标「流水状态未知」，并给选项「继续按可得信息出回执 / 停止，人工核对后再跑」。
 
 ### 变更说明：tag 注记的唯一来源
 
@@ -402,13 +420,13 @@ git tag -a "${TARGET_TAG}" -F "$NOTES" "${BASE_REF}"
 
 | 情况 | 处理 |
 |---|---|
-| 版本没领先 tag | `BLOCKED`，先走升版本 PR，release 里不改版本 |
+| 版本没领先 tag | `BLOCKED`：给选项「升 patch / minor / major / 只跟踪现有 tag」，再走升版本 PR，release 里不改版本 |
 | tag 已存在且正确 | `TAGGED`，跳过打 tag，只跟踪与校验（重跑幂等） |
-| workflow 失败 | **不删 tag 重打**：给 run 链接，建议 `gh run rerun <id>` 或进下一个版本号 |
+| workflow 失败 | **不删 tag 重打**（tag 不可变）：给 run 链接 + 选项「只报告 / 重跑 / 下个版本」 |
 | workflow 仍在跑 | 可中止；重跑从 `TAGGED` 继续跟踪，不会重复打 tag |
 | npm / Release 查不了 | 报「未知」，不并入成功也不判失败 |
-| tag 打错分支 | `STATE=BLOCKED` + `tag-not-on-base`；删除重打必须用户显式授权 |
-| `--tag` 与清单版本不一致 | `STATE=BLOCKED` + `tag-version-mismatch`；改 tag 或先升版本，不静默改目标 |
+| tag 打错分支 | `STATE=BLOCKED` + `tag-not-on-base`；给选项「停止 / 授权删除重打」（不可逆） |
+| `--tag` 与清单版本不一致 | `STATE=BLOCKED` + `tag-version-mismatch`；给选项「先升版本 / 改用清单版本作 tag / 停止」，不静默改目标 |
 
 ### 发版段的边界
 
@@ -431,6 +449,7 @@ git tag -a "${TARGET_TAG}" -F "$NOTES" "${BASE_REF}"
 | 你想改 | 改哪儿 |
 |---|---|
 | 稳定分支判定 | `references/stable-branch.md`（改这里等于改四个分支） |
+| 决策点怎么问（选项形状与推荐项） | `references/ask-options.md` |
 | 某个流程的步骤/验收 | `references/<分支>.md` |
 | 机械动作（预检、变更说明、瘦身） | `scripts/*.sh` |
 | 加一个新入口（新命令） | `commands-opencode/git/*.md` 或 `commands-dsh/lib/index.js`，**只加声明** |
@@ -453,6 +472,7 @@ git tag -a "${TARGET_TAG}" -F "$NOTES" "${BASE_REF}"
 3. **"tag 打错了，改一下"** —— tag 推送后不可编辑，只能删了重打，且需要用户授权；所以注记正文与目标 sha 都要在推送前确认。
 4. **"没检测到发布流水就是没发出去"** —— 只说明本仓没有 `tags:` 触发的 workflow，或者发布走的是别的方式（手动、外部流水）；报告只呈现事实。
 5. **"npm 查不到就是发布失败"** —— 可能是缓存/网络导致查不了（`NPM_PUBLISHED=unknown`），两者要分开报。
+6. **"把预检结果打印出来，然后问『要不要发版』"** —— 这是开放式追问，等于把「有哪些选择、各自代价」丢回给用户。该给的是选项：按此打 tag / 取消 / 改说明，外加 CHANGELOG 与 Release 两题（见 `references/ask-options.md`）。
 
 ## 参考
 

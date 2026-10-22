@@ -1,6 +1,6 @@
 # release 分支：`pr-merge` 之后的发布段
 
-**主线只做三件事：打 tag → 跟踪 tag 触发的发布后效 → 校验并出回执。** 不改版本号、不建分支、不开 PR——版本号已经随前置 PR 合并进稳定分支。**唯一例外**：用户在计划卡里选择「写 CHANGELOG.md」时，会为这一个文件开一次分支 + PR（见步骤 2），且必须在打 tag 之前合入。
+**主线只做三件事：打 tag → 跟踪 tag 触发的发布后效 → 校验并出回执。** 不改版本号、不建分支、不开 PR——版本号已经随前置 PR 合并进稳定分支。**唯一例外**：用户在选项里选了「写 CHANGELOG.md」时，会为这一个文件开一次分支 + PR（见步骤 2），且必须在打 tag 之前合入。
 
 **两条必须守住的边界（否则会把某个仓库的习惯当成通用规律）：**
 
@@ -16,6 +16,7 @@
 | 本分支不做 | 改版本号、建 `release/*` 分支、开 PR、合并、回合并 |
 | 与 `tag` 的分界 | `tag` 只打标签就结束；`release` = 打标签 + 跟踪后效 + 逐项校验 + 回执 |
 | 判定来源 | 稳定分支与 tag 约束复用 `stable-branch.md` / `tag.md`「发版约束」，本文件不复述 |
+| 决策方式 | **一律用选项式提问**（`references/ask-options.md`）：计划卡只负责告知，待决事项必须变成可点的选项，不打印现状等人用自然语言回答 |
 
 ## 后效是仓库事实，不是假定
 
@@ -26,7 +27,7 @@
 | `TAG_WORKFLOWS` | `.github/workflows/*.yml` 的 `on:` 段含 `tags:`（`jobs:` 之前） | 每个 workflow 的 run 结论 |
 | `EFFECT_NPM` | `package.json` 有 `publishConfig`，或任一 workflow 含 `npm publish` | `npm view <name>@<version>` |
 | `EFFECT_GH_RELEASE` | tag workflow 里出现 `action-gh-release` / `gh release create` | `gh release view <tag>` |
-| 其他（镜像 / 文档站 / 部署） | **不探测** | 记为"未检测到"，由用户确认或人工核对 |
+| 其他（镜像 / 文档站 / 部署） | **不探测** | 记为"未检测到"；确需跟踪时用选项问「继续（推荐）/ 指定产物与校验方式」，不猜 |
 
 探测只看**未注释**的行（workflow 头部注释里常出现 `tags:` / `npm publish` 之类字样，注释不能算后效）。
 
@@ -46,12 +47,12 @@ bash scripts/release-preflight.sh              # 无清单仓库加 --tag v1.1.0
 |---|---|---|
 | `READY` | 目标 tag 尚未存在 | 步骤 1 →（可选 2）→ 3 → 4 |
 | `TAGGED` | tag 已存在 | **跳过步骤 2 与 3**：tag 正文不可改，CHANGELOG 也无从补入，直接跟踪与校验（重跑即幂等） |
-| `NEEDS_TAG` | 无清单且未给 `--tag` | 停：让用户给目标 tag（或先补版本清单） |
-| `BLOCKED` | 版本没领先 tag / tag 不在稳定分支历史 / `--tag` 与清单版本不一致 | 停，按 `BLOCKERS` 逐条说明 |
+| `NEEDS_TAG` | 无清单且未给 `--tag` | 停，**用选项**索取目标 tag（`v0.1.0` / `v1.0.0` / 自定义，另可 `先补版本清单`） |
+| `BLOCKED` | 版本没领先 tag / tag 不在稳定分支历史 / `--tag` 与清单版本不一致 | 停，按 `BLOCKERS` **给对应选项**（见步骤 1 的 BLOCKED 选项表），不是「说明完就结束」 |
 
-`WARN` 不阻断：`dirty-worktree` 不影响打 tag；`npm-unknown` 是查不了而非未发布；`gh-missing` 则无法跟踪流水，需人工确认；`latest-tag-not-semver` 表示 tag 无法与版本号比较（守卫跳过，靠人确认）；`multiple-publish-packages` 要按 `PKG_CANDIDATES` 用 `--pkg` 指定发布包；`commits-truncated` 表示变更说明超过 300 条，需要时给 `changelog.sh` 加 `--max`。
+`WARN` 不阻断：`dirty-worktree` 不影响打 tag；`npm-unknown` 是查不了而非未发布；`gh-missing` 表示无法跟踪流水，给选项「继续只做产物校验（推荐）/ 停止」；`latest-tag-not-semver` 表示 tag 无法与版本号比较（守卫跳过，改由计划卡的 tag 确认兜底）；`multiple-publish-packages` 要按 `PKG_CANDIDATES` 用 `--pkg` 指定发布包；`commits-truncated` 表示变更说明超过 300 条，需要时给 `changelog.sh` 加 `--max`。
 
-### 1. 唯一一次确认（计划卡）
+### 1. 唯一一次确认（计划卡 + 选项）
 
 ```
 发布计划
@@ -59,7 +60,7 @@ bash scripts/release-preflight.sh              # 无清单仓库加 --tag v1.1.0
   版本     <PKG_VERSION 或 --tag>（自 <LATEST_TAG> 起 N 个提交：feat a / fix b / breaking c）
   tag      <TARGET_TAG> @ <BASE_REF> 的 <sha>（注记 tag，正文见下方变更说明）
   说明     变更说明全文（进 tag 注记，也是 Release notes 的来源）
-  CHANGELOG <有：<文件>，已记录/未记录 | 无此文件> → 问「要不要写进 CHANGELOG.md」
+  CHANGELOG <有：<文件>，已记录/未记录 | 无此文件> → 作为下文第 ② 题的选项呈现
   后效     workflow: <TAG_WORKFLOWS 或「未检测到」>
            npm: <包名 或「未检测到」>
            GitHub Release: <是 / 未检测到>
@@ -72,14 +73,35 @@ bash scripts/release-preflight.sh              # 无清单仓库加 --tag v1.1.0
 NOTES="$(mktemp)"
 { echo "release: ${TARGET_TAG}"; echo; \
   bash scripts/changelog.sh --from "${LATEST_TAG}" --to "${BASE_REF}" --link-to "${TARGET_TAG}"; } > "$NOTES"
-cat "$NOTES"          # 贴进计划卡让用户确认
+cat "$NOTES"          # 作为计划卡正文展示；决策走下面的选项
 ```
 
 首个版本去掉 `--from`。**`--link-to` 不可省**：`--to` 是 `origin/main` 这类远端跟踪名，直接塞进 compare 链接会得到 404；`--link-to` 指向即将打的 tag，推送后链接即有效。
 
-同时确认 GitHub Release 的去向：探测到 `EFFECT_GH_RELEASE=yes` 时由仓库 workflow 创建（本流程只校验 notes 非空）；未探测到时在计划卡里问一次「由本流程创建 / 不创建」，不擅自创建。
+计划卡只是**告知**（版本源、tag、sha、注记正文、探测到的后效）。紧接着必须**把这一阶段所有待决事项并进同一次选项式提问**（`references/ask-options.md`）——不要打印完计划卡就停下来等用户回一句「可以」。长内容留在计划卡正文里，选项只写短标签 + 后果：
 
-确认后不再中途询问。
+| STATE | 同一次提问里的题 | 选项（推荐项在前） |
+|---|---|---|
+| `READY` | ① 是否按此打 tag | `按此打 tag`（推荐）/ `取消` / `改 tag 名或说明` |
+| | ② 是否写 `CHANGELOG.md` | `不写，直接打 tag`（推荐，零副作用）/ `写，并走一次分支 + PR` |
+| | ③ GitHub Release 谁创建（**仅** `EFFECT_GH_RELEASE=no` 时问） | `不创建`（推荐）/ `由本流程创建` |
+| `NEEDS_TAG` | 目标 tag | `v0.1.0`（推荐，首个版本）/ `v1.0.0` / `自定义` |
+| `TAGGED` | 无需提问（只跟踪校验，重跑幂等） | — |
+
+- `EFFECT_GH_RELEASE=yes` 时第 ③ 题不问：由仓库 workflow 创建，本流程只校验 notes 非空，不擅自再建一个。
+- 第 ② 题选「写」才进步骤 2；选「不写」则全程不碰工作区。
+
+`BLOCKED` 时同样不是「逐条说明就结束」，而是按 `BLOCKERS` 给选项：
+
+| `BLOCKERS` | 选项（推荐项在前） |
+|---|---|
+| `version-not-ahead-of-tag` | `升 patch 到 <下一版>`（推荐）/ `升 minor 到 <y>` / `升 major 到 <z>` / `只跟踪现有 tag，不发新版本` |
+| `tag-not-on-base` | `停止`（推荐）/ `授权删 tag 重打`（不可逆：正文与目标 sha 都无法改） |
+| `tag-version-mismatch` | `先升版本到 <tag 版本>`（推荐）/ `改用清单版本 <PKG_VERSION> 作 tag` / `停止` |
+
+除「只跟踪现有 tag」外，升版本都要走 `commit-push` → `pr-create` → `pr-merge`，合并后重新预检（**本流程不改版本号**）。
+
+用户选完后**不再中途询问**；后续唯一会再提问的场合是步骤 4 出现失败/超时（给「只报告 / 重跑 / 下个版本」，见步骤 4）。
 
 ### 2. 可选：写 CHANGELOG.md（需要一次分支 + PR）
 
@@ -149,14 +171,16 @@ gh run list --workflow <file> --limit 20 --json databaseId,headBranch,status,con
 | 超时未结束 | ⏳ 给 run 链接与当前状态 |
 | 匹配不到 run | ⚠️ 说明「该 workflow 未见 tag 触发记录」，不判成功 |
 
+出现 `failure` / 超时 / 匹配不到 run 时，报告完给**一题选项**（`references/ask-options.md`）：`只报告`（推荐）/ `gh run rerun <id>`（仅 failure）/ `下个版本再发`。不自行 rerun，也不因为「重跑一下可能就好了」替用户决定。
+
 然后按探测到的产物类型校验：
 
 - `EFFECT_NPM=yes`：`npm view <name>@<version> --registry https://registry.npmjs.org` → 可见 / 不可见 / 查不了（三档，查不了不算失败也不算成功）
 - `EFFECT_GH_RELEASE=yes`：`gh release view <tag>` → 存在（并检查 notes 非空）/ 不存在
-- 计划卡里选了「由本流程创建」：`gh release create <tag> --notes-file "$NOTES"`（用步骤 1 已确认的文件；重跑时先按上面说明生成）→ 创建后回读确认
+- 选项里选了「由本流程创建」：`gh release create <tag> --notes-file "$NOTES"`（用步骤 1 已确认的文件；重跑时先按上面说明生成）→ 创建后回读确认
 - 两者皆 `no` 且 `TAG_WORKFLOWS=<none>`：明确写「本仓未检测到 tag 触发的发布流水；tag 即交付物」，不做任何成功断言
 
-非 GitHub 仓库（GitLab/Gitea）：`gh run list` 不适用，报告为「流水状态未知，需人工确认」，不猜。
+非 GitHub 仓库（GitLab/Gitea）：`gh run list` 不适用，报告为「流水状态未知」，并给选项 `继续按可得信息出回执`（推荐）/ `停止，人工核对后再跑`，不猜。
 
 ### 5. 回执
 
@@ -175,13 +199,13 @@ gh run list --workflow <file> --limit 20 --json databaseId,headBranch,status,con
 
 | 情况 | 处理 |
 |---|---|
-| workflow 失败 | **不删 tag 重打**（tag 不可变）；给 run 链接，建议 `gh run rerun <id>` 或下个版本号 |
+| workflow 失败 | **不删 tag 重打**（tag 不可变）；给 run 链接 + 选项 `只报告`（推荐）/ `gh run rerun <id>` / `下个版本再发` |
 | 仍在跑 | 可中止；重跑本流程会从 `TAGGED` 继续跟踪，不会重复打 tag |
 | 已全部通过 | 重跑同样给出一致回执（幂等） |
-| 版本没领先 tag | `STATE=BLOCKED`，先走升版本 PR |
-| tag 不在主干 | `STATE=BLOCKED` + `BLOCKERS=tag-not-on-base`，多为打错分支，删/重打需用户显式授权 |
-| `--tag` 与清单版本不一致 | `STATE=BLOCKED` + `BLOCKERS=tag-version-mismatch`，改 tag 或先升版本，**不静默改 tag 目标** |
-| 无清单且无 `--tag` | `STATE=NEEDS_TAG`，向用户索取目标 tag |
+| 版本没领先 tag | `STATE=BLOCKED`，给选项 `升 patch`（推荐）/ `升 minor` / `升 major` / `只跟踪现有 tag`，再走升版本 PR |
+| tag 不在主干 | `STATE=BLOCKED` + `BLOCKERS=tag-not-on-base`，多为打错分支；给选项 `停止`（推荐）/ `授权删 tag 重打`（不可逆） |
+| `--tag` 与清单版本不一致 | `STATE=BLOCKED` + `BLOCKERS=tag-version-mismatch`，给选项 `先升版本到 <tag 版本>`（推荐）/ `改用清单版本作 tag` / `停止`，**不静默改 tag 目标** |
+| 无清单且无 `--tag` | `STATE=NEEDS_TAG`，用选项索取目标 tag（`v0.1.0` / `v1.0.0` / 自定义） |
 | CHANGELOG PR 未合并 | 停：不打 tag。先合并 PR 再重新预检（否则 tag 指向的提交没有这条记录） |
 | CHANGELOG 已含该版本 | `changelog.sh` 退出码 3，视为完成，不重复写、不重复开 PR |
 | 打完 tag 才发现漏记 | 不改 tag；记到下一个版本，或经用户明确授权后删 tag 重打 |
@@ -199,6 +223,7 @@ gh run list --workflow <file> --limit 20 --json databaseId,headBranch,status,con
 - 版本源为 manifest 时：`<BASE_REF>` 的 `package.json.version == <TARGET_TAG>`（去 `v`）
 - tag 注记非空且含变更说明（`git for-each-ref --format='%(contents)' refs/tags/<tag>` 可读）
 - 每个探测到的后效都有独立结论（成功 / 失败 / 未知），没有一个被静默跳过
+- 每个需要用户决定的场合都落成了**带选项的提问**（含推荐项与自定义兜底），没有开放式追问、没有「打印现状等人回复」
 - 未探测到的后效在回执里显式标注「未检测到」，不说成「无后效」或「已发布」
 - 选了写 CHANGELOG 时：合并后重新预检 `CHANGELOG_HAS_VERSION=yes`，且 tag 指向**合并之后**的 `<BASE_REF>`（不是合并前那次的 sha）
 - 任一步失败 → 停在当前状态，报告「STATE + 已做/未做 + 下一条命令」，不伪造成功
