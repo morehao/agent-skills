@@ -24,7 +24,7 @@
  *   `readFallback: true`，注入文本里带「直接 read 技能文件」的兜底路径。
  *
  * 分支 key 词汇表（与各 SKILL.md 决策树对齐）：
- *   git-kit: commit-push / commit-message / branch / pr-create / pr-merge / tag / slim / star-classify
+ *   git-kit: commit-push / commit-message / branch / pr-create / pr-merge / tag / release / slim / star-classify
  *   handoff: print
  */
 
@@ -68,6 +68,11 @@ const COMMANDS = [
 		branch: "pr-merge",
 		hint: "[PR/MR 编号]",
 		description: "按编号合并 PR/MR（自动识别 gh/glab），删除原分支（head 为稳定分支时保留），切回主干并更新代码"
+	},
+	{
+		name: "git-release",
+		branch: "release",
+		description: "pr-merge 之后的发布段：在已合并的稳定分支上打 tag → 跟踪该仓库 tag 触发的后效并逐项校验（只打标签用 /git-tag）"
 	},
 	{
 		name: "git-tag",

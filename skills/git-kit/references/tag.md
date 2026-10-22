@@ -21,9 +21,22 @@
    - 选择含 `release` 的分支且分支名带版本号时，候选 tag 优先从分支名推断（如 `release/2.0.0`、`release-v2.0` → `v2.0.0`），作为第 1 个候选
    - 用户可选候选或自定义（如 `v1.3.0-beta.1`）
    - **校验不冲突**：`git tag -l <tag>` 与 `git ls-remote --tags <目标仓库> <tag>` 均须无输出；冲突则提示换名，不覆盖已有 tag
-6. **确认**：展示 `<tag>` @ `<branch>` @ `<sha> <subject>`（tag 指向的提交）让用户确认后再执行
+6. **生成注记正文并确认**：用 `scripts/changelog.sh`（与 `release` 共用同一实现）从上一个 tag 汇总变更，作为注记正文。下文用 `PREV_TAG`（上一个 tag；首个 tag 时为空）、`REMOTE`、`BRANCH`、`TAG` 指代已确认的值：
+
+   ```bash
+   bash scripts/changelog.sh --from "${PREV_TAG}" --to "${REMOTE}/${BRANCH}" --link-to "${TAG}"   # 首个 tag 省略 --from
+   ```
+
+   `--link-to` 让 compare 链接右端指向**即将打的 tag**；`--to` 是 `origin/main` 这类远端跟踪名，直接塞进链接会得到 404。
+
+   展示 `<tag>` @ `<branch>` @ `<sha> <subject>` **和完整注记正文**让用户确认——tag 一旦推送就不能改正文，必须在推送前定稿。用户可改写、精简，或只要首行 `release: <tag>`。若还要把变更写进 `CHANGELOG.md`，那是 `release` 分支的可选动作（本分支不写文件）。
 7. **构建并推送**（同一 bash 链式，防半途）：
-   `git fetch <目标仓库> --tags && git tag -a <tag> -m "release: <tag>" <目标仓库>/<branch> && git push <目标仓库> <tag> && echo "TAG_PUSH_OK"`
+
+   ```bash
+   NOTES="$(mktemp)"
+   { echo "release: ${TAG}"; echo; bash scripts/changelog.sh --from "${PREV_TAG}" --to "${REMOTE}/${BRANCH}" --link-to "${TAG}"; } > "$NOTES"
+   git fetch ${REMOTE} --tags && git tag -a "${TAG}" -F "$NOTES" "${REMOTE}/${BRANCH}" && git push ${REMOTE} "${TAG}" && echo "TAG_PUSH_OK"
+   ```
 8. **验证**：输出出现 `TAG_PUSH_OK`，且 `git ls-remote --tags <目标仓库> <tag>` 与本地 `git tag -l <tag>` 均可见
 
 ## 发版约束（目标仓库的 `v*` tag 会触发发布时必读）
@@ -39,6 +52,7 @@
 ## 注意事项
 
 - 只打**注记 tag**（`-a` 带消息/作者/日期）；轻量 tag 无这些信息，不适合发版
+- 注记正文是「这版改了什么」的唯一机读载体，由 `scripts/changelog.sh` 从 Conventional Commits 汇总，**推送前必须确认**（tag 不可改）
 - tag 指向 `<目标仓库>/<branch>` 的远端最新提交，不受本地分支状态影响
 - 打 tag 不改任何文件/提交，**不切换当前分支**，无需工作区干净
 - tag 已存在（本地或远端）→ 停并报告，`git tag` 默认拒绝覆盖、`git push` 也会被拒，不伪造成功
