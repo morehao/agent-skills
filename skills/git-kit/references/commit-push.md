@@ -13,7 +13,7 @@
 
 ## 稳定分支自动建分支（在稳定分支时执行）
 
-稳定分支判定：**唯一定义在 `references/stable-branch.md`**（本文不再复述判定表）。发版升版本（改 `commands-dsh/package.json` 的 `version`）**不豁免**——同样走本流程建分支，再走 PR 合并 `main`，合并后才打 tag（顺序与守卫见 `references/tag.md`「发版约束」与 `PUBLISHING.md`）。
+稳定分支判定：**唯一定义在 `references/stable-branch.md`**（本文不再复述判定表）。发版升版本（改发布包 `package.json` 的 `version`）**不豁免**——同样走本流程建分支，再走 PR 合并 `main`，合并后才打 tag（顺序与守卫见 `references/tag.md`「发版约束」）。
 
 稳定分支不允许直接提交，先基于代码变动自动创建分支再走后续流程，避免污染稳定分支：
 
@@ -30,7 +30,7 @@
 
 ## 注意事项
 
-- **稳定分支约束**：当前分支命中 `references/stable-branch.md` 的稳定分支定义且**确有代码变动**时，才自动建分支后提交；其他分支直接提交。**发版升版本不是例外**（改 `version` 也要建分支 → PR → 合并，见 `PUBLISHING.md`）。无论哪条，**无变动一律不建分支、不提交**（如实报告）
+- **稳定分支约束**：当前分支命中 `references/stable-branch.md` 的稳定分支定义且**确有代码变动**时，才自动建分支后提交；其他分支直接提交。**发版升版本不是例外**（改 `version` 也要建分支 → PR → 合并，见 `references/stable-branch.md`）。无论哪条，**无变动一律不建分支、不提交**（如实报告）
 - message 内不要包含双引号 `"`，避免破坏 `git commit -m "..."` 的引号配对
 - 若 `git commit` 报 `nothing to commit`（工作区无变更）或 `git add` 无内容，如实报告当前状态，不继续提交
 

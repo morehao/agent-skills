@@ -1,6 +1,6 @@
 # opencode 扩展工具集 (ai-kit)
 
-本项目集中管理我要用的 opencode 自定义扩展：一部分是 `commands-opencode/`（斜杠指令），一部分是 `skills/`（技能）；同源逻辑还以 `commands-dsh/` 插件形式接入 dsh（见 [dsh 接入](#dsh-接入可选)）。
+本项目集中管理我要用的 opencode 自定义扩展：`commands-opencode/`（斜杠指令）+ `skills/`（技能）。dsh 侧的斜杠命令插件在独立仓 [morehao/dsh-commands](https://github.com/morehao/dsh-commands)（npm 安装），本仓只提供它依赖的技能（见 [dsh 接入](#dsh-接入可选)）。
 
 ## 目录结构
 
@@ -8,7 +8,6 @@
 ai-kit/
 ├── README.md                  # 本说明
 ├── LICENSE
-├── PUBLISHING.md              # npm 发包流程与踩坑说明（@morehao/dsh-commands / OIDC）
 ├── commands-opencode/          # opencode 斜杠指令
 │   ├── README.md              # 指令功能与用法说明
 │   ├── handoff.md             # 跨会话交接指令（/handoff，只打印）
@@ -21,16 +20,11 @@ ai-kit/
 │       ├── commit-push.md
 │       ├── slim.md
 │       └── star-classify.md
-├── commands-dsh/              # dsh 插件：git-kit / handoff 的 dsh 原生斜杠命令入口（命令=意图表，与 opencode 入口共享 skill）
-│   ├── package.json
-│   ├── cordis.patch.yml
-│   ├── lib/index.js
-│   └── README.md
 ├── docs/                      # 说明文档：git-kit 工作流解释（含 Mermaid / SVG 图）
 │   ├── git-kit.md             #   入口与路由、提交→PR→合并、发版（tag / release）
 │   └── assets/                #   图（SVG）
 ├── scripts/
-│   └── dsh-install.sh         # dsh 一键接入：软链 skills + 注册 commands-dsh 插件
+│   └── dsh-install.sh         # dsh 接入：软链 skills + 装 npm 上的 dsh-commands 插件
 └── skills/                    # 技能（opencode 与 dsh 共用）
     ├── git-kit/               # Git 工作流辅助（message/commit-push/branch/pr-create/pr-merge/tag/release/slim/star）
     │   ├── references/        # 拆分的辅助逻辑
@@ -63,7 +57,7 @@ ai-kit/
 
 每个 skill 目录下是一个 `SKILL.md`（含 frontmatter 定义触发条件），复杂逻辑可拆到 `references/` 子目录。`skills/` 下只放各技能的目录，不放置说明性文件（见下方"用法说明"）。
 
-> **联动**：`skills/git-kit` 是 Git 工作流逻辑与意图路由的唯一真源；`commands-opencode/git/*`（opencode 斜杠）与 `commands-dsh/`（dsh 斜杠）只是**命令入口**，声明「命令 → git-kit 分支」映射并交给 git-kit 执行，互为多条入口（opencode 斜杠指令 / dsh 斜杠命令 / 自然语言触发）。`skills/handoff` 同理：`commands-opencode/handoff.md` 与 dsh `/handoff` 只声明「命令 → handoff print 分支」，只打印交接文本、不落盘。
+> **联动**：`skills/git-kit` 是 Git 工作流逻辑与意图路由的唯一真源；`commands-opencode/git/*`（opencode 斜杠）与另一仓的 `morehao/dsh-commands` 插件（dsh 斜杠）只是**命令入口**，声明「命令 → git-kit 分支」映射并交给 git-kit 执行，互为多条入口（opencode 斜杠指令 / dsh 斜杠命令 / 自然语言触发）。`skills/handoff` 同理：`commands-opencode/handoff.md` 与 dsh `/handoff` 只声明「命令 → handoff print 分支」，只打印交接文本、不落盘。
 
 ## commands —— 斜杠指令
 
@@ -86,19 +80,20 @@ ai-kit/
 
 ## dsh 接入（可选）
 
-`commands-dsh/` 以 **dsh 原生命令**形式暴露 git-kit 工作流与跨会话交接：`/git-message`、`/git-commit-push`、`/git-branch`、`/git-pr-create`、`/git-pr-merge`、`/git-release`、`/git-tag`、`/git-slim`、`/git-star-classify`、`/handoff`。插件是**自包含意图表**（一行声明 = 命令名 + 对应 skill 分支 key，`skill` 省略时默认 git-kit），命令执行时向当前 agent 注入一条加载对应 skill（git-kit / handoff）并按其分支执行的指令——与 opencode 入口共用同一 skill、单一真源，编辑 `skills/git-kit/` 或 `skills/handoff/` 即同步生效（改插件 `lib/index.js` 需重启 dsh）。
+dsh 侧的斜杠命令插件在独立仓 **[morehao/dsh-commands](https://github.com/morehao/dsh-commands)**（npm 包 `@morehao/dsh-commands`），以 **dsh 原生命令**形式暴露 git-kit 工作流与跨会话交接：`/git-message`、`/git-commit-push`、`/git-branch`、`/git-pr-create`、`/git-pr-merge`、`/git-release`、`/git-tag`、`/git-slim`、`/git-star-classify`、`/handoff`。插件是**自包含意图表**（一行声明 = 命令名 + 对应 skill 分支 key，`skill` 省略时默认 git-kit），命令执行时向当前 agent 注入一条加载对应 skill（git-kit / handoff）并按其分支执行的指令——与 opencode 入口共用同一 skill、单一真源。**本仓只提供技能**：编辑 `skills/git-kit/` 或 `skills/handoff/` 立即对其生效；改插件本体（`COMMANDS` 表）请到插件仓（改完需重启 dsh）。
 
 一键接入（幂等，可重复执行）：
 
 ```bash
-./scripts/dsh-install.sh --skills-only     # 只挂技能：零副作用、不需要 dsh CLI —— 最常用的安全子集
-./scripts/dsh-install.sh                    # 全量接入：技能 + 插件注册（profile 自动解析）
-./scripts/dsh-install.sh --profile desktop   # 显式指定 profile（等价 DSH_PROFILE=desktop）
-DSH_USE_NPM=1 ./scripts/dsh-install.sh       # 插件改走 npm 已发布包，而非本地 link:
+./scripts/dsh-install.sh --skills-only      # 只挂技能：零副作用、不需要 dsh CLI —— 最常用的安全子集
+./scripts/dsh-install.sh                     # 全量接入：技能 + 装 npm 上的 @morehao/dsh-commands（profile 自动解析）
+./scripts/dsh-install.sh --profile desktop    # 显式指定 profile（等价 DSH_PROFILE=desktop）
 # 插件变更后重启 dsh；技能是热加载的，不用重启
 ```
 
-脚本做两件事：① 软链 `skills/*` 到 `$DSH_HOME/skills`（默认 `~/.dsh/skills`，**全局生效**）；② `dsh plugin --profile <profile> add link:<本仓库>/commands-dsh`（`link:` 为真软链，源码改动即生效；自动追加进 profile 的 bundles）。传 `--skills-only` 则只做第 ① 步。
+脚本做两件事：① 软链 `skills/*` 到 `$DSH_HOME/skills`（默认 `~/.dsh/skills`，**全局生效**）；② `dsh plugin --profile <profile> add @morehao/dsh-commands`（自动追加进 profile 的 bundles）。传 `--skills-only` 则只做第 ① 步。
+
+> 插件仓开发调试（改插件 `lib/index.js` 要即时生效）走 `link:`，用显式路径：`./scripts/dsh-install.sh --plugin-link <dsh-commands 仓路径>`。脚本**不猜**插件仓位置——它在另一个仓库里。
 
 > **profile 不再硬编码**（早期版本写死 `web`，与实际安装不符时会凭空造出一个 profile，命令却不出现在你正在用的客户端里）。现在的优先级是：`--profile <name>` > `$DSH_PROFILE` > 「`$DSH_HOME/profiles` 下**唯一**存在的 profile」。多个或零个 profile 时会报错并列出候选，绝不会替你新建。
 >
@@ -121,11 +116,11 @@ dsh 侧技能目录约定（`skills/` 是**全局**的，软链后所有项目�
 
 经软链注册的技能在 dsh 技能面板中带 `linked` 标记、为**只读**（禁用编辑/删除），正好避免误改真源。**技能是热加载的**：新增软链后无需重启，新会话与技能面板立即能看到；只有插件 `lib/index.js` 的改动才需要重启。
 
-> 插件已发布到 npm（`@morehao/dsh-commands`），也可只装命令插件本体：`dsh plugin --profile <profile> add @morehao/dsh-commands`（`<profile>` 同样以实际为准）。注意 skills **仍需来自本仓库**（dsh 不从 node_modules 扫描 skill），所以用 npm 方式时请另行软链 `skills/*` 或执行上面的 skills 步骤。发包/更新到 npm 的完整流程见 [PUBLISHING.md](PUBLISHING.md)。
+> 插件从 npm 安装：`dsh plugin --profile <profile> add @morehao/dsh-commands`（`<profile>` 同样以实际为准）。注意 skills **仍需来自本仓库**（dsh 不从 node_modules 扫描 skill），所以装完插件还要软链 `skills/*`（或跑上面的 `--skills-only`）。插件的发版流程在其本仓的 `PUBLISHING.md`。
 
 卸载：`dsh plugin --profile <profile> remove @morehao/dsh-commands`，再删除对应的 skill 软链（`rm ~/.dsh/skills/<name>`）即可。（旧版曾以 `dsh-git-commands` 或 `@morehao/dsh-git-commands` 安装过：对应 `dsh plugin --profile <profile> remove dsh-git-commands` / `dsh plugin --profile <profile> remove @morehao/dsh-git-commands`。）
 
-详见 [commands-dsh/README.md](commands-dsh/README.md)。
+插件仓：[morehao/dsh-commands](https://github.com/morehao/dsh-commands)（含命令列表、安装与发版说明）。
 
 ## 文档
 

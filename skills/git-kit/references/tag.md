@@ -15,7 +15,7 @@
    - 其余：`<目标仓库>/<branch>` 中 `git log <latest-tag>..<目标仓库>/<branch>` 有提交的分支（比最新 tag 新、值得打 tag）；无 tag 时列出全部远端分支
    - 展示编号让用户选（1/2/3…），也允许用户直接输入分支名；**用选项式提问呈现**（`references/ask-options.md`），不要只列编号等用户回一句话
 5. **候选 tag（让用户选）**：
-   - **先核对发布包版本**：读发布包的 `package.json` 的 `version`（本仓 `commands-dsh/package.json`），候选 tag 须与其一致，详见下方「发版约束」
+   - **先核对发布包版本**：读发布包目录的 `package.json` 的 `version`（`--pkg` 可指定；本仓无发布包时按 tag 为版本源），候选 tag 须与其一致，详见下方「发版约束」
    - 有最新 tag 且为 semver（`v?X.Y.Z`）：按递增档提议 3 个候选 patch/minor/major（如 `v1.2.3` → `v1.2.4` / `v1.3.0` / `v2.0.0`），沿用现有 tag 的 `v` 前缀风格
    - **无 tag**：提议首个版本 `v0.1.0` 与 `v1.0.0`（默认 `v` 前缀）
    - 选择含 `release` 的分支且分支名带版本号时，候选 tag 优先从分支名推断（如 `release/2.0.0`、`release-v2.0` → `v2.0.0`），作为第 1 个候选
@@ -43,10 +43,10 @@
 
 ## 发版约束（目标仓库的 `v*` tag 会触发发布时必读）
 
-若打了 `v*` tag 会触发发布工作流（本仓：`.github/workflows/release.yml` → `scripts/ci-publish.sh`），打 tag 前必须先对齐版本号：
+若打了 `v*` tag 会触发发布工作流（本仓**没有**发布工作流，发 npm 的仓才需要：如 `.github/workflows/release.yml` → 发布脚本），打 tag 前必须先对齐版本号：
 
-- **硬守卫**：tag 版本（去掉 `v` 前缀）必须等于发布包 `package.json` 的 `version`（本仓 `commands-dsh/package.json`），否则发布脚本直接 `exit 1` 拒绝发布。不一致的 tag **不会误发**，但会白占一个 tag 名 + 留一条失败 run（tag 已推送，改名须删除重打）。
-- **顺序**：候选 tag 与当前版本不一致时 → **先升版本**：改 `package.json` 的 `version` → 走 `commit-push`（起点是稳定分支时自动建分支）→ 走 `pr-create` 建 PR → 合并 `main`，**合并后**才在本流程打 tag（tag 指向 `main` 的最新提交，即含升版本的那次合并提交）。完整手册见 `PUBLISHING.md`「日常发新版」。
+- **硬守卫**：tag 版本（去掉 `v` 前缀）必须等于发布包 `package.json` 的 `version`（发布包目录由 `--pkg` 指定；本仓无发布包时按 tag 为版本源），否则发布脚本直接 `exit 1` 拒绝发布。不一致的 tag **不会误发**，但会白占一个 tag 名 + 留一条失败 run（tag 已推送，改名须删除重打）。
+- **顺序**：候选 tag 与当前版本不一致时 → **先升版本**：改 `package.json` 的 `version` → 走 `commit-push`（起点是稳定分支时自动建分支）→ 走 `pr-create` 建 PR → 合并 `main`，**合并后**才在本流程打 tag（tag 指向 `main` 的最新提交，即含升版本的那次合并提交）。发布包所在仓的发版手册（若有 `PUBLISHING.md`）里有「日常发新版」，本仓无发布包则只按本条打 tag。
 - 升版本提交**不得**直接落在稳定分支上——发版不构成例外（`references/stable-branch.md`）。
 - **不得**为绕过守卫擅自打不一致的 tag；用户明确要求「只打 tag、不管发布」时才照办，并在报告中写明发布工作流预期会失败。
 - 幂等：npmjs 已存在该版本 → 工作流跳过（exit 0），重复打 tag 不会重复发布。

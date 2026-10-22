@@ -8,7 +8,7 @@
 
 ## 三条入口，一个实现
 
-opencode 斜杠命令（`commands-opencode/git/*.md`）和 dsh 斜杠命令（`commands-dsh/lib/index.js`）都只是**委托壳**：它们声明「命令 → skill 分支」的映射，不写任何判定。所以同一句「把 PR 合并掉」，无论从斜杠命令来还是直接说出来，走的都是同一份逻辑。
+opencode 斜杠命令（`commands-opencode/git/*.md`）和 dsh 斜杠命令（另一仓 [morehao/dsh-commands](https://github.com/morehao/dsh-commands) 的 `lib/index.js`）都只是**委托壳**：它们声明「命令 → skill 分支」的映射，不写任何判定。所以同一句「把 PR 合并掉」，无论从斜杠命令来还是直接说出来，走的都是同一份逻辑。
 
 改行为时记住这条：**改逻辑改 skill，改入口只加入口**。在命令侧复制一份判定，就是两份真源。
 
@@ -395,7 +395,7 @@ bash skills/git-kit/scripts/release-preflight.sh --tag v1.1.0   # 无可读版�
 
 | 仓库形态 | `TAG_WORKFLOWS` | `EFFECT_NPM` | `EFFECT_RELEASE` | 回执里出现的行 |
 |---|---|---|---|---|
-| npm 包（本仓） | `release.yml` | `yes` | `none` | Release ✅ + 流水 ✅ + npm ✅ |
+| npm 包（如插件仓 `morehao/dsh-commands`） | `release.yml` | `yes` | `none` | Release ✅ + 流水 ✅ + npm ✅ |
 | 容器镜像 | `image.yml` | `no` | `none` | Release ✅ + 流水 ✅ |
 | 无 workflow | 空 | `no` | `none` | Release ✅ + 明确写「未检测到 tag 触发的发布流水」 |
 
@@ -485,7 +485,7 @@ git tag -a --cleanup=verbatim "${TARGET_TAG}" -F "$TAG_MSG" "${BASE_REF}"
 | 决策点怎么问（选项形状与推荐项） | `references/ask-options.md` |
 | 某个流程的步骤/验收 | `references/<分支>.md` |
 | 机械动作（预检、变更说明、瘦身） | `scripts/*.sh` |
-| 加一个新入口（新命令） | `commands-opencode/git/*.md` 或 `commands-dsh/lib/index.js`，**只加声明** |
+| 加一个新入口（新命令） | `commands-opencode/git/*.md`，或 dsh 插件仓（另一仓）的 `lib/index.js`，**只加声明** |
 | 本文档的图 | `docs/assets/`（SVG）或本文内联的 Mermaid 块 |
 
 ## 常见误区
@@ -501,7 +501,7 @@ git tag -a --cleanup=verbatim "${TARGET_TAG}" -F "$TAG_MSG" "${BASE_REF}"
 ### 发版
 
 1. **"release 会顺手把版本号升了"** —— 不会。升版本属于前置 PR，release 只读取它。
-2. **"发版一定要发 npm"** —— 那是本仓的后效，不是通用规律；Go / 容器 / 静态站仓库的同一流程不会出现 npm 那一行。
+2. **"发版一定要发 npm"** —— 那是「发 npm 的仓库（如插件仓）」的后效，不是通用规律；Go / 容器 / 静态站仓库的同一流程不会出现 npm 那一行。
 3. **"tag 打错了，改一下"** —— tag 推送后不可编辑，只能删了重打，且需要用户授权；所以注记正文与目标 sha 都要在推送前确认。
 4. **"没检测到发布流水就是没发出去"** —— 只说明本仓没有 tag 触发的 workflow/pipeline，或者发布走的是别的方式（手动、外部流水）；报告只呈现事实。
 5. **"npm 查不到就是发布失败"** —— 可能是缓存/网络导致查不了（`NPM_PUBLISHED=unknown`），两者要分开报。
@@ -514,4 +514,4 @@ git tag -a --cleanup=verbatim "${TARGET_TAG}" -F "$TAG_MSG" "${BASE_REF}"
 - 操作指令（模型侧）：[`skills/git-kit/SKILL.md`](../skills/git-kit/SKILL.md)
 - 分支细节：`skills/git-kit/references/`（`stable-branch.md`、`commit-format.md`、`tag.md`、`release.md` 等）
 - 脚本：`skills/git-kit/scripts/`（`release-preflight.sh`、`release-verify.sh`、`changelog.sh`、`git-slim.sh`、`git-star.sh`）
-- 本仓的 npm 发布流程：[`PUBLISHING.md`](../PUBLISHING.md)
+- dsh 插件仓（含 npm 发布流程）：[morehao/dsh-commands](https://github.com/morehao/dsh-commands)

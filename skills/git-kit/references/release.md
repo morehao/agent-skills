@@ -82,7 +82,7 @@ bash scripts/release-preflight.sh              # 无清单仓库加 --tag v1.1.0
 
 ```
 发布计划
-  版本源   <manifest: commands-dsh/package.json | tag>
+  版本源   <manifest: <发布包>/package.json | tag>
   版本     <PKG_VERSION 或 --tag>（自 <LATEST_TAG> 起 N 个提交：feat a / fix b / breaking c）
   tag      <TARGET_TAG> @ <BASE_REF> 的 <sha>（注记 tag，正文见下方变更说明）
   说明     变更说明全文（进 tag 注记，也是 Release body 的来源）

@@ -25,7 +25,7 @@
 | `tag` | 打版本 tag | **优先**作为 tag 来源分支（偏好，非禁止）（`references/tag.md`） |
 | `release` | 发布段（打 tag + 跟踪后效） | 以**远端**稳定分支为发布基准：tag 指向它、版本号读它（`references/release.md`） |
 
-**无例外**：发版升版本（改 `commands-dsh/package.json` 的 `version`）**同样不直接提交稳定分支**——走 `commit-push` 建分支 → PR → 合并 `main`，合并后再打 tag（顺序与守卫见 `references/tag.md`「发版约束」与 `PUBLISHING.md`）。
+**无例外**：发版升版本（改发布包 `package.json` 的 `version`，无发布包时按 tag 为版本源）**同样不直接提交稳定分支**——走 `commit-push` 建分支 → PR → 合并 `main`，合并后再打 tag（顺序与守卫见 `references/tag.md`「发版约束」）。
 
 ## 边界
 
