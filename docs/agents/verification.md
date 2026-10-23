@@ -22,6 +22,17 @@ node scripts/check-opencode-commands.mjs --dsh ../dsh-commands   # 顺带比对�
 
 新增/修改命令的完整步骤见 [安装与维护](../installation.md) 的「新增或修改命令」。
 
+### CI
+
+[`.github/workflows/commands.yml`](../../.github/workflows/commands.yml) 在 push 到 `main` 与所有 PR 上跑两个 job：
+
+| job | 内容 | 失败含义 |
+|---|---|---|
+| `contract` | `node scripts/check-opencode-commands.mjs` + 两个安装脚本 `bash -n` | 命令契约/README/`$ARGUMENTS` 不合规，或脚本有语法错误 |
+| `dsh-parity` | checkout `morehao/dsh-commands` 到 `.ci/dsh-commands`，跑 `--dsh` | 两仓的 branch/skill 漂移（description 差异只提示，不失败） |
+
+本地等价：`node scripts/check-opencode-commands.mjs --dsh ../dsh-commands`。CI 依赖另一仓的 `main`，dsh-commands 改了 branch key 这里会立刻红——这是预期信号，不是 flaky。
+
 ## project-insight 引擎
 
 `skills/project-insight/scripts/` 依赖 `mermaid`、`jsdom`（`select-baseline.mjs` 只用 node 内置模块 + `git`，无 npm 依赖）。`node_modules` 被 gitignore，**首次需在其中 `npm install`**；若本机用 `cp -r` 复制注册而非软链，复制后要在副本的 `scripts/` 重装。

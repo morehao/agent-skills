@@ -18,8 +18,8 @@
 | `git/message` | 将中文描述转换为 Conventional Commits 格式的 commit message（纯生成，不提交） |
 | `git/pr-create` | 基于代码差异向目标仓库创建或更新 PR/MR（自动识别 gh/glab） |
 | `git/pr-merge` | 按编号合并 PR/MR，删除原分支（head 为稳定分支时保留），切回主干并更新代码（自动识别 gh/glab） |
-| `git/release` | pr-merge 之后的发布段：打 tag → 默认创建 GitHub/GitLab Release → 按仓库探测跟踪后效并逐项校验 |
-| `git/tag` | 查看最新 tag 与来源分支，选择分支与版本号，构建注记 tag 并推送 |
+| `git/release` | pr-merge 之后的发布段：打 tag → 默认创建 GitHub/GitLab Release → 按仓库探测跟踪后效并逐项校验；tag 注记与 Release body 共用同一份变更说明（中文摘要 + 折叠原文，推送前确认并冻结） |
+| `git/tag` | 查看最新 tag 与来源分支，选择分支与版本号，构建注记 tag（中文摘要 + 折叠原文）并推送 |
 | `git/commit-push` | 基于代码变更自动生成 commit message 并执行提交推送 |
 | `git/slim` | 将当前 git 仓库瘦身为浅克隆，默认保留 30 天历史 |
 | `git/star-classify` | 拉取并分类自己的 GitHub star 仓库，输出中文分组清单 |
@@ -50,8 +50,8 @@
 - `/git/message <中文描述>` → 生成 commit message
 - `/git/pr-create [目标分支]` → 基于差异创建/更新 PR/MR（默认探测 main/master）
 - `/git/pr-merge [编号]` → 合并 PR/MR（无编号时探测当前分支关联的 PR/MR 并确认），删除原分支（head 为稳定分支时保留），切回主干并更新（默认 squash）
-- `/git/tag [tag名或分支名]` → 探测最新 tag 与来源分支，选择分支与版本号后打注记 tag 并推送
-- `/git/release` → pr-merge 之后的发布段：只读预检 → 一次确认 → 打 tag → **默认创建 GitHub/GitLab Release** → 按仓库探测跟踪后效（流水 / 产物）并出校验回执（只打标签用 `/git/tag`）
+- `/git/tag [tag名或分支名]` → 探测最新 tag 与来源分支，选择分支与版本号后打注记 tag（变更说明 = 中文摘要 + 折叠原文）并推送
+- `/git/release` → pr-merge 之后的发布段：只读预检 → 一次确认 → 打 tag → **默认创建 GitHub/GitLab Release** → 按仓库探测跟踪后效（流水 / 产物）并出校验回执；变更说明由 tag 注记与 Release body 共用（推送前冻结，只打标签用 `/git/tag`）
 - `/git/commit-push` → 分析当前变更自动提交并推送
 - `/git/slim [天数]` → 瘦身当前仓库（默认保留 30 天历史）
 - `/git/star-classify` → 拉取并分类自己的 GitHub star 仓库
@@ -68,7 +68,7 @@
 
 | 路径 | 功能 |
 |------|------|
-| `cleanup` | 磁盘空间回收：查询占用 → 用户勾选清理项 → 只清所选，含本地数据库处理（macOS 为主） |
+| `cleanup` | 磁盘空间回收与本地数据瘦身（macOS 为主）：先只读测量 → 用户勾选清理项 → 只清所选；用户数据只报告不代删 |
 
 `/cleanup` 委托 `disk-cleanup` skill 的 `cleanup` 分支，逻辑单一真源在 `skills/disk-cleanup/`（`SKILL.md` 流程 + `references/cleanup.md` 清理对象 + `scripts/` 两个执行脚本）。
 
@@ -76,7 +76,7 @@
 
 - `/cleanup`（无参数）→ **先给编号选项**（只看占用 / 选勾清理 / 本地数据库 / 取消），不执行任何脚本，也不先「顺手查一下」；
 - `/cleanup 只看占用` → 只读统计并分类报告，每项带编码与实测大小；
-- `/cleanup 执行` → 先出清单，**用户勾选后**才 `--clean --only <勾选的编码>`；`/tmp` 与 Time Machine 快照这两项交给用户自己的终端；
+- `/cleanup 选勾清理`（口语「执行」同义）→ 先出清单，**用户勾选后**才 `--clean --only <勾选的编码>`；`/tmp` 与 Time Machine 快照这两项交给用户自己的终端；
 - `/cleanup 预览` → 对已勾选的编码跑 `--clean --dry-run --only <编码>`，只打印不删除；
 - `/cleanup 本地数据库` → 数据库瘦身：先备份、先闭库再执行。
 

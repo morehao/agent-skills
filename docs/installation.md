@@ -50,7 +50,11 @@ ln -sfn /path/to/agent-skills/commands-opencode/cleanup.md ~/.config/opencode/co
 
 官方把两者分得很清楚：**命令**是提示词模板（markdown + `description`/`agent`/`model`/`subtask`，支持 `$ARGUMENTS`、`$1..$N`、`!shell`、`@file`），放文件即注册；**插件**是生命周期 hook + 自定义 tool 的 JS/TS 运行时代码。官方**没有**「插件注册斜杠命令」的 API：相关 PR [#10261](https://github.com/anomalyco/opencode/pull/10261) 已关闭，[#24065](https://github.com/anomalyco/opencode/issues/24065) 仍在问 `config` hook 里改 `cfg.command` 算不算官方支持（源码里是 `as any` + `Effect.ignore`，属未文档化副作用）。本仓命令都是 5 行委托壳、零运行期逻辑，命令文件正是精确匹配的 primitive；换成插件只会多出 JS 加载与依赖风险。dsh 侧用插件是**平台约束**（dsh 只能由插件注册斜杠命令），不要反推。
 
+在 opencode v2.1.3 的二进制上复核过（2026-10-23）：命令来源只有 config 文档与 `{command,commands}/**/*.md` 扫描，没有 `ConfigCommandV1`、也没有 `command.execute.before` 这类注册面——所以「把命令做成 opencode 插件」在当前版本**做不到**，不是取舍问题。
+
 另一个官方去重手段是 skill 的 `metadata: opencode/slash: "true"`（把一个 SKILL.md 同时暴露成 `/name`），但两处不适用：本仓 9 条 git 命令共用**一个** `git-kit` skill，slash 只能给出 `/git-kit` 一条，丢意图粒度；且**截至 opencode v2.1.3（2026-10-22）该特性尚未发版**——文档站已写，但二进制里没有这个 key，实测 `opencode api GET /api/command` 返回的命令列表不含带该 metadata 的 skill（skill 本身能被 `GET /api/skill` 发现）。等它落地后可评估去掉 `handoff.md`（一 skill 一意图），git 九条仍须保留。
+
+**与 dsh 的一处刻意差异（别照抄）**：dsh 的 `handoff` 命令需要 `readFallback` 兜底，因为 dsh 的 `skill` 工具会拒载带 `disable-model-invocation: true` 的技能。opencode 不会：v2.1.3 里该 frontmatter 只被转成 `autoinvoke: false` 用于把技能移出模型可见的**技能清单**（guidance），`skill` 工具按 id 直接取用、不做这项过滤（源码核对：`SkillInstructions.load` 过滤 autoinvoke，`opencode.tool.skill` 的 `get(id)` 不过滤）。所以 `/handoff` 在 opencode 上按「用 `skill` 工具加载 `handoff`」写即可，**不要**照搬 `readFallback`。
 
 复查（用一次性 HOME，不碰真实配置）：
 
@@ -138,6 +142,8 @@ node scripts/check-opencode-commands.mjs --dsh ../dsh-commands   # 顺带比对�
 - `--dsh`：branch/skill 不一致判失败，description 差异只提示；并检查 dsh 有、opencode 没有的委托命令。
 
 退出码：`0` 通过（可带提示）/ `1` 有错误 / `2` 用法错误。
+
+CI（[`.github/workflows/commands.yml`](../.github/workflows/commands.yml)）在 push 到 `main` 和所有 PR 上跑同一脚本，并把 `morehao/dsh-commands` checkout 到 `.ci/dsh-commands` 做跨仓比对；本地等价命令就是上面第二条。
 
 ## 新增或修改命令
 

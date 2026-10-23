@@ -38,8 +38,8 @@ node scripts/check-opencode-commands.mjs
 | `/git/branch <描述>` | 按中文描述建候选分支并切换 |
 | `/git/pr-create [目标分支]` | 创建/更新 PR/MR（自动识别 gh/glab） |
 | `/git/pr-merge [编号]` | 合并 PR/MR、清理分支、回主干更新 |
-| `/git/release [版本]` | 合并后的发布段：打 tag → 默认建 GitHub/GitLab Release → 校验后效 |
-| `/git/tag [tag/分支]` | 给分支打注记 tag 并推送 |
+| `/git/release [版本]` | 合并后的发布段：打 tag → 默认建 GitHub/GitLab Release → 校验后效；变更说明 = 中文摘要 + 折叠原文 |
+| `/git/tag [tag/分支]` | 给分支打注记 tag（中文摘要 + 折叠原文）并推送 |
 | `/git/slim [天数]` | 仓库瘦身为浅克隆（默认保留 30 天） |
 | `/git/star-classify` | 拉取并分类自己的 GitHub star |
 | `/handoff [范围]` | 把当前会话压成可粘贴的续跑提示（只打印） |

@@ -12,7 +12,8 @@
 | `scripts/` | 接入脚本 + 命令契约校验 |
 | `docs/` | 给人看的解释性文档；`docs/agents/` 给 agent 按需加载 |
 | `README.md` | 仓库入口（人读） |
-| `CHANGELOG.md` | 变更记录 |
+| `CHANGELOG.md` | 本仓变更记录（跟随里程碑 tag；npm 发布记录在 dsh-commands 仓） |
+| `.github/workflows/` | CI：命令契约校验（含跨仓比对）+ 安装脚本语法 |
 
 ## commands-opencode/
 
