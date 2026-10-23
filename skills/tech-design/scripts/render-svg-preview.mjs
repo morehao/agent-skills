@@ -26,7 +26,7 @@ const targetScript = join(skillsRoot, 'project-insight', 'scripts', 'render-svg-
 
 if (!existsSync(targetScript)) {
   console.error(`[依赖缺失] 找不到预览引擎: ${targetScript}`);
-  console.error('  本脚本复用 project-insight 的 render-svg-preview.mjs，请确认 ai-kit 仓库结构完整。');
+  console.error('  本脚本复用 project-insight 的 render-svg-preview.mjs，请确认 agent-skills 仓库结构完整。');
   process.exit(2);
 }
 

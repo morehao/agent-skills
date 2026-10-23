@@ -29,7 +29,7 @@ const targetScript = join(skillsRoot, 'project-insight', 'scripts', 'select-base
 
 if (!existsSync(targetScript)) {
   console.error(`[依赖缺失] 找不到基线选择引擎: ${targetScript}`);
-  console.error('  本脚本复用 project-insight 的 select-baseline.mjs，请确认 ai-kit 仓库结构完整。');
+  console.error('  本脚本复用 project-insight 的 select-baseline.mjs，请确认 agent-skills 仓库结构完整。');
   process.exit(2);
 }
 

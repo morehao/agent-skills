@@ -202,7 +202,7 @@ prepare_target() {
   mkdir -p "$target"
 }
 
-echo "==> ai-kit 根目录:  $REPO_ROOT"
+echo "==> agent-skills 根目录:  $REPO_ROOT"
 echo "==> opencode 配置:  $CONFIG_DIR"
 if [ "$CHECK" -eq 1 ]; then
   echo "==> 模式: 只检查（不修改）"
