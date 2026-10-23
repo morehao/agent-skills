@@ -33,6 +33,17 @@ node scripts/check-opencode-commands.mjs --dsh ../dsh-commands   # 顺带比对�
 
 本地等价：`node scripts/check-opencode-commands.mjs --dsh ../dsh-commands`。CI 依赖另一仓的 `main`，dsh-commands 改了 branch key 这里会立刻红——这是预期信号，不是 flaky。
 
+## 环境类检查（本地，不进 CI）
+
+技能安装位与工具侧软链依赖本机 `$HOME`，CI 跑不了，改动接入相关代码后本地自查：
+
+```bash
+./scripts/skills-link.sh --check          # ~/.agents/skills：缺失/指向错误/悬空/被真实目录占位
+./scripts/opencode-install.sh --check     # 命令软链 + 技能侧结论 + 配置提示
+```
+
+两者都是只读，问题数 >0 退出 1。要试“装”的动作，必须用临时目录（见 installation.md「改脚本注意」），别对着真实 `~/.agents` 跑。
+
 ## project-insight 引擎
 
 `skills/project-insight/scripts/` 依赖 `mermaid`、`jsdom`（`select-baseline.mjs` 只用 node 内置模块 + `git`，无 npm 依赖）。`node_modules` 被 gitignore，**首次需在其中 `npm install`**；若本机用 `cp -r` 复制注册而非软链，复制后要在副本的 `scripts/` 重装。

@@ -24,8 +24,9 @@
 
 ## scripts/
 
-- `opencode-install.sh` — opencode 接入（软链 skills + commands），幂等。选项：`--skills-only` / `--commands-only` / `--check`（只检查，问题数 >0 退出 1）/ `--dry-run` / `-h`；`OPENCODE_CONFIG` 覆盖配置根。只遍历 `skills/` 下的目录，避免松散文件被通配链走，并清理技能/命令改名后的悬空软链。
-- `dsh-install.sh` — dsh 接入（软链 skills + 装 npm 上的 `@morehao/dsh-commands`），幂等。选项：`--profile <name>` / `--skills-only`（只软链技能、跳过插件）/ `--plugin-link <插件仓路径>`（插件仓开发调试走 `link:`）/ `-h`；`--skills-only` 是零副作用的安全子集。
+- `skills-link.sh` — **技能安装位的唯一入口**：把 `skills/*` 软链到 `~/.agents/skills`（`AGENTS_SKILLS_DIR` 或 `--target` 覆盖），幂等。选项：`--check`（只读，缺失/指向错误/悬空/被真实目录占位 → 退出 1）/ `--dry-run` / `--force`（同名真实目录先改名备份再软链）/ `-h`。只遍历目录，避免松散文件被通配链走。
+- `opencode-install.sh` — opencode 接入：技能委托 `skills-link.sh`，命令软链到 `<config>/command/`。选项：`--skills-only` / `--commands-only` / `--check` / `--dry-run` / `-h`；`OPENCODE_CONFIG` 覆盖配置根、`AGENTS_SKILLS_DIR` 覆盖技能安装位。会提示旧布局（`<config>/skills` 残留软链）与「opencode 未配置技能根」。
+- `dsh-install.sh` — dsh 接入：技能委托 `skills-link.sh`（dsh 默认扫 `~/.agents/skills`），再装 npm 上的 `@morehao/dsh-commands`。选项：`--profile <name>` / `--skills-only`（只软链技能、跳过插件）/ `--plugin-link <插件仓路径>`（插件仓开发调试走 `link:`）/ `-h`；检测到 `$DSH_HOME/skills` 旧布局会给 `rm` 提示。
 - `check-opencode-commands.mjs` — 命令契约校验：frontmatter 合法字段、`**<branch> 分支**` 对应 `skills/<skill>/references/<branch>.md`、`$ARGUMENTS` 独立成行、两份 README 表格与命令文件一一对应。可选 `--dsh <插件仓路径>` 比对另一仓 `COMMANDS` 表的 branch/skill（不一致判失败，description 差异只提示）。
 
 ## 三个入口，一份实现

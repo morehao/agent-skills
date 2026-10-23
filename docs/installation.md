@@ -2,6 +2,32 @@
 
 本仓是技能与 opencode 指令的唯一真源：通过软链接接入本机，`git pull` 后无需重新复制。dsh 的斜杠命令插件在独立仓 [morehao/dsh-commands](https://github.com/morehao/dsh-commands)，本仓只提供它依赖的技能。
 
+## 技能安装位（统一）
+
+本机**只有一个**技能安装位：`~/.agents/skills`（可用 `AGENTS_SKILLS_DIR` 覆盖）。
+
+- **为什么是它**：这是 `skills` CLI（`-g -a universal`）的全局目录，也是 dsh 默认扫描的技能根；其它工具只要指过来，看到的都是同一份。
+- **里面放什么**：本仓 `skills/*` 的**软链**（本仓仍是唯一真源，改即生效），加上第三方技能（`skills` CLI 装成的真实目录，如 `officecli`、`weather-query`），两者互不干扰。
+- **怎么装 / 校验**：
+
+```bash
+./scripts/skills-link.sh             # 软链 skills/* -> ~/.agents/skills/*（幂等）
+./scripts/skills-link.sh --check     # 只检查：缺失/指向错误/悬空/被真实目录占位 → 退出 1
+./scripts/skills-link.sh --force     # 同名真实目录先备份成 <name>.bak-<时间戳> 再软链（不删数据）
+```
+
+> `--force` 用在「之前用 `skills` CLI 装过同名技能」的机器上：那些是真实目录快照，脚本默认不覆盖，`--force` 只改名备份。
+
+各工具只需要「看得见这个目录」：
+
+| 工具 | 怎么看见 | 要做什么 |
+|---|---|---|
+| opencode | 配置文件里的 `skills` 数组 | 加 `"skills": ["~/.agents/skills"]`（或等价 `"compatibility": { "agents": ["~/.agents"] }`）；**不加就看不到** |
+| dsh | 默认扫描 `~/.agents/skills` | 无需配置；插件侧 `/skill-init` 也不必再往 `$DSH_HOME/skills` 建第二份软链 |
+| 其它（Claude Code 等） | 视工具而定 | 指向同一目录即可 |
+
+opencode 的**命令**没法来自 `~/.agents`——它只认配置目录下的 `command/`，所以命令仍由 `opencode-install.sh` 软链。
+
 ## opencode
 
 配置根默认 `~/.config/opencode/`，可用 `OPENCODE_CONFIG` 覆盖。命令清单、参数与「命令 → skill 分支」映射见 [opencode 指令集](../commands-opencode/README.md)。
@@ -10,7 +36,7 @@
 
 ```bash
 ./scripts/opencode-install.sh                  # 技能 + 命令
-./scripts/opencode-install.sh --skills-only     # 只挂技能
+./scripts/opencode-install.sh --skills-only     # 只挂技能（等价 skills-link.sh）
 ./scripts/opencode-install.sh --commands-only   # 只挂命令
 ./scripts/opencode-install.sh --check           # 只检查，不修改
 ./scripts/opencode-install.sh --dry-run         # 只打印将执行的操作
@@ -18,33 +44,37 @@
 
 脚本行为：
 
-- 创建 `<config>/skills` 与 `<config>/command`；
-- 逐个软链 `skills/<name>` → `<config>/skills/<name>`（只遍历目录）；
-- 软链 `commands-opencode/git` → `<config>/command/git`，`commands-opencode/handoff.md` → `<config>/command/handoff.md`，`commands-opencode/cleanup.md` → `<config>/command/cleanup.md`；
-- 清理指向本仓但目标已不存在的悬空软链；
-- 目标已有同名真实目录/文件时跳过，不覆盖；
+- **技能**：调用 `scripts/skills-link.sh`，链到统一安装位 `~/.agents/skills`（不再建 `<config>/skills`）；
+- **命令**：软链 `commands-opencode/git` → `<config>/command/git`，`handoff.md`、`cleanup.md` 同理；
+- 清理指向本仓但目标已不存在的悬空软链；目标已有同名真实目录/文件时跳过，不覆盖；
+- 检测到旧布局（`<config>/skills` 下还有技能软链）或 opencode 未配置技能根时，打印处理提示（不影响退出码）；
 - `--check` 只报告问题，问题数 >0 退出 1。
 
 ### 手工等价
 
 ```bash
-mkdir -p ~/.config/opencode/skills ~/.config/opencode/command
-for name in git-kit handoff project-insight project-wiki svg-maker tech-design; do
-  ln -sfn /path/to/agent-skills/skills/"$name" ~/.config/opencode/skills/"$name"
+# 技能：软链到统一安装位
+mkdir -p ~/.agents/skills
+for name in git-kit handoff disk-cleanup project-insight project-wiki svg-maker tech-design; do
+  ln -sfn /path/to/agent-skills/skills/"$name" ~/.agents/skills/"$name"
 done
+
+# 命令：opencode 配置目录
+mkdir -p ~/.config/opencode/command
 ln -sfn /path/to/agent-skills/commands-opencode/git ~/.config/opencode/command/git
 ln -sfn /path/to/agent-skills/commands-opencode/handoff.md ~/.config/opencode/command/handoff.md
 ln -sfn /path/to/agent-skills/commands-opencode/cleanup.md ~/.config/opencode/command/cleanup.md
 ```
 
-> `mkdir -p` 别省：新机器上 `~/.config/opencode/command/` 通常不存在，直接 `ln` 会失败。
+> `mkdir -p` 别省：新机器上 `~/.agents/skills/` 与 `~/.config/opencode/command/` 通常都不存在，直接 `ln` 会失败。
 
 ### 约定
 
+- **技能不落在 opencode 配置目录**：`<config>/skills` 已不再是本仓的落点；残留的旧软链会让同一技能被登记两次，`opencode-install.sh --check` 会提示删除。
 - **`command/` 还是 `commands/`**：opencode v2.x 同时扫描两者（源码 `scan("{command,commands}/**/*.md")`，命令名会剥掉这层前缀），本仓用 `command/`，两种布局都能识别。
 - **`skills/` 下只放技能目录**：不放置松散说明文件。脚本只遍历目录，正是为了避免 `skills/*` 通配把松散文件也链过去。
 - **软链 vs 复制**：软链跟随本仓更新；不想跟随时可 `cp -r`，之后需手动同步。
-- **卸载**：删掉对应软链即可，例如 `rm ~/.config/opencode/command/git`、`rm ~/.config/opencode/skills/git-kit`。
+- **卸载**：`rm ~/.agents/skills/git-kit`、`rm ~/.config/opencode/command/git` 等，删掉对应软链即可。
 
 ### 为什么是命令文件而不是插件
 
@@ -88,10 +118,10 @@ dsh 的斜杠命令由独立插件提供：源码在 [morehao/dsh-commands](http
 
 脚本做两件事：
 
-1. 逐个软链 `skills/<name>` 到 `$DSH_HOME/skills`（默认 `~/.dsh/skills`，全局生效）；
+1. 调用 `scripts/skills-link.sh` 把 `skills/<name>` 软链到统一安装位 `~/.agents/skills`（dsh 默认扫描）；
 2. `dsh plugin --profile <profile> add @morehao/dsh-commands`。
 
-`--skills-only` 只做第 1 步。插件从 npm 安装，技能仍须由本仓软链提供（dsh 不从 `node_modules` 扫描 skill）。
+`--skills-only` 只做第 1 步。插件从 npm 安装，技能仍须由本仓软链提供（dsh 不从 `node_modules` 扫描 skill）。以前版本的脚本会往 `$DSH_HOME/skills` 建第二份软链；现在默认不建，检测到残留会给出 `rm` 提示（同一技能登记两次没有好处）。
 
 > **profile 不硬编码**：优先级 `--profile <name>` > `$DSH_PROFILE` > `$DSH_HOME/profiles` 下唯一存在的 profile。多个或零个时报错并列出候选，不会替你新建。查看已有 profile：`ls ~/.dsh/profiles/`（桌面版是 `desktop`）。
 >
@@ -100,17 +130,17 @@ dsh 的斜杠命令由独立插件提供：源码在 [morehao/dsh-commands](http
 ### 手工等价（只挂技能）
 
 ```bash
-mkdir -p "$DSH_HOME/skills"
-for name in git-kit handoff project-insight project-wiki svg-maker tech-design; do
-  ln -sfn /path/to/agent-skills/skills/"$name" "$DSH_HOME/skills/$name"
+mkdir -p ~/.agents/skills
+for name in git-kit handoff disk-cleanup project-insight project-wiki svg-maker tech-design; do
+  ln -sfn /path/to/agent-skills/skills/"$name" ~/.agents/skills/"$name"
 done
 ```
 
 ### 技能根与热加载
 
-- 用户级 `<dshHome>/skills` = `~/.dsh/skills`（全局）
-- 项目级 `<项目根>/.dsh/skills`（项目根 = 最近的含 `.git` 祖先目录）
-- 另扫描 `~/.agents/skills` 与 `<项目根>/.agents/skills`
+- **统一安装位 `~/.agents/skills`**（本仓技能的落点，也是 canonical 目录）
+- `~/.dsh/skills`（用户级）、`<项目根>/.dsh/skills`（项目级）仍会被扫描，但不再作为本仓技能的落点
+- `<项目根>/.agents/skills` 也会被扫描（项目级第三方技能）
 
 软链注册的技能带 `linked` 标记、只读（禁止编辑/删除），避免误改真源。技能是热加载的：新增软链后无需重启，新会话与技能面板立即能看到；只有插件 `lib/index.js` 的改动才需要重启 dsh。
 
@@ -118,7 +148,7 @@ done
 
 ```bash
 dsh plugin --profile <profile> remove @morehao/dsh-commands
-rm ~/.dsh/skills/<name>
+rm ~/.agents/skills/<name>
 ```
 
 旧版曾以 `dsh-git-commands` / `@morehao/dsh-git-commands` 安装：对应 `dsh plugin --profile <profile> remove dsh-git-commands` / `remove @morehao/dsh-git-commands`。脚本在重装时会自动移除旧名，避免新旧 bundle 并存。
@@ -160,6 +190,9 @@ CI（[`.github/workflows/commands.yml`](../.github/workflows/commands.yml)）在
 - 测试安装脚本用临时配置根，不要拿真实配置试：
 
 ```bash
-OPENCODE_CONFIG="$(mktemp -d)" ./scripts/opencode-install.sh
-OPENCODE_CONFIG="$(mktemp -d)" ./scripts/opencode-install.sh --check
+OPENCODE_CONFIG="$(mktemp -d)" AGENTS_SKILLS_DIR="$(mktemp -d)" ./scripts/opencode-install.sh
+AGENTS_SKILLS_DIR="$(mktemp -d)/skills" ./scripts/skills-link.sh
+DSH_HOME="$(mktemp -d)" AGENTS_SKILLS_DIR="$(mktemp -d)/skills" ./scripts/dsh-install.sh --skills-only
 ```
+
+> 只有 `--check` 是只读的，可以直接对着真实 `~/.agents/skills` 跑；其余模式务必带临时 `AGENTS_SKILLS_DIR`。
