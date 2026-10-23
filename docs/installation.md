@@ -30,11 +30,11 @@
 ```bash
 mkdir -p ~/.config/opencode/skills ~/.config/opencode/command
 for name in git-kit handoff project-insight project-wiki svg-maker tech-design; do
-  ln -sfn /path/to/ai-kit/skills/"$name" ~/.config/opencode/skills/"$name"
+  ln -sfn /path/to/agent-skills/skills/"$name" ~/.config/opencode/skills/"$name"
 done
-ln -sfn /path/to/ai-kit/commands-opencode/git ~/.config/opencode/command/git
-ln -sfn /path/to/ai-kit/commands-opencode/handoff.md ~/.config/opencode/command/handoff.md
-ln -sfn /path/to/ai-kit/commands-opencode/cleanup.md ~/.config/opencode/command/cleanup.md
+ln -sfn /path/to/agent-skills/commands-opencode/git ~/.config/opencode/command/git
+ln -sfn /path/to/agent-skills/commands-opencode/handoff.md ~/.config/opencode/command/handoff.md
+ln -sfn /path/to/agent-skills/commands-opencode/cleanup.md ~/.config/opencode/command/cleanup.md
 ```
 
 > `mkdir -p` 别省：新机器上 `~/.config/opencode/command/` 通常不存在，直接 `ln` 会失败。
@@ -98,7 +98,7 @@ dsh 的斜杠命令由独立插件提供：源码在 [morehao/dsh-commands](http
 ```bash
 mkdir -p "$DSH_HOME/skills"
 for name in git-kit handoff project-insight project-wiki svg-maker tech-design; do
-  ln -sfn /path/to/ai-kit/skills/"$name" "$DSH_HOME/skills/$name"
+  ln -sfn /path/to/agent-skills/skills/"$name" "$DSH_HOME/skills/$name"
 done
 ```
 

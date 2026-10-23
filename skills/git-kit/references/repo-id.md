@@ -21,8 +21,8 @@ git remote get-url <目标仓库> | sed -E 's#^git@([^:]+):#\1/#; s#^ssh://git@(
 
 | 远端 URL | `<repo-id>` |
 |---------|------------|
-| `git@github.com:morehao/ai-kit.git` | `github.com/morehao/ai-kit` |
-| `https://github.com/morehao/ai-kit.git` | `github.com/morehao/ai-kit` |
+| `git@github.com:morehao/agent-skills.git` | `github.com/morehao/agent-skills` |
+| `https://github.com/morehao/agent-skills.git` | `github.com/morehao/agent-skills` |
 | `ssh://git@gitlab.com/group/sub/repo.git` | `gitlab.com/group/sub/repo`（子组保留） |
 
 - 用 `git config --get remote.<目标仓库>.url` 交叉确认；存在多个 pushurl 时以 fetch url 为准

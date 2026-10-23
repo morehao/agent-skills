@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # dsh 接入安装脚本（幂等，可重复执行）：
-#   1) 把 ai-kit/skills/* 软链到 dsh 用户技能目录（$DSH_HOME/skills，默认 ~/.dsh/skills，全局生效）
+#   1) 把 agent-skills/skills/* 软链到 dsh 用户技能目录（$DSH_HOME/skills，默认 ~/.dsh/skills，全局生效）
 #   2) 把 dsh 命令插件（npm 包 @morehao/dsh-commands，源码在另一仓 morehao/dsh-commands）注册进 dsh profile
 #
 # 用法：./scripts/dsh-install.sh [--profile <name>] [--skills-only] [--plugin-link <path>]
@@ -156,7 +156,7 @@ find_dsh() {
   return 1
 }
 
-echo "==> ai-kit 根目录: $REPO_ROOT"
+echo "==> agent-skills 根目录: $REPO_ROOT"
 echo "==> dsh 配置根:  $DSH_HOME_DIR"
 
 # ---------- 1) skills -> $DSH_HOME_DIR/skills ----------

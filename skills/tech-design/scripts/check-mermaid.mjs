@@ -26,7 +26,7 @@ const depsDir = join(skillsRoot, 'project-insight', 'scripts', 'node_modules');
 
 if (!existsSync(targetScript)) {
   console.error(`[依赖缺失] 找不到校验引擎: ${targetScript}`);
-  console.error('  本脚本复用 project-insight 的 check-mermaid.mjs，请确认 ai-kit 仓库结构完整。');
+  console.error('  本脚本复用 project-insight 的 check-mermaid.mjs，请确认 agent-skills 仓库结构完整。');
   process.exit(2);
 }
 if (!existsSync(depsDir)) {

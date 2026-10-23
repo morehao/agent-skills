@@ -1,4 +1,4 @@
-# ai-kit
+# agent-skills
 
 个人 AI 编码工具扩展：`commands-opencode/`（opencode 斜杠指令）+ `skills/`（技能，opencode / dsh 共用）。命令只是委托壳，逻辑唯一真源在 `skills/`；dsh 的斜杠入口在独立仓 [morehao/dsh-commands](https://github.com/morehao/dsh-commands)，本仓只提供它依赖的技能。
 
@@ -7,7 +7,7 @@
 ## 快速开始
 
 ```bash
-git clone git@github.com:morehao/ai-kit.git && cd ai-kit
+git clone git@github.com:morehao/agent-skills.git && cd agent-skills
 
 # opencode：软链技能与命令（幂等）
 ./scripts/opencode-install.sh

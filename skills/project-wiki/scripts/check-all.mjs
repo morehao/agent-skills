@@ -127,7 +127,7 @@ if (mdFiles.length) {
   const depsDir = join(ENGINE, 'node_modules');
   if (!existsSync(engineScript) || !existsSync(depsDir)) {
     console.error(`\n[依赖缺失] 找不到 Mermaid 校验引擎或依赖：${engineScript}`);
-    console.error('  本脚本复用 project-insight 的引擎（单一真源）。请确认 ai-kit 仓库结构完整，');
+    console.error('  本脚本复用 project-insight 的引擎（单一真源）。请确认 agent-skills 仓库结构完整，');
     console.error('  并在 skills/project-insight/scripts/ 下执行过 npm install（node_modules 不入库）。');
     process.exit(2);
   }
