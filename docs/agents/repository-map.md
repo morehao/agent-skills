@@ -24,9 +24,10 @@
 
 ## scripts/
 
-- `skills-link.sh` — **技能安装位的唯一入口**：把 `skills/*` 软链到 `~/.agents/skills`（`AGENTS_SKILLS_DIR` 或 `--target` 覆盖），幂等。选项：`--check`（只读，缺失/指向错误/悬空/被真实目录占位 → 退出 1）/ `--dry-run` / `--force`（同名真实目录先改名备份再软链）/ `-h`。只遍历目录，避免松散文件被通配链走。
-- `opencode-install.sh` — opencode 接入：技能委托 `skills-link.sh`，命令软链到 `<config>/command/`。选项：`--skills-only` / `--commands-only` / `--check` / `--dry-run` / `-h`；`OPENCODE_CONFIG` 覆盖配置根、`AGENTS_SKILLS_DIR` 覆盖技能安装位。会提示旧布局（`<config>/skills` 残留软链）与「opencode 未配置技能根」。
-- `dsh-install.sh` — dsh 接入：技能委托 `skills-link.sh`（dsh 默认扫 `~/.agents/skills`），再装 npm 上的 `@morehao/dsh-commands`。选项：`--profile <name>` / `--skills-only`（只软链技能、跳过插件）/ `--plugin-link <插件仓路径>`（插件仓开发调试走 `link:`）/ `-h`；检测到 `$DSH_HOME/skills` 旧布局会给 `rm` 提示。
+- `skills-install.sh` — **发布**：用 `skills` CLI 把 `skills/*` 安装到本源 `~/.agents/skills`（`AGENTS_SKILLS_DIR` 可覆盖）。选项：`--source <owner/repo|url>`（默认 `morehao/agent-skills`）/ `--check`（只读比对本源与本仓，缺失或落后 → 退出 1）/ `--dry-run` / `-h`；发布前提示工作区脏、本地领先 `origin/main`（CLI 装的是远端内容）。测试可用 `SKILLS_CLI` 指桩。
+- `skills-fanout.sh` — **分发**：把本源里的技能软链到各 agent 目录（默认 `opencode,dsh`，可选 `claude`）。选项：`--agents <列表>` / `--check`（缺失/指向错误/悬空/被真实目录占位 → 退出 1）/ `--dry-run` / `-h`；已指向本源跳过、指向别处（旧布局）改指向、悬空清理、真实目录不覆盖。
+- `opencode-install.sh` — opencode 接入：技能委托 `skills-fanout.sh --agents opencode`，命令软链到 `<config>/command/`。选项：`--skills-only` / `--commands-only` / `--check` / `--dry-run` / `-h`；`OPENCODE_CONFIG`、`AGENTS_SKILLS_DIR` 可覆盖。
+- `dsh-install.sh` — dsh 接入：技能委托 `skills-fanout.sh --agents dsh`（建 `$DSH_HOME/skills` 软链），再装 npm 上的 `@morehao/dsh-commands`。选项：`--profile <name>` / `--skills-only`（只建软链、跳过插件）/ `--plugin-link <插件仓路径>`（插件仓开发调试走 `link:`）/ `-h`。
 - `check-opencode-commands.mjs` — 命令契约校验：frontmatter 合法字段、`**<branch> 分支**` 对应 `skills/<skill>/references/<branch>.md`、`$ARGUMENTS` 独立成行、两份 README 表格与命令文件一一对应。可选 `--dsh <插件仓路径>` 比对另一仓 `COMMANDS` 表的 branch/skill（不一致判失败，description 差异只提示）。
 
 ## 三个入口，一份实现

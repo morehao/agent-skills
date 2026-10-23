@@ -4,7 +4,7 @@
 
 ## 硬约束（改动前先过一遍）
 
-1. **本仓是唯一真源**：技能与命令通过软链注册到本机，改本仓即生效；不要编辑软链副本。**技能只有一个安装位 `~/.agents/skills`**（`scripts/skills-link.sh` 负责，`AGENTS_SKILLS_DIR` 可覆盖）；opencode 用它 config 的 `skills` 去读，dsh 默认扫。命令没法搬，仍软链到各工具自己的目录。接入语义见 [接入与生效语义](docs/agents/deployment.md)。
+1. **两层：本仓是编辑源，`~/.agents/skills` 是运行时本源**。技能内容改动**不自动生效**：先 push，再 `./scripts/skills-install.sh`（skills CLI）发布到本源；各 agent 目录只放指向本源（`AGENTS_SKILLS_DIR` 可覆盖）的软链，由 `./scripts/skills-fanout.sh` 维护。opencode 的**命令**没法搬，仍从本仓软链到其配置目录——命令改本仓即时生效，技能不然。不要编辑软链副本。接入语义见 [接入与生效语义](docs/agents/deployment.md)。
 2. **`skills/` 下只允许技能目录**，禁止松散说明文件（`ln -sfn skills/*` 会展开全部条目）。
 3. **升版本不得直接提交稳定分支**（`main` 也不接受直推，发版不构成例外）：改 version → 分支 → PR → 合并 → 打 tag。细则见 [发版纪律](docs/agents/release-discipline.md)。
 4. **过程性文档落 `.dsh/docs/`**，该目录整体被 gitignore、只留本地；需要入库的方案/设计放仓库 `docs/` 或技能目录。
@@ -27,17 +27,20 @@
 ## 目录速览
 
 - `commands-opencode/` — git 斜杠指令 + `handoff.md` + `cleanup.md`，都是**委托壳**：只加载对应技能并按意图执行，不含逻辑。
-- `scripts/` — `skills-link.sh`（技能安装位 `~/.agents/skills`）、`opencode-install.sh` / `dsh-install.sh`（幂等软链接入）、`check-opencode-commands.mjs`（命令契约校验）。
+- `scripts/` — `skills-install.sh`（发布到本源 `~/.agents/skills`）、`skills-fanout.sh`（本源 → 各 agent 软链）、`opencode-install.sh` / `dsh-install.sh`（各工具接入）、`check-opencode-commands.mjs`（命令契约校验）。
 - `skills/` — git-kit、handoff、project-insight、project-wiki、tech-design、svg-maker、disk-cleanup，逐个详见 [技能内部规则](docs/agents/skill-internals.md)。
 - `docs/` — 给人看的解释性文档；`docs/agents/` 是 agent 的按需加载细则。
 
 ## 常用命令
 
 ```bash
-./scripts/skills-link.sh --check           # 技能安装位（~/.agents/skills）只读检查
-./scripts/opencode-install.sh              # opencode 接入（--check 只检查）
-./scripts/dsh-install.sh --skills-only     # dsh 只软链技能（零副作用）
+./scripts/skills-install.sh --check        # 本源（~/.agents/skills）与本仓是否一致
+./scripts/skills-fanout.sh --check         # 各 agent 目录的软链是否都指向本源
+./scripts/opencode-install.sh --check      # opencode 侧（技能软链 + 命令软链）
+./scripts/dsh-install.sh --skills-only     # dsh 只建技能软链（零副作用）
 node scripts/check-opencode-commands.mjs   # 命令契约校验
 ```
+
+**改了 `skills/` 里的内容**：push 后必须 `./scripts/skills-install.sh` 发布，否则各 agent 读到的还是旧内容。
 
 参数、退出码与全部门禁清单见 [校验与运行](docs/agents/verification.md)。

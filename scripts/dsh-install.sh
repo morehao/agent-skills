@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
-# dsh 接入安装脚本（幂等，可重复执行）：
-#   1) 把 agent-skills/skills/* 软链到「本地技能统一安装位」（默认 ~/.agents/skills，见 skills-link.sh）
-#      —— dsh 默认就扫描这个目录（canonical 技能根），因此不再往 $DSH_HOME/skills 建第二份软链
+# dsh 接入脚本（幂等，可重复执行）：
+#   1) 技能：把本源 ~/.agents/skills/<name> 软链到 $DSH_HOME/skills/<name>（= skills-fanout.sh）
 #   2) 把 dsh 命令插件（npm 包 @morehao/dsh-commands，源码在另一仓 morehao/dsh-commands）注册进 dsh profile
+#
+# 模型：**本源是 ~/.agents/skills**（真实内容，由 skills-install.sh 用 skills CLI 从本仓发布）。
+# dsh 会直接扫本源，这里的 $DSH_HOME/skills 软链是"再加一条可见路径"，两者指向同一份内容。
 #
 # 用法：./scripts/dsh-install.sh [--profile <name>] [--skills-only] [--plugin-link <path>]
 #
 #   --profile <name>   dsh profile 名。默认取 $DSH_PROFILE；未设置时，若 $DSH_HOME/profiles
 #                      下只有一个 profile 就自动选用它，多个或零个则报错要求显式指定。
 #                      （早期版本硬编码 web，与实际安装不符时会凭空造出一个 profile，已修。）
-#   --skills-only      只做第 1 步（软链 skills），跳过插件注册；不需要 dsh CLI，也不碰 profile。
+#   --skills-only      只做第 1 步（软链技能），跳过插件注册；不需要 dsh CLI，也不碰 profile。
 #   --plugin-link <path>
 #                      第 2 步用 link: 接入指定路径的插件源码（插件仓开发调试时用）。
 #                      不传则装 npm 上的 @morehao/dsh-commands。脚本**不猜**插件仓位置。
@@ -18,13 +20,13 @@
 # 环境变量：
 #   DSH_HOME           dsh 配置根，默认 ~/.dsh
 #   DSH_PROFILE        默认 profile 名
-#   AGENTS_SKILLS_DIR  技能安装位，默认 ~/.agents/skills
+#   AGENTS_SKILLS_DIR  技能本源目录，默认 ~/.agents/skills
 #
 # 插件默认从 npm 安装（插件源码在另一仓，本仓只出技能）；改插件源码要即时生效时用 --plugin-link。
 # 技能软链是热加载的：新增后 dsh 立即看到，不需要重启。
 #
 # 卸载：dsh plugin --profile <profile> remove @morehao/dsh-commands（bundles 会自动摘除），
-#       并删除对应软链（rm "$AGENTS_SKILLS_DIR/<name>"，默认 ~/.agents/skills/<name>）。
+#       并删除 $DSH_HOME/skills/<name> 软链（本源内容用 skills CLI 卸）。
 # 注意：插件名现在是 scoped 的 @morehao/dsh-commands；若你旧版以 dsh-git-commands 或
 #   @morehao/dsh-git-commands 安装过，脚本会自动先移除旧名再重装，避免新旧 bundle 并存。
 set -euo pipefail
@@ -42,7 +44,7 @@ usage() {
 
   --profile <name>   dsh profile 名。默认取 $DSH_PROFILE；未设置时，若 $DSH_HOME/profiles
                      下只有一个 profile 就自动选用它，多个或零个则报错要求显式指定。
-  --skills-only      只把 skills 软链到统一安装位（默认 ~/.agents/skills），跳过插件注册（不需要 dsh CLI）。
+  --skills-only      只做技能软链（$DSH_HOME/skills/<name> -> 本源），跳过插件注册（不需要 dsh CLI）。
   --plugin-link <path>
                      插件用 link:<path> 接入（插件仓开发调试）；默认装 npm 包。
   -h, --help         显示本帮助。
@@ -50,12 +52,11 @@ usage() {
 环境变量:
   DSH_HOME           dsh 配置根，默认 ~/.dsh
   DSH_PROFILE        默认 profile 名
-  AGENTS_SKILLS_DIR  技能安装位，默认 ~/.agents/skills
+  AGENTS_SKILLS_DIR  技能本源目录，默认 ~/.agents/skills
 
-示例:
-  ./scripts/dsh-install.sh --skills-only              # 只挂技能，最常用的安全子集
-  ./scripts/dsh-install.sh --profile desktop          # 指定 profile 全量接入
-  ./scripts/dsh-install.sh --plugin-link ~/path/to/dsh-commands  # 插件仓源码即时生效
+说明:
+  技能本源是 ~/.agents/skills（由 ./scripts/skills-install.sh 从本仓发布）；
+  本脚本只在 $DSH_HOME/skills 建指向本源的软链。
 EOF
 }
 
@@ -161,44 +162,31 @@ find_dsh() {
 
 echo "==> agent-skills 根目录: $REPO_ROOT"
 echo "==> dsh 配置根:  $DSH_HOME_DIR"
+echo "==> 技能本源:  ${AGENTS_SKILLS_DIR:-$HOME/.agents/skills}"
 
-# ---------- 1) skills -> 统一安装位（默认 ~/.agents/skills，dsh 默认扫描） ----------
-SKILLS_TARGET="${AGENTS_SKILLS_DIR:-$HOME/.agents/skills}"
-echo "==> 技能安装位: $SKILLS_TARGET"
+# ---------- 1) skills -> $DSH_HOME/skills（软链指向本源） ----------
+SKILLS_TARGET="$DSH_HOME_DIR/skills"
+echo "==> 技能软链目录: $SKILLS_TARGET"
+if [ ! -d "${AGENTS_SKILLS_DIR:-$HOME/.agents/skills}" ]; then
+  echo "错误：技能本源目录不存在：${AGENTS_SKILLS_DIR:-$HOME/.agents/skills}" >&2
+  echo "  先发布技能：./scripts/skills-install.sh（skills CLI 从本仓安装到本源）" >&2
+  exit 2
+fi
 
 skills_status=0
-bash "$REPO_ROOT/scripts/skills-link.sh" --target "$SKILLS_TARGET" || skills_status=$?
+bash "$REPO_ROOT/scripts/skills-fanout.sh" --agents dsh || skills_status=$?
 if [ "$skills_status" -ne 0 ]; then
   echo "错误：技能软链失败（见上），插件注册未执行。" >&2
   exit "$skills_status"
 fi
 
-# 1.1) 旧布局提示：以前在 $DSH_HOME/skills 建的技能软链会让同一技能被登记两次（不代删，只给命令）
-LEGACY_DIR="$DSH_HOME_DIR/skills"
-if [ -d "$LEGACY_DIR" ]; then
-  found_legacy=0
-  for target in "$LEGACY_DIR"/*; do
-    [ -L "$target" ] || continue
-    real="$(readlink "$target")"
-    case "$real" in
-      "$REPO_ROOT"/skills/*|"$SKILLS_TARGET"/*)
-        if [ "$found_legacy" -eq 0 ]; then
-          echo "  ! 检测到旧布局：${LEGACY_DIR} 下仍有技能软链（dsh 现已默认扫描 ${SKILLS_TARGET}）"
-          echo "    这些链会让同一技能被登记两次，建议逐个删除："
-          found_legacy=1
-        fi
-        echo "      rm \"${target}\""
-        ;;
-    esac
-  done
-fi
-
 if [ "$SKILLS_ONLY" -eq 1 ]; then
   cat <<DONE
 
-完成（--skills-only）。技能已软链到：
-  $SKILLS_TARGET
-dsh 默认扫描该目录，技能是热加载的，无需重启即可在会话与技能面板中看到。
+完成（--skills-only）。技能软链已就位：
+  $SKILLS_TARGET  ->  ${AGENTS_SKILLS_DIR:-$HOME/.agents/skills}
+技能是热加载的，无需重启即可在会话与技能面板中看到。
+内容发布（改本仓后要生效）用：./scripts/skills-install.sh
 插件注册已按要求跳过；需要时去掉 --skills-only 重跑本脚本。
 DONE
   exit 0

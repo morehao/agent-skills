@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# opencode 接入安装脚本（幂等，可重复执行）：
-#   1) 把本仓 skills/* 软链到「本地技能统一安装位」（默认 ~/.agents/skills，见 skills-link.sh）
-#   2) 把 commands-opencode/git、handoff.md 与 cleanup.md 软链到 opencode 的 command 目录
+# opencode 接入脚本（幂等，可重复执行）：
+#   1) 技能：把本源 ~/.agents/skills/<name> 软链到 <config>/skills/<name>（= skills-fanout.sh）
+#   2) 命令：把 commands-opencode/git、handoff.md 与 cleanup.md 软链到 <config>/command
 #
-# 技能只有**一个**安装位（~/.agents/skills），opencode 通过 config 的 `skills` 数组去那里读；
-# 命令没法搬（opencode 只认配置目录下的 command/），所以这一半仍由本脚本软链。
+# 模型：**本源是 ~/.agents/skills**（真实内容，由 skills-install.sh 用 skills CLI 从本仓发布）；
+# 各 agent 目录只放指向本源的软链。本脚本不碰本源内容，只生成 opencode 这一侧的软链。
+# 命令没法搬（opencode 只认配置目录下的 command/），所以这一半由本脚本软链。
 #
-# 为什么不用通配的 `ln -sfn skills/*`：通配会把 skills/ 下的松散文件也一起链过去，
-# 且不会清理技能改名后留下的悬空软链。技能链接逻辑集中在 skills-link.sh（只遍历目录、
-# 清理悬空链、遇真实目录默认不覆盖）；命令链接沿用同样的规则。
+# 为什么不用通配的 `ln -sfn ...`：通配会把松散文件也链过去，且不会清理改名后的悬空软链。
+# 技能侧逻辑集中在 skills-fanout.sh（只遍历目录、清理悬空、遇真实目录不覆盖）；命令侧同规则。
 #
 # 用法：./scripts/opencode-install.sh [选项]
 #
-#   --skills-only    只软链技能（= skills-link.sh），不碰命令
+#   --skills-only    只做技能软链（= skills-fanout.sh --agents opencode），不碰命令
 #   --commands-only  只软链命令，不碰技能
 #   --check          只检查（不建目录、不改软链）：报告缺失/不一致/悬空，问题数 >0 时退出 1
 #   --dry-run        打印将要做的操作，不落盘
@@ -20,16 +20,17 @@
 #
 # 环境变量：
 #   OPENCODE_CONFIG     opencode 配置根，默认 ~/.config/opencode
-#   AGENTS_SKILLS_DIR   技能安装位，默认 ~/.agents/skills
+#   AGENTS_SKILLS_DIR   技能本源目录，默认 ~/.agents/skills
 set -euo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_DIR="${OPENCODE_CONFIG:-$HOME/.config/opencode}"
 SKILLS_SRC="$REPO_ROOT/skills"
 COMMANDS_SRC="$REPO_ROOT/commands-opencode"
-SKILLS_DST="${AGENTS_SKILLS_DIR:-$HOME/.agents/skills}"
+HUB="${AGENTS_SKILLS_DIR:-$HOME/.agents/skills}"
+SKILLS_DST="$CONFIG_DIR/skills"
 COMMAND_DST="$CONFIG_DIR/command"
-SKILLS_LINK="$REPO_ROOT/scripts/skills-link.sh"
+FANOUT="$REPO_ROOT/scripts/skills-fanout.sh"
 
 MODE="all" # all | skills | commands
 CHECK=0
@@ -47,7 +48,7 @@ usage() {
   cat <<'EOF'
 用法: ./scripts/opencode-install.sh [选项]
 
-  --skills-only    只把 skills/ 软链到技能安装位（默认 ~/.agents/skills）。
+  --skills-only    只做技能软链：<config>/skills/<name> -> ~/.agents/skills/<name>。
   --commands-only  只软链 commands-opencode/{git,handoff.md,cleanup.md} 到 command 目录。
   --check          只检查不修改：缺失、指向错误、悬空软链都算问题，有问题退出 1。
   --dry-run        只打印将执行的操作。
@@ -55,11 +56,11 @@ usage() {
 
 环境变量:
   OPENCODE_CONFIG     opencode 配置根，默认 ~/.config/opencode
-  AGENTS_SKILLS_DIR   技能安装位，默认 ~/.agents/skills
+  AGENTS_SKILLS_DIR   技能本源目录，默认 ~/.agents/skills
 
 说明:
-  技能只链到统一安装位一份，opencode 靠 config 的 skills 去读：
-    { "skills": ["~/.agents/skills"] }        # 或 "compatibility": { "agents": ["~/.agents"] }
+  技能本源是 ~/.agents/skills（由 ./scripts/skills-install.sh 从本仓发布），
+  opencode 侧只放指向本源的软链，因此**不需要**再在 opencode.json 里配 skills。
   命令必须落在配置目录下的 command/（opencode v2.x 源码里 scan("{command,commands}/**/*.md")），
   本仓沿用 command/。
 EOF
@@ -211,56 +212,18 @@ prepare_target() {
   mkdir -p "$target"
 }
 
-# 旧布局（技能软链直接挂在 <config>/skills）会让同一技能出现两次：提示清理，不算失败。
-warn_legacy_skill_links() {
-  local legacy="$CONFIG_DIR/skills"
-  local target
-  local real
-  local found=0
-
-  [ -d "$legacy" ] || return 0
-  for target in "$legacy"/*; do
-    [ -L "$target" ] || continue
-    real="$(readlink "$target")"
-    case "$real" in
-      "$SKILLS_SRC"/*|"$SKILLS_DST"/*)
-        if [ "$found" -eq 0 ]; then
-          echo "  ! 检测到旧布局：${legacy} 下仍有技能软链（现已统一到 ${SKILLS_DST}）"
-          found=1
-        fi
-        echo "      可删：rm \"${target}\""
-        ;;
-    esac
-  done
-}
-
-# 技能可见性靠 opencode 配置；这里只做尽力而为的提示（不解析 JSONC，不影响退出码）。
-opencode_config_hint() {
-  local cfg="$CONFIG_DIR/opencode.json"
-  local alt="$CONFIG_DIR/opencode.jsonc"
-
-  if [ -f "$cfg" ] && grep -q 'agents/skills\|"skills"\|compatibility' "$cfg"; then
-    return 0
-  fi
-  if [ -f "$alt" ] && grep -q 'agents/skills\|"skills"\|compatibility' "$alt"; then
-    return 0
-  fi
-  echo "  ! opencode 还没配置技能根。在 ${cfg} 里加一行："
-  echo '      "skills": ["~/.agents/skills"]'
-  echo '    或等价写法：  "compatibility": { "agents": ["~/.agents"] }'
-  echo "    （不加这行，opencode 看不到 ${SKILLS_DST} 下的技能，/git/* 会在加载 skill 时失败。）"
-}
-
 echo "==> agent-skills 根目录:  $REPO_ROOT"
 echo "==> opencode 配置:  $CONFIG_DIR"
+echo "==> 技能本源:  $HUB"
 if [ "$CHECK" -eq 1 ]; then
   echo "==> 模式: 只检查（不修改）"
 elif [ "$DRY_RUN" -eq 1 ]; then
   echo "==> 模式: dry-run（不落盘）"
 fi
 
-if [ "$MODE" != "commands" ] && [ ! -d "$SKILLS_SRC" ]; then
-  echo "错误：找不到技能源目录 $SKILLS_SRC" >&2
+if [ "$MODE" != "commands" ] && [ ! -d "$HUB" ]; then
+  echo "错误：技能本源目录不存在：$HUB" >&2
+  echo "  先发布技能：./scripts/skills-install.sh（它用 skills CLI 从本仓安装到本源）" >&2
   exit 2
 fi
 if [ "$MODE" != "skills" ] && [ ! -d "$COMMANDS_SRC/git" ]; then
@@ -268,20 +231,19 @@ if [ "$MODE" != "skills" ] && [ ! -d "$COMMANDS_SRC/git" ]; then
   exit 2
 fi
 
-# ---------- 1) skills ----------
+# ---------- 1) skills（只建软链：本源 -> opencode 配置目录） ----------
 if [ "$MODE" != "commands" ]; then
-  echo "==> skills -> ${SKILLS_DST}（统一安装位，链接逻辑在 scripts/skills-link.sh）"
+  echo "==> skills -> ${SKILLS_DST}（软链指向本源 ${HUB}，逻辑在 scripts/skills-fanout.sh）"
   if [ "$CHECK" -eq 1 ]; then
-    bash "$SKILLS_LINK" --target "$SKILLS_DST" --check || skills_status=$?
+    bash "$FANOUT" --agents opencode --check || skills_status=$?
   elif [ "$DRY_RUN" -eq 1 ]; then
-    bash "$SKILLS_LINK" --target "$SKILLS_DST" --dry-run || skills_status=$?
+    bash "$FANOUT" --agents opencode --dry-run || skills_status=$?
   else
-    bash "$SKILLS_LINK" --target "$SKILLS_DST" || skills_status=$?
+    bash "$FANOUT" --agents opencode || skills_status=$?
   fi
   if [ "$skills_status" -ne 0 ]; then
     issues=$((issues + 1))
   fi
-  warn_legacy_skill_links
 fi
 
 # ---------- 2) commands ----------
@@ -294,14 +256,11 @@ if [ "$MODE" != "skills" ]; then
   link_path "$COMMANDS_SRC/cleanup.md" "$COMMAND_DST/cleanup.md" "命令 cleanup"
 fi
 
-if [ "$MODE" != "commands" ]; then
-  opencode_config_hint
-fi
-
 if [ "$CHECK" -eq 1 ]; then
   echo "==> 检查完成：${issues} 项问题（命令侧已一致 ${unchanged} 项，悬空 ${removed} 项；技能侧结论见上）"
   if [ "$issues" -gt 0 ]; then
-    echo "    修复：技能侧去掉 --check 重跑 scripts/skills-link.sh；命令侧先移走「已存在且不是软链」的真实目录。"
+    echo "    修复：技能侧去掉 --check 重跑 scripts/skills-fanout.sh --agents opencode；"
+    echo "          本源内容缺失/落后先跑 scripts/skills-install.sh；命令侧先移走「已存在且不是软链」的真实目录。"
     exit 1
   fi
   echo "    全部就绪。"
@@ -310,7 +269,7 @@ fi
 
 echo "==> 完成（命令侧）：新建 ${linked} 项，更新 ${updated} 项，已最新 ${unchanged} 项，跳过 ${skipped} 项，清理 ${removed} 项"
 if [ "$MODE" != "commands" ]; then
-  echo "    技能安装位：$SKILLS_DST"
+  echo "    技能软链目录：${SKILLS_DST}（指向本源 ${HUB}）"
 fi
 if [ "$MODE" != "skills" ]; then
   echo "    命令目录：$COMMAND_DST"

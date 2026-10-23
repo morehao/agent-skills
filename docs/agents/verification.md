@@ -35,14 +35,15 @@ node scripts/check-opencode-commands.mjs --dsh ../dsh-commands   # 顺带比对�
 
 ## 环境类检查（本地，不进 CI）
 
-技能安装位与工具侧软链依赖本机 `$HOME`，CI 跑不了，改动接入相关代码后本地自查：
+本源内容与各 agent 软链都依赖本机 `$HOME`，CI 跑不了。改动接入相关代码后本地自查：
 
 ```bash
-./scripts/skills-link.sh --check          # ~/.agents/skills：缺失/指向错误/悬空/被真实目录占位
-./scripts/opencode-install.sh --check     # 命令软链 + 技能侧结论 + 配置提示
+./scripts/skills-install.sh --check       # 本源 ~/.agents/skills 是否与本仓一致（缺失/落后）
+./scripts/skills-fanout.sh --check        # 各 agent 目录的软链是否都指向本源
+./scripts/opencode-install.sh --check     # 上面两项的 opencode 侧 + 命令软链
 ```
 
-两者都是只读，问题数 >0 退出 1。要试“装”的动作，必须用临时目录（见 installation.md「改脚本注意」），别对着真实 `~/.agents` 跑。
+三者都是只读，问题数 >0 退出 1。`skills-install.sh --check` 报「本源与本仓不一致」通常意味着「本仓改了但还没 push/发布」。要试“写”的动作，必须用临时目录（见 installation.md「改脚本注意」），别对着真实 `~/.agents` 跑。
 
 ## project-insight 引擎
 
