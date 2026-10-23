@@ -143,6 +143,8 @@ node scripts/check-opencode-commands.mjs --dsh ../dsh-commands   # 顺带比对�
 
 退出码：`0` 通过（可带提示）/ `1` 有错误 / `2` 用法错误。
 
+CI（[`.github/workflows/commands.yml`](../.github/workflows/commands.yml)）在 push 到 `main` 和所有 PR 上跑同一脚本，并把 `morehao/dsh-commands` checkout 到 `.ci/dsh-commands` 做跨仓比对；本地等价命令就是上面第二条。
+
 ## 新增或修改命令
 
 1. 逻辑写进 `skills/git-kit/references/<branch>.md`（必要时补 `scripts/`）。

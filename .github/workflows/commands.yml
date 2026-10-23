@@ -1,0 +1,49 @@
+name: commands
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: 命令契约（本仓）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: 契约 / README / $ARGUMENTS 校验
+        run: node scripts/check-opencode-commands.mjs
+
+      - name: 安装脚本语法（按 bash 3.2 写）
+        run: |
+          for f in scripts/*.sh; do
+            echo "bash -n ${f}"
+            bash -n "${f}"
+          done
+
+  dsh-parity:
+    name: 与 dsh-commands 的分支契约
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 另一仓只读比对：branch/skill 不一致判失败，description 差异只提示。
+      - uses: actions/checkout@v4
+        with:
+          repository: morehao/dsh-commands
+          path: .ci/dsh-commands
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: 跨仓比对「命令 → skill 分支」
+        run: node scripts/check-opencode-commands.mjs --dsh .ci/dsh-commands
