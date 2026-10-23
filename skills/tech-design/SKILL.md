@@ -108,7 +108,7 @@ description: 编写并落盘「技术方案 / 技术设计文档」（design doc
    # SVG：边拓扑审计（结构类图新画或重排后必跑）+ 目视预览
    node <本skill目录>/scripts/audit-svg-topology.mjs [--expect 期望边清单.txt] <图.svg>...
    node <本skill目录>/scripts/render-svg-preview.mjs <图.svg>...
-   # 常见注册位置：~/.config/opencode/skills/tech-design/、$DSH_HOME/skills/tech-design/
+   # 常见注册位置：~/.agents/skills/tech-design/（opencode 与 dsh 的统一技能安装位）
    ```
    `[MERMAID-ERROR]`、审计**退出码非 0** → 必须修复后重跑，**不静默放过**；`[MERMAID-WARN]`、`[EDGE-GAP]` 为提示级。SVG 图落成**文档同目录的 `.svg` 资产**（英文语义名），并在报告里列出。**简版 ER 图**（`erDiagram`）同样纳入 Mermaid 校验；附录 DDL 是代码块、不参与图校验，但要与正文表格逐项核对一致（`references/data-model.md`）。校验只覆盖「能否解析/渲染」「边是否贴合齐全」，ID 语义化、引号、视图服务关切等约定仍需人工过。
 5. 报告格式：`✅ 技术方案文档已生成: <文件路径>`，并补一句本次落点/场景/档位/专题，以及文档中最需要评审拍板的 1-2 个点。

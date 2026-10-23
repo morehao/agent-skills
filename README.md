@@ -6,12 +6,18 @@
 
 ## 快速开始
 
+本机只有**一个**技能安装位：`~/.agents/skills`（本仓 `skills/*` 软链进去；第三方技能由 `skills` CLI 装在同一处）。
+
 ```bash
 git clone git@github.com:morehao/agent-skills.git && cd agent-skills
 
-# opencode：软链技能与命令（幂等）
+# 技能：软链到统一安装位（幂等）
+./scripts/skills-link.sh
+./scripts/skills-link.sh --check          # 只检查，不动盘
+
+# opencode：命令软链 + 技能可见性（技能走上面的安装位；opencode 需在 opencode.json 配 skills，见文档）
 ./scripts/opencode-install.sh
-./scripts/opencode-install.sh --check      # 只检查软链
+./scripts/opencode-install.sh --check
 
 # dsh（可选）：通常只需挂技能；全量接入会再装 npm 插件
 ./scripts/dsh-install.sh --skills-only
@@ -20,14 +26,14 @@ git clone git@github.com:morehao/agent-skills.git && cd agent-skills
 node scripts/check-opencode-commands.mjs
 ```
 
-手工等价命令、profile 解析、`command/` 与 `commands/` 的区别、卸载，见 [安装与维护](docs/installation.md)。
+opencode 侧需要在 `~/.config/opencode/opencode.json` 里加 `"skills": ["~/.agents/skills"]`（脚本会提示）。手工等价命令、profile 解析、`command/` 与 `commands/` 的区别、卸载，见 [安装与维护](docs/installation.md)。
 
 ## 目录
 
 - `commands-opencode/` — opencode 斜杠指令（`git/*.md` + `handoff.md` + `cleanup.md`）
 - `skills/` — 技能：git-kit、handoff、project-insight、project-wiki、tech-design、svg-maker、disk-cleanup
 - `docs/` — 安装、技能、git-kit 工作流
-- `scripts/` — opencode / dsh 接入 + 命令契约校验
+- `scripts/` — 技能安装位（`skills-link.sh`）+ opencode / dsh 接入 + 命令契约校验
 
 ## 命令
 
