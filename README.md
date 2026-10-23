@@ -6,34 +6,38 @@
 
 ## 快速开始
 
-本机只有**一个**技能安装位：`~/.agents/skills`（本仓 `skills/*` 软链进去；第三方技能由 `skills` CLI 装在同一处）。
+**技能本源是 `~/.agents/skills`**：本仓是编辑源，用 `skills` CLI 发布到本源，再由软链分发给各 agent。
 
 ```bash
 git clone git@github.com:morehao/agent-skills.git && cd agent-skills
 
-# 技能：软链到统一安装位（幂等）
-./scripts/skills-link.sh
-./scripts/skills-link.sh --check          # 只检查，不动盘
+# ① 发布技能到本源（改完本仓、push 之后都要跑）
+./scripts/skills-install.sh
+./scripts/skills-install.sh --check        # 只读：本源与本仓是否一致
 
-# opencode：命令软链 + 技能可见性（技能走上面的安装位；opencode 需在 opencode.json 配 skills，见文档）
-./scripts/opencode-install.sh
+# ② 分发软链：本源 -> opencode / dsh 的技能目录
+./scripts/skills-fanout.sh
+./scripts/skills-fanout.sh --check
+
+# ③ opencode：命令软链（技能已由 fanout 就位）
+./scripts/opencode-install.sh --commands-only
 ./scripts/opencode-install.sh --check
 
-# dsh（可选）：通常只需挂技能；全量接入会再装 npm 插件
+# dsh（可选）：技能软链 + npm 插件
 ./scripts/dsh-install.sh --skills-only
 
 # 改完命令/README 后校验契约
 node scripts/check-opencode-commands.mjs
 ```
 
-opencode 侧需要在 `~/.config/opencode/opencode.json` 里加 `"skills": ["~/.agents/skills"]`（脚本会提示）。手工等价命令、profile 解析、`command/` 与 `commands/` 的区别、卸载，见 [安装与维护](docs/installation.md)。
+发布链路、`--source` 覆盖、手工等价命令、profile 解析与卸载，见 [安装与维护](docs/installation.md)。
 
 ## 目录
 
 - `commands-opencode/` — opencode 斜杠指令（`git/*.md` + `handoff.md` + `cleanup.md`）
 - `skills/` — 技能：git-kit、handoff、project-insight、project-wiki、tech-design、svg-maker、disk-cleanup
 - `docs/` — 安装、技能、git-kit 工作流
-- `scripts/` — 技能安装位（`skills-link.sh`）+ opencode / dsh 接入 + 命令契约校验
+- `scripts/` — 发布（`skills-install.sh`）+ 分发（`skills-fanout.sh`）+ opencode / dsh 接入 + 命令契约校验
 
 ## 命令
 
