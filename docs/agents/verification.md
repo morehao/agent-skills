@@ -22,13 +22,30 @@ node scripts/check-opencode-commands.mjs --dsh ../dsh-commands   # 顺带比对�
 
 新增/修改命令的完整步骤见 [安装与维护](../installation.md) 的「新增或修改命令」。
 
+## disk-cleanup 编码表校验
+
+```bash
+node scripts/check-disk-cleanup-codes.mjs
+```
+
+退出码：`0` 一致 / `1` 有漂移 / `2` 用法或环境错误（脚本跑不起来、JSON 解析失败）。
+
+单一事实源是 `skills/disk-cleanup/scripts/mac_cleanup.sh --list --json`（脚本里的 `KNOWN_IDS` 与元数据），
+校验它与三处文档一一对应：
+
+- `skills/disk-cleanup/references/cleanup.md` 的「清理项编码」表（漏写/多写都判失败）；
+- `skills/disk-cleanup/SKILL.md` 勾选表第二列（`--only` 编码）；
+- `docs/agents/skill-internals.md` 的「清理项编码（…）」清单。
+
+改了编码（新增/删除/改名）必须四处同步，否则用户会看到脚本不认的编码（`--only` 直接 exit 1）或漏掉可清理项。
+
 ### CI
 
 [`.github/workflows/commands.yml`](../../.github/workflows/commands.yml) 在 push 到 `main` 与所有 PR 上跑两个 job：
 
 | job | 内容 | 失败含义 |
 |---|---|---|
-| `contract` | `node scripts/check-opencode-commands.mjs` + 两个安装脚本 `bash -n` | 命令契约/README/`$ARGUMENTS` 不合规，或脚本有语法错误 |
+| `contract` | `node scripts/check-opencode-commands.mjs` + `node scripts/check-disk-cleanup-codes.mjs` + 两个安装脚本 `bash -n` | 命令契约/README/`$ARGUMENTS` 不合规、disk-cleanup 编码与文档漂移，或脚本有语法错误 |
 | `dsh-parity` | checkout `morehao/dsh-commands` 到 `.ci/dsh-commands`，跑 `--dsh` | 两仓的 branch/skill 漂移（description 差异只提示，不失败） |
 
 本地等价：`node scripts/check-opencode-commands.mjs --dsh ../dsh-commands`。CI 依赖另一仓的 `main`，dsh-commands 改了 branch key 这里会立刻红——这是预期信号，不是 flaky。

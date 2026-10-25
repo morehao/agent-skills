@@ -39,6 +39,7 @@
 ./scripts/opencode-install.sh --check      # opencode 侧（技能软链 + 命令软链）
 ./scripts/dsh-install.sh --skills-only     # dsh 只建技能软链（零副作用）
 node scripts/check-opencode-commands.mjs   # 命令契约校验
+node scripts/check-disk-cleanup-codes.mjs  # disk-cleanup 编码与三处文档是否一致
 ```
 
 **改了 `skills/` 里的内容**：push 后必须 `./scripts/skills-install.sh` 发布，否则各 agent 读到的还是旧内容。

@@ -28,6 +28,7 @@
 - `skills-fanout.sh` — **分发**：把本源里的技能软链到各 agent 目录（默认 `opencode,dsh`，可选 `claude`）。选项：`--agents <列表>` / `--check`（缺失/指向错误/悬空/被真实目录占位 → 退出 1）/ `--dry-run` / `-h`；已指向本源跳过、指向别处（旧布局）改指向、悬空清理、真实目录不覆盖。
 - `opencode-install.sh` — opencode 接入：技能委托 `skills-fanout.sh --agents opencode`，命令软链到 `<config>/command/`。选项：`--skills-only` / `--commands-only` / `--check` / `--dry-run` / `-h`；`OPENCODE_CONFIG`、`AGENTS_SKILLS_DIR` 可覆盖。
 - `dsh-install.sh` — dsh 接入：技能委托 `skills-fanout.sh --agents dsh`（建 `$DSH_HOME/skills` 软链），再装 npm 上的 `@morehao/dsh-commands`。选项：`--profile <name>` / `--skills-only`（只建软链、跳过插件）/ `--plugin-link <插件仓路径>`（插件仓开发调试走 `link:`）/ `-h`。
+- `check-disk-cleanup-codes.mjs` — disk-cleanup 编码一致性校验：以 `skills/disk-cleanup/scripts/mac_cleanup.sh --list --json` 为单一事实源，比对 `references/cleanup.md` 编码表、`SKILL.md` 勾选表、`docs/agents/skill-internals.md` 编码清单（漏写/多写都判失败，退出码 1）。
 - `check-opencode-commands.mjs` — 命令契约校验：frontmatter 合法字段、`**<branch> 分支**` 对应 `skills/<skill>/references/<branch>.md`、`$ARGUMENTS` 独立成行、两份 README 表格与命令文件一一对应。可选 `--dsh <插件仓路径>` 比对另一仓 `COMMANDS` 表的 branch/skill（不一致判失败，description 差异只提示）。
 
 ## 三个入口，一份实现
