@@ -22,6 +22,9 @@ jobs:
       - name: 契约 / README / $ARGUMENTS 校验
         run: node scripts/check-opencode-commands.mjs
 
+      - name: disk-cleanup 编码表一致性
+        run: node scripts/check-disk-cleanup-codes.mjs
+
       - name: 安装脚本语法（按 bash 3.2 写）
         run: |
           for f in scripts/*.sh; do
