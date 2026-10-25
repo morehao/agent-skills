@@ -16,7 +16,7 @@ Git 工作流（message / commit-push / branch / pr-create / pr-merge / tag / re
 
 ## handoff
 
-**刻意只有单文件 `SKILL.md`（30 行）**：规则 4 条 + 取证命令 + 输出骨架 5 节，没有 `references/`。把当前会话压成一段可直接粘贴的续跑提示：**只打印、不落盘**；新会话粘贴后先核对分支/工作区/关键文件再继续。入口 opencode `/handoff` 与 dsh `/handoff`（`print` 分支）。**frontmatter 标 `disable-model-invocation: true`**：只允许用户手动调用（模型可见目录里不再出现）；dsh 的 skill 工具会直接拒绝加载，故 dsh 侧命令注入带「直接 read `$DSH_HOME/skills/handoff/SKILL.md`」的兜底——该路径由插件仓硬编码，依赖 `dsh-install.sh` 建的那条软链；没建链时等价路径是本源 `~/.agents/skills/handoff/SKILL.md`。
+**刻意只有单文件 `SKILL.md`（29 行）**：规则 4 条 + 取证命令 + 输出骨架 5 节，没有 `references/`。把当前会话压成一段可直接粘贴的续跑提示：**只打印、不落盘**；新会话粘贴后先核对分支/工作区/关键文件再继续。入口 opencode `/handoff` 与 dsh `/handoff`（`print` 分支）。**frontmatter 不设 `disable-model-invocation`**：模型在技能清单里可见，既能被用户斜杠调用，也能在用户说「交接一下」或判定需要跨会话接力时自行加载——触发条件写进 `description`，别只依赖手动入口。dsh 侧命令注入仍指向 `$DSH_HOME/skills/handoff/SKILL.md` 的 read 兜底（插件仓既有实现），不以此作为可见性前提。
 
 ## project-insight
 

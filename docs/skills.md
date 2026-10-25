@@ -30,7 +30,7 @@ Git 工作流的唯一真源。`SKILL.md` 只做意图路由：先判断命中�
 
 - 只打印一个 Markdown 代码块，不落盘、不改仓库；
 - 每条结论带 `path:line` 或命令结果；取不到证据标 `[待核实]`，没跑过标 `[未验证]`，决策没落点标 `[未落盘]`；
-- frontmatter 标 `disable-model-invocation: true`：只允许用户手动调用，模型不会自动触发。
+- 模型可见、可自行触发：`description` 里写明触发语（「交接一下」「生成续跑提示」「handoff」、换工具/换目录/交给别人）；与斜杠入口 `/handoff` 等价，不要求用户手动敲命令。
 
 入口：opencode `/handoff`、dsh `/handoff`。
 
