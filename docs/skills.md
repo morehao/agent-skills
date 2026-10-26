@@ -73,6 +73,8 @@ Git 工作流的唯一真源。`SKILL.md` 只做意图路由：先判断命中�
 - **取舍对偶**：每个选型写代价与不该选的场景，并回指目标；
 - **宁轻勿重**：不适用章节删掉，不留 N/A。
 
+交付前过三道闸：作者自检 → 文档门禁 `check-design-doc.mjs`（占位符/空壳章节/状态块/备选/追溯表/DDL 一致性，三档严重度）→ 评审 gate（完整档必跑，独立上下文 + 并行 lens，只回 `VERDICT` 与 top3）。
+
 配图 Mermaid 与 SVG 均为一等公民；`check-mermaid.mjs` / `audit-svg-topology.mjs` / `render-svg-preview.mjs` 是 project-insight 引擎的薄壳。
 
 ## svg-maker

@@ -22,6 +22,18 @@ node scripts/check-opencode-commands.mjs --dsh ../dsh-commands   # 顺带比对�
 
 新增/修改命令的完整步骤见 [安装与维护](../installation.md) 的「新增或修改命令」。
 
+## tech-design 文档门禁回归
+
+```bash
+node skills/tech-design/scripts/tests/check-design-doc-test.mjs
+```
+
+退出码：`0` 全部断言通过 / `1` 有断言失败。
+
+这个测试守的是门禁脚本本身：合规文档必须通过、**故意违规必须被拦住**（缺状态块、残留 `TBD`、`N/A` 空壳章节、备选无「不做」、缺追溯表、DDL 与正文两说）、`--strict` 只提升 warn、`note` 在任何模式下都不阻断、`--tier light` 不要求追溯表。夹具在 `skills/tech-design/scripts/tests/fixtures/`，其中 `good-full.md` 同时是「高质量完整档」的可参照样例。
+
+改了 `check-design-doc.mjs` 的规则或严重度，必须同步改夹具与断言——夹具不跟着改，等于把门禁调松而不自知。
+
 ## disk-cleanup 编码表校验
 
 ```bash
@@ -45,7 +57,7 @@ node scripts/check-disk-cleanup-codes.mjs
 
 | job | 内容 | 失败含义 |
 |---|---|---|
-| `contract` | `node scripts/check-opencode-commands.mjs` + `node scripts/check-disk-cleanup-codes.mjs` + 两个安装脚本 `bash -n` | 命令契约/README/`$ARGUMENTS` 不合规、disk-cleanup 编码与文档漂移，或脚本有语法错误 |
+| `contract` | `node scripts/check-opencode-commands.mjs` + `node scripts/check-disk-cleanup-codes.mjs` + `node skills/tech-design/scripts/tests/check-design-doc-test.mjs` + 两个安装脚本 `bash -n` | 命令契约/README/`$ARGUMENTS` 不合规、disk-cleanup 编码与文档漂移、tech-design 文档门禁规则或夹具失败，或脚本有语法错误 |
 | `dsh-parity` | checkout `morehao/dsh-commands` 到 `.ci/dsh-commands`，跑 `--dsh` | 两仓的 branch/skill 漂移（description 差异只提示，不失败） |
 
 本地等价：`node scripts/check-opencode-commands.mjs --dsh ../dsh-commands`。CI 依赖另一仓的 `main`，dsh-commands 改了 branch key 这里会立刻红——这是预期信号，不是 flaky。
