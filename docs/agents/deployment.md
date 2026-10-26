@@ -9,7 +9,7 @@
                                                                   --软链--> 各 agent 技能目录（skills-fanout.sh）
 ```
 
-- **本仓不是运行时真源**：改 `skills/` 后**不会**自动生效，必须 `git push` + `./scripts/skills-install.sh` 才发布到本源。
+- **本仓不是运行时真源**：改 `skills/` 后**不会**自动生效，要 `git push` 后**由维护者手动**把 `skills/<name>/` 同步到 `~/.agents/skills/<name>/`（脚本 `skills-install.sh` 仍可选用，但不是强制步骤，也不由 agent 代为执行）。
 - **本源是 `~/.agents/skills`**（`AGENTS_SKILLS_DIR` 可覆盖）：真实内容都在这，第三方技能（`officecli`、`weather-query` 等）也装在同一处。
 - **各 agent 目录只有软链**：`scripts/skills-fanout.sh` 建 `~/.config/opencode/skills/<name>`、`~/.dsh/skills/<name>`（可选 `~/.claude/skills/<name>`）指向本源。所以其它 agent 看到的永远是**已发布**内容，不会被某个工作区的半成品影响。
 - **命令没法搬到本源**：opencode 只认配置目录下的 `command/`，那部分仍由 `opencode-install.sh` 从本仓软链（命令是委托壳，改本仓即时生效——这点和技能不同）。
@@ -20,7 +20,7 @@
 
 | 动作 | 脚本 | 方向 | 何时跑 |
 |---|---|---|---|
-| 发布内容 | `skills-install.sh` | 本仓 → 本源（skills CLI） | 首次；本仓技能有更新且已 push 之后 |
+| 发布内容 | **手动同步**（可选用 `skills-install.sh`） | 本仓 → 本源 | 维护者决定；本仓技能有更新且已 push 之后 |
 | 分发软链 | `skills-fanout.sh` | 本源 → 各 agent 目录 | 首次；本源新增/删除技能之后 |
 | 只读自查 | 两者 `--check` | — | 怀疑「命令能点但 skill 加载失败」时 |
 
@@ -37,7 +37,7 @@
 - **本源**：`~/.agents/skills`（dsh 直接扫描，也是 `skills` CLI 的 canonical 目录）。
 - **软链层**：`~/.dsh/skills`（由 fanout 维护）；项目级 `<项目根>/.dsh/skills`、`<项目根>/.agents/skills` 也会被扫描。
 - 新增/变更**软链**后无需重启（新会话与技能面板立即生效）；只有插件 `lib/index.js` 改动才需要重启 dsh。
-- 改了**技能内容**：发布到本源（`skills-install.sh`）后即生效，不需要重启。
+- 改了**技能内容**：维护者手动同步到本源后即生效，不需要重启。
 
 ## `skills/` 目录约定
 

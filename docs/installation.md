@@ -13,7 +13,7 @@
    └─软链─> ~/.dsh/skills/<name>          ./scripts/skills-fanout.sh 负责
 ```
 
-- **改本仓不会自动生效**：先 push 到 `morehao/agent-skills`，再跑 `./scripts/skills-install.sh` 发布到本源。
+- **改本仓不会自动生效**：先 push 到 `morehao/agent-skills`，再由维护者手动把 `skills/<name>/` 同步到本源 `~/.agents/skills/<name>/`（`./scripts/skills-install.sh` 是可选的批量方式）。
 - 本源里同时存在第三方技能（`skills` CLI 装的，如 `officecli`、`weather-query`），与本仓技能互不干扰。
 - 各 agent 目录**只放指向本源的软链**，内容不复制。好处：其它 agent 永远看到已发布的稳定内容，不会被某个工作区的半成品影响。
 
@@ -201,7 +201,7 @@ CI（[`.github/workflows/commands.yml`](../.github/workflows/commands.yml)）在
 3. 更新 `commands-opencode/README.md` 的两张表（指令清单 + 联动表）和根 `README.md` 的命令表。
 4. 跑 `node scripts/check-opencode-commands.mjs`。
 5. 同步 dsh 入口：到 dsh-commands 仓的 `COMMANDS` 表加一行，并跑它的 `check-skill-contract.mjs`。
-6. 改了技能内容要**发布**才生效：`git push` → `./scripts/skills-install.sh`（本机各 agent 随即读到新内容）。
+6. 改了技能内容要**同步**才生效：`git push` → 维护者手动同步到 `~/.agents/skills/`（本机各 agent 随即读到新内容）。
 
 ## 改脚本注意
 
