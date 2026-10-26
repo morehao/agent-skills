@@ -31,7 +31,7 @@ node <本skill目录>/scripts/check-design-doc.mjs <文档> --tier <light|standa
 
 ### 第 3 段：并行 lens（独立上下文）
 
-按**场景与专题**选 2–4 个 lens，每个一个独立 subagent：
+按**场景与专题**选 2–4 个风险 lens（下表前四行），完整档再固定加一个实施者视角 lens；每个一个独立 subagent：
 
 | lens | 何时选 | 追问 |
 |------|--------|------|
