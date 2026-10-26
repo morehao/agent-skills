@@ -51,6 +51,8 @@ references：`version-contract.md`（单基线契约与陈旧三选一裁决）�
 
 技术方案 / 技术设计文档生成（原 `tech-design-proposal`，曾用名 `design-doc`）。多文件：`SKILL.md` 只做意图路由（**档位 × 场景 × 专题**三轴：档位定篇幅、场景（单选）定过程义务、专题（可多选）定技术领域加固点；**场景判定前先答「落点」第 0 问**——新系统 / 既有系统的新模块 / 既有系统的既有模块，决定取证对象与义务增量：宿主约束、对宿主的影响、必须谁签）+ 工作流（澄清 → 定档 → 定落点与场景 → 选专题 → **取证 → 按叙事链推理** → 量化 → 撰写 → 自检落盘）+ 交付前自检 + 落盘收尾（含文档状态块：状态/作者/评审人/拍板人；收尾原为 `output.md`，已合并进 SKILL.md，避免两份说法漂移）。
 
+**两种模式**：编写（默认，走 12 步）与评审（既有文档只出 `VERDICT` + findings，不重写、不补章节）；判定规则在 `SKILL.md` 顶部，评审流程在 `references/review-gate.md`「评审模式」。
+
 references：`templates.md`（**叙事链 9 问与顺序依赖** + 三档骨架与各节必答项）、`scenarios.md`（**落点义务增量 A/B/C** + 六类场景义务包：新建/增量改造/结构重构/替换与迁移/下线与废弃/专项优化——必答项 + 章节增删 + 验收与回滚形态）、`focus-areas.md`（专题加固点与迁移手法手段库）、`data-model.md`（**数据库设计落法**：正文三张表——实体清单/字段/索引与查询匹配 + 简版 ER 图 + **DDL 只在附录**且为唯一可执行真源）、`quantification.md`（量化与量级估算：收益口径、可用性预算、最脆弱假设）、`quality-bar.md`（图/代码/论证红线 + 反模式表 + 评审清单）。
 
 职责边界：**过程义务归场景**（落点义务 + 迁移/兼容/回滚/等价性验证），**技术必答项归专题**，两者不重复表述。
@@ -62,7 +64,7 @@ references：`templates.md`（**叙事链 9 问与顺序依赖** + 三档骨架�
 - **取舍对偶**：每个选型写代价、不该选的场景，并回指目标或约束。
 - **宁轻勿重**：不适用的章节删掉，不留 N/A。
 
-**质量靠三道闸，不靠自评**：① 交付前自检（作者侧，`SKILL.md` 26 条）；② 文档门禁 `scripts/check-design-doc.mjs`（机械项：占位符/空壳章节/状态块/备选含不做/追溯表/DDL 与正文一致性/无口径形容词与数字/该有的图缺席（`TD-NO-DIAGRAM`）或图断链（`TD-ASSET-MISSING`）/引用技能内部文件（`TD-INTERNAL-REF`）/体量超 20 屏（`TD-SIZE`，note 级），三档严重度 + `--tier` 与 `--upstream` 编号对账，退出码 0/1/2 与 `project-wiki/scripts/check-docs.mjs` 同契约）；③ 评审 gate `references/review-gate.md`（独立上下文：门禁 → 清单判定 → 并行 lens，各写 `<文档目录>/reviews/` 子目录只回 `VERDICT` + top3）。**门禁只做机械项，语义判断归 gate**——这条分工写死在三个文件里，别互相越界。门禁回归测试 `scripts/tests/check-design-doc-test.mjs`（27 条断言，含「故意违规必须被拦住」与「note 在 `--strict` 下也不阻断」），跑在 CI 的 `contract` job。
+**质量靠三道闸，不靠自评**：① 交付前自检（作者侧，清单见 `SKILL.md`「交付前自检」，此处不写死条数）；② 文档门禁 `scripts/check-design-doc.mjs`（规则与严重度清单以 `--list-rules` 为唯一真源，含图缺席/断链、内部指代、体量与未定记号收口；三档严重度 + `--tier` 与 `--upstream` 编号对账，退出码 0/1/2 与 `project-wiki/scripts/check-docs.mjs` 同契约）；③ 评审 gate `references/review-gate.md`（独立上下文：门禁 → 清单判定 → 并行 lens，各写 `<文档目录>/reviews/` 子目录只回 `VERDICT` + top3）。**门禁只做机械项，语义判断归 gate**——这条分工写死在三个文件里，别互相越界。门禁回归测试 `scripts/tests/check-design-doc-test.mjs`（含「故意违规必须被拦住」与「note 在 `--strict` 下也不阻断」），跑在 CI 的 `contract` job。行为侧另有人工 baseline `scripts/tests/behavior/baseline.md`（要跑模型，不进 CI），结果回写 `references/anti-rationalization.md`。
 
 骨架与主流模板的对齐点（上下文与边界**前置**、完整档「读者与关切」、**散文优先**、体量红线、不该写方案的判断）以及**有意偏离**（ADR 内嵌成追溯表、不设 degree-of-constraint 章节、不设质量树、不设 prior art）都记在 `references/templates.md` 文末的维护备注里——改骨架时同步那一节，别让下一轮复核把设计选择当成漏洞。
 

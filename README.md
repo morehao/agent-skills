@@ -65,7 +65,7 @@ node scripts/check-opencode-commands.mjs
 | [`handoff`](skills/handoff/SKILL.md) | 跨会话交接：只打印一段可粘贴的续跑提示 |
 | [`project-insight`](skills/project-insight/SKILL.md) | 开源项目架构分析：决策卡 + 可迁移模式 + 学习路径，证据按需 |
 | [`project-wiki`](skills/project-wiki/SKILL.md) | 面向不读源码的读者写 Wiki：散文 + 图 + 表，代码密度极低 |
-| [`tech-design`](skills/tech-design/SKILL.md) | 技术方案：档位 × 场景 × 专题三轴，取证先于动笔 |
+| [`tech-design`](skills/tech-design/SKILL.md) | 技术方案：档位 × 场景 × 专题三轴，取证先于动笔；含既有文档评审模式 |
 | [`svg-maker`](skills/svg-maker/SKILL.md) | 生成自包含、可离线打开的 SVG 图 |
 | [`disk-cleanup`](skills/disk-cleanup/SKILL.md) | 磁盘空间回收与本地数据瘦身：先查询、用户勾选后只删所选，用户数据只报告 |
 

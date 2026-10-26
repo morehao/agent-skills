@@ -34,6 +34,10 @@ node skills/tech-design/scripts/tests/check-design-doc-test.mjs
 
 改了 `check-design-doc.mjs` 的规则或严重度，必须同步改夹具与断言——夹具不跟着改，等于把门禁调松而不自知。
 
+规则与严重度的**唯一清单**用 `node skills/tech-design/scripts/check-design-doc.mjs --list-rules` 查；文档里不抄枚举，回归测试会断言清单与源码里 `report()` 发出的码一一对应。
+
+`skills/tech-design/scripts/tests/behavior/baseline.md` 是**人工行为回归**（要跑模型，不进 CI）：技能新增或大改后按其中三个场景复跑，把新出现的偷懒话术追加到 `references/anti-rationalization.md`。
+
 ## disk-cleanup 编码表校验
 
 ```bash
