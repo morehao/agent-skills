@@ -70,7 +70,7 @@ flowchart LR
 ### 校验（落盘前必过）
 
 ```bash
-# 文档正文门禁：占位符/空壳章节/状态块/备选/追溯表/DDL 一致性
+# 文档正文门禁（规则清单：node <本skill目录>/scripts/check-design-doc.mjs --list-rules）
 node <本skill目录>/scripts/check-design-doc.mjs <文档> --tier <light|standard|full> [--upstream <PRD>...]
 
 # Mermaid：真解析（mermaid.parse）

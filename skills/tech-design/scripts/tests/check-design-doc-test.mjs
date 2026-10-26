@@ -7,6 +7,7 @@
 // 退出码：0 全部通过 / 1 有断言失败。
 
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -139,6 +140,28 @@ const warnOnly = join(fixtures, 'warn-only.md');
   ok('轻量档示例通过（无 error 无 warn）', r.code === 0 && !r.out.includes('✗ ') && !r.out.includes('! '), r.out);
   ok('记号收口到「假设与约束」不报未收口', !r.out.includes('TD-MARKER-UNCOLLECTED'), r.out);
   ok('验收百分比不误判为「数字缺口径」', !r.out.includes('TD-NUM-BASIS'), r.out);
+}
+
+// ⑩ 规则清单是唯一真源：--list-rules 与源码里 report() 的码一一对应
+{
+  const r = run(['--list-rules']);
+  ok('--list-rules 退出码 0', r.code === 0, r.out + r.err);
+
+  const listed = r.out.trim().split('\n').filter(Boolean).map((l) => l.split('\t')[0]);
+  ok('--list-rules 输出 ≥20 条且含关键码',
+    listed.length >= 20
+      && ['TD-STATUS-BLOCK', 'TD-OPTION', 'TD-TRACE', 'TD-NO-DIAGRAM', 'TD-ASSET-MISSING', 'TD-INTERNAL-REF']
+        .every((c) => listed.includes(c)),
+    r.out);
+
+  const src = readFileSync(script, 'utf8');
+  const used = [...new Set(
+    [...src.matchAll(/report\('(?:error|warn|note)',\s*'([A-Z-]+)'/g)].map((m) => m[1]),
+  )].sort();
+  const listedSet = [...new Set(listed)].sort();
+  ok('规则清单覆盖源码全部 report() 码（无漏列/多列）',
+    used.length === listedSet.length && used.every((c, i) => c === listedSet[i]),
+    `源码用：${used.join(',')}\n清单：${listedSet.join(',')}`);
 }
 
 // ———————————————————————————— 汇总 ————————————————————————————

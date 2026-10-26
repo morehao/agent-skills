@@ -62,7 +62,7 @@ references：`templates.md`（**叙事链 9 问与顺序依赖** + 三档骨架�
 - **取舍对偶**：每个选型写代价、不该选的场景，并回指目标或约束。
 - **宁轻勿重**：不适用的章节删掉，不留 N/A。
 
-**质量靠三道闸，不靠自评**：① 交付前自检（作者侧，`SKILL.md` 26 条）；② 文档门禁 `scripts/check-design-doc.mjs`（机械项：占位符/空壳章节/状态块/备选含不做/追溯表/DDL 与正文一致性/无口径形容词与数字/该有的图缺席（`TD-NO-DIAGRAM`）或图断链（`TD-ASSET-MISSING`）/引用技能内部文件（`TD-INTERNAL-REF`）/体量超 20 屏（`TD-SIZE`，note 级），三档严重度 + `--tier` 与 `--upstream` 编号对账，退出码 0/1/2 与 `project-wiki/scripts/check-docs.mjs` 同契约）；③ 评审 gate `references/review-gate.md`（独立上下文：门禁 → 清单判定 → 并行 lens，各写 `<文档目录>/reviews/` 子目录只回 `VERDICT` + top3）。**门禁只做机械项，语义判断归 gate**——这条分工写死在三个文件里，别互相越界。门禁回归测试 `scripts/tests/check-design-doc-test.mjs`（27 条断言，含「故意违规必须被拦住」与「note 在 `--strict` 下也不阻断」），跑在 CI 的 `contract` job。
+**质量靠三道闸，不靠自评**：① 交付前自检（作者侧，清单见 `SKILL.md`「交付前自检」，此处不写死条数）；② 文档门禁 `scripts/check-design-doc.mjs`（规则与严重度清单以 `--list-rules` 为唯一真源，含图缺席/断链、内部指代、体量与未定记号收口；三档严重度 + `--tier` 与 `--upstream` 编号对账，退出码 0/1/2 与 `project-wiki/scripts/check-docs.mjs` 同契约）；③ 评审 gate `references/review-gate.md`（独立上下文：门禁 → 清单判定 → 并行 lens，各写 `<文档目录>/reviews/` 子目录只回 `VERDICT` + top3）。**门禁只做机械项，语义判断归 gate**——这条分工写死在三个文件里，别互相越界。门禁回归测试 `scripts/tests/check-design-doc-test.mjs`（含「故意违规必须被拦住」与「note 在 `--strict` 下也不阻断」），跑在 CI 的 `contract` job。行为侧另有人工 baseline `scripts/tests/behavior/baseline.md`（要跑模型，不进 CI），结果回写 `references/anti-rationalization.md`。
 
 骨架与主流模板的对齐点（上下文与边界**前置**、完整档「读者与关切」、**散文优先**、体量红线、不该写方案的判断）以及**有意偏离**（ADR 内嵌成追溯表、不设 degree-of-constraint 章节、不设质量树、不设 prior art）都记在 `references/templates.md` 文末的维护备注里——改骨架时同步那一节，别让下一轮复核把设计选择当成漏洞。
 

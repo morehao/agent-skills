@@ -3,7 +3,7 @@
 //
 // 用法：
 //   node check-design-doc.mjs <方案.md>... [--tier light|standard|full] [--upstream <PRD.md>...]
-//                             [--strict] [--quiet] [--json]
+//                             [--strict] [--quiet] [--json] [--list-rules]
 //
 // 严重度三档（与 project-wiki/scripts/check-docs.mjs 同一套语义）：
 //   error  程序可确定判定，且违反会让评审读到错的东西        → 退出码 1
@@ -22,11 +22,39 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve, basename, dirname } from 'node:path';
 
-const USAGE = '用法: node check-design-doc.mjs <方案.md>... [--tier light|standard|full] [--upstream <PRD.md>...] [--strict] [--quiet] [--json]';
+const USAGE = '用法: node check-design-doc.mjs <方案.md>... [--tier light|standard|full] [--upstream <PRD.md>...] [--strict] [--quiet] [--json] [--list-rules]';
 
 const C = {
   reset: '\u001b[0m', red: '\u001b[31m', yellow: '\u001b[33m', cyan: '\u001b[36m', dim: '\u001b[2m', bold: '\u001b[1m',
 };
+
+// ———————————————————————————— 规则清单 ————————————————————————————
+// `--list-rules` 是规则与严重度的唯一真源：文档里不抄枚举，
+// CI 断言它与源码里 report() 实际发出的码一一对应。
+
+const RULES = [
+  ['TD-TARGET-MISSING', 'error', '目标文件不存在或不是文件'],
+  ['TD-STATUS-BLOCK', 'error', '缺文档状态块，或状态块缺作者/评审人/拍板人/最后更新'],
+  ['TD-STATUS-VALUE', 'warn', '状态取值不在 草案待评 / 评审中 / 已批准 内'],
+  ['TD-PLACEHOLDER', 'error', '残留 TBD / TODO / 待补充 等占位符'],
+  ['TD-NA', 'error', '章节只有 N/A / 不适用 等空壳'],
+  ['TD-SECTION-EMPTY', 'warn', '章节没有正文'],
+  ['TD-SECTION-THIN', 'warn', '多个章节只有 1 行有效内容'],
+  ['TD-SIZE', 'note', '超过 ~900 行，建议拆总纲 + 子方案'],
+  ['TD-INTERNAL-REF', 'warn', '交付文档引用了技能内部文件或「本技能」'],
+  ['TD-NO-DIAGRAM', 'warn', '有架构/流程/数据模型章节但全文无图'],
+  ['TD-ASSET-MISSING', 'warn', '图引用指向的本地文件不存在'],
+  ['TD-VAGUE', 'warn', '无数字支撑的形容词（高性能/海量/显著…）'],
+  ['TD-GOAL-NO-NUMBER', 'warn', '目标/验收里的提升/降低没有数字与口径'],
+  ['TD-EMPTY-WORDS', 'warn', '「加强监控」「做好兜底」这类空话'],
+  ['TD-NUM-BASIS', 'warn', '性能类数字没有口径（平均/P99/窗口/来源）'],
+  ['TD-OPTION', 'error', '缺备选章节，或备选里没有「不做/维持现状/否决」'],
+  ['TD-TRACE', 'error', '缺决策↔需求追溯表，或某行缺承接需求/验证手段'],
+  ['TD-TRACE-UPSTREAM', 'warn', '承接需求编号在上游文档里找不到'],
+  ['TD-DDL-MISMATCH', 'warn', '附录 DDL 与正文字段表不一致'],
+  ['TD-MARKER', 'note', '[待核实]/[待澄清]/[假设] 的收口提醒'],
+  ['TD-MARKER-UNCOLLECTED', 'warn', '有未定记号，但没有开放问题/假设与约束章节'],
+];
 
 // ———————————————————————————— 参数 ————————————————————————————
 
@@ -37,6 +65,7 @@ let tierOpt = null;
 let strict = false;
 let quiet = false;
 let asJson = false;
+let listRules = false;
 
 for (let i = 0; i < argv.length; i += 1) {
   const a = argv[i];
@@ -45,12 +74,12 @@ for (let i = 0; i < argv.length; i += 1) {
   if (a === '--strict') { strict = true; continue; }
   if (a === '--quiet') { quiet = true; continue; }
   if (a === '--json') { asJson = true; continue; }
+  if (a === '--list-rules') { listRules = true; continue; }
   if (a === '-h' || a === '--help') { console.log(USAGE); process.exit(0); }
   if (a.startsWith('--')) { console.error(`[用法错误] 未知参数：${a}\n${USAGE}`); process.exit(2); }
   targets.push(a);
 }
 
-if (!targets.length) { console.error(USAGE); process.exit(2); }
 if (tierOpt !== null && !['light', 'standard', 'full'].includes(tierOpt)) {
   console.error(`[用法错误] --tier 只能是 light / standard / full，收到：${tierOpt}`);
   process.exit(2);
@@ -58,6 +87,11 @@ if (tierOpt !== null && !['light', 'standard', 'full'].includes(tierOpt)) {
 for (const u of upstreamPaths) {
   if (!u || !existsSync(resolve(u))) { console.error(`[用法错误] --upstream 不存在：${u}`); process.exit(2); }
 }
+if (listRules) {
+  for (const [code, level, desc] of RULES) console.log(`${code}\t${level}\t${desc}`);
+  process.exit(0);
+}
+if (!targets.length) { console.error(USAGE); process.exit(2); }
 
 // ———————————————————————————— 报告 ————————————————————————————
 

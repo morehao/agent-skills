@@ -133,7 +133,7 @@ description: 编写并落盘「技术方案 / 技术设计文档」（design doc
 | 独立评审怎么跑、lens 怎么选、裁决怎么给 | `references/review-gate.md` |
 | 想看一份过关的完整档长什么样（含追溯表与 DDL） | `scripts/tests/fixtures/good-full.md` |
 
-文档正文的机械项由 `scripts/check-design-doc.mjs` 检查（占位符、空壳章节、状态块、备选、追溯表、DDL 一致性、形容词与无口径数字）；语义判断不走脚本。
+文档正文的机械项由 `scripts/check-design-doc.mjs` 检查；**规则清单以脚本为唯一真源**：`node <本skill目录>/scripts/check-design-doc.mjs --list-rules`（含图缺席/断链、内部指代、体量、未定记号收口——别只按「占位符 + 形容词」准备）。交付文档里不抄规则枚举，抄了必漂。语义判断不走脚本。
 
 只读当前所需小节，不整篇搬运。
 
