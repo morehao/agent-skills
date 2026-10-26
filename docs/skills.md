@@ -36,15 +36,15 @@ Git 工作流的唯一真源。`SKILL.md` 只做意图路由：先判断命中�
 
 ## project-insight
 
-开源项目深度解读，产出一份「每条论断都能核验」的 Markdown：
+开源项目架构设计分析：解构边界、模块责任、关键链路与设计决策，产出开发者能学走的架构分析：
 
-- 真源引用必须 `文件:行号`，并由 `scripts/verify-references.mjs` 程序化重定位（首末行双锚点，不整段贴码）；
-- Mermaid 图由 `scripts/check-mermaid.mjs` 真解析；
-- 版本基线由 `scripts/select-baseline.mjs` 选定（稳定 tag > 稳定分支 > 默认分支 > 无 main/master 的兜底矩阵），基线写进 README 概览与 `CHANGELOG.md` 顶部；
-- `[UNVERIFIED]` / `[MERMAID-ERROR]` 保留，不静默放过；
+- 默认**零代码索引**，重点写判断：问题与约束 → 架构全景 → 模块责任 → 关键链路 → 决策卡 → 可迁移模式 → 学习路径；
+- 证据按需：反直觉论断、数字、与自述冲突、用户要求核验时，才在附录给 `文件:行号` 并跑 `verify-references.mjs`；默认模式可用 `check-doc.mjs` 做路径/链接体检；
+- 图是主体：结构/分层/拓扑用 SVG（走 `svg-maker`），时序用 Mermaid；落盘前用 `check-mermaid.mjs` 真解析、SVG 跑拓扑审计；
+- 默认落点 `<项目>-架构分析.md`，**不写进源码仓库**；知识库入库（`{分类}/{项目}/` + 索引）仅在用户明确要求时启用；
 - 落盘后不做 `git add/commit`。
 
-适合：要逐条点开核验、要深挖设计权衡的读者。
+适合：想从项目里学架构设计、要决策与可迁移模式的开发者。
 
 ## project-wiki
 
@@ -56,7 +56,7 @@ Git 工作流的唯一真源。`SKILL.md` 只做意图路由：先判断命中�
 - 真实性由作者侧门禁 `scripts/check-all.mjs` 保证（代码预算、依据行、首页索引、图表复杂度、版本契约等），Mermaid / SVG 校验复用 project-insight 引擎；
 - 单基线契约：校验根与 `--expect-baseline` 必须一起交，快照只对自述的那个基线成立。
 
-适合：给团队一份能读的文档。与 `project-insight` 的分工是**受众不同**：要逐条核验走前者，要给不读源码的人读走后者。
+适合：给团队一份能读的文档。与 `project-insight` 的分工是**产出性质不同**：要学架构设计、要决策与可迁移模式走前者；要一份不读源码也能读的系统说明走后者。
 
 ## tech-design
 
@@ -100,7 +100,7 @@ Git 工作流的唯一真源。`SKILL.md` 只做意图路由：先判断命中�
 |---|---|
 | 把 Git 流程走完（提交、PR、合并、发版） | `git-kit` |
 | 换会话 / 换工具，先把现场交接出去 | `handoff` |
-| 读懂一个开源项目，留下可核验的笔记 | `project-insight` |
+| 从开源项目里学架构设计，要判断与可迁移模式 | `project-insight` |
 | 给团队写一份不读源码也能看懂的 Wiki | `project-wiki` |
 | 写技术方案 / 设计文档 | `tech-design` |
 | 只要一张独立图表 | `svg-maker` |

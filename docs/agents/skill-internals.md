@@ -20,18 +20,19 @@ Git 工作流（message / commit-push / branch / pr-create / pr-merge / tag / re
 
 ## project-insight
 
-开源项目深度解读。`SKILL.md` 较大（约 50KB），铁律：
+开源项目架构设计分析。`SKILL.md` 只做意图路由（双模式 / 三档深度 / 六步主干 / 骨架 / 证据规则 / 红线），细节按需加载：
 
-- 真源引用 `文件:行号` 必须经 `scripts/verify-references.mjs` 程序化重定位验证（指纹用**首末行双锚点**，不整段贴码；旧 snippet 格式仅存量兼容）。
-- Mermaid 图必须经 `scripts/check-mermaid.mjs` 校验全 `OK`。
-- `[UNVERIFIED]` / `[MERMAID-ERROR]` 一律保留，不静默放过。
-- **版本基线**（step 0.5）由 `scripts/select-baseline.mjs` 程序化选定：稳定 tag > 稳定分支（`release*`/`stable*`/`maintenance*`/`1.x`）> 默认分支（main/master/远端 HEAD）> **无 main/master 的兜底矩阵**。选定后的工作树才是 `source_repo` 与引用校验根；脏工作树不静默覆盖（`git worktree` 兜底）；基线写进 README 概览一行 + `CHANGELOG.md` 顶部（不进 frontmatter）。细则在 `references/version-baseline.md`。
-- 参考性内容按需加载：`version-baseline.md`（基线选择）、`data-model-guide.md`（五要素成文细则）、`errors-and-fixes.md`（查错表）、`analysis-guide.md`（深度方法论）、`large-repo-workflow.md`（并行流程）、`project-types/`（类型规格）。
-- 落盘后**不做 git add/commit**。
+- **默认学习分析，零代码索引**；主产物是「决策卡 + 模式卡 + 学习路径」，不是证据型 README。证据核验是可选模式，只有五类触发（反直觉论断 / 与自述冲突 / 数字 / 用户要求 / 增量 diff）才在附录给 `文件:行号`。
+- **证据模式**：`scripts/verify-references.mjs` 程序化重定位（首末行双锚点，不整段贴码），`[UNVERIFIED]` 保留不静默放过；引用链接允许空括号或真实 URL。
+- **默认模式门禁**：`scripts/check-doc.mjs` 查本地链接/引用资产/SVG 元信息/证据路径/孤立图；Mermaid 仍由 `scripts/check-mermaid.mjs` 真解析；SVG 由 `svg-maker` 产出并跑 `audit-svg-topology.mjs` + `render-svg-preview.mjs`。
+- **基线**：默认只在文首记一行 `git describe`；证据模式才用 `scripts/select-baseline.mjs` 程序化选基线（稳定 tag > 稳定分支 > 默认分支 > 兜底矩阵），且写作/校验必须同树。
+- references：`method.md`（原型判定 / 垂直切片 / 大仓 / README 对账）、`artifact.md`（骨架 / 逐章必答 / 长文骨架 / 入库模式）、`decisions.md`（决策卡 / 模式卡 / 反事实）、`diagrams.md`、`evidence.md`（引用 / 基线 / 增量证据）、`incremental.md`、`examples.md`（好坏对照）、`types/`（7 类提问清单，不是产出规格）。
+- 默认落点 `<项目>-架构分析.md`，**不写进 `source_repo`**；知识库入库（`{分类}/{项目}/` + 索引）仅在用户明确要求时启用；落盘后不做 `git add/commit`。
+- 与 `project-wiki` 的分工从"受众不同"改为"**产出性质不同**"：本 skill 产设计判断（为什么、代价、可迁移），后者产系统说明（是什么、怎么用）。
 
 ## project-wiki
 
-面向**不读源码的广泛读者**产出项目 Wiki（Markdown：内嵌 Mermaid + 可选 `assets/*.svg`，不依赖渲染服务与外链解析）。与 `project-insight` 的分工是**受众不同**：那边每条论断后跟 `文件:行号` + 锚点指纹，供能读源码的人逐条核验；这边表达手段按**读者成本**排序（散文 → 图 → 表 → 代码），出处**收进章末一行** `> 依据：`（**不写可点击链接**，用 code span），正文**禁止出现任何校验痕迹**（锚点指纹、`Sources:`）。
+面向**不读源码的广泛读者**产出项目 Wiki（Markdown：内嵌 Mermaid + 可选 `assets/*.svg`，不依赖渲染服务与外链解析）。与 `project-insight` 的分工是**产出性质不同**：那边产设计判断（决策卡 / 模式卡 / 可迁移），默认零代码索引；这边产系统说明，表达手段按**读者成本**排序（散文 → 图 → 表 → 代码），出处**收进章末一行** `> 依据：`（**不写可点击链接**，用 code span），正文**禁止出现任何校验痕迹**（锚点指纹、`Sources:`）。
 
 `SKILL.md` = 意图路由 + **七条铁律**，其中两条最容易违规：
 

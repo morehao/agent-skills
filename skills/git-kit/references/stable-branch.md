@@ -30,4 +30,4 @@
 ## 边界
 
 - 本定义**只服务 git-kit 的写操作**（提交/合并/打 tag）。
-- `project-insight` 里的「稳定分支」（选解读基线：稳定 tag > 稳定分支 > 默认分支）是**另一个概念**，用于挑选只读快照，判定规则在 `skills/project-insight/references/version-baseline.md`，**不要**与本文互相替换。
+- `project-insight` 里的「稳定分支」（选分析基线：稳定 tag > 稳定分支 > 默认分支）是**另一个概念**，用于挑选只读快照，判定规则由 `skills/project-insight/scripts/select-baseline.mjs` 实现、说明在 `skills/project-insight/references/evidence.md`，**不要**与本文互相替换。
