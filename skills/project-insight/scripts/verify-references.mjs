@@ -2,12 +2,12 @@
 // verify-references.mjs —— 真源引用程序化校验（Grounding，防幻觉核心配套）。
 //
 // 用法：
-//   node verify-references.mjs <source_repo> <分析.md> [file2.md ...]
+//   node verify-references.mjs <source_repo> <解读.md> [file2.md ...]
 //     <source_repo>  源码仓库根（= 本次选定基线的工作树），作为所有 `文件:行号` 引用验证的锚点。
-//     其余参数  分析文档（本 skill 本次产出的全部 md）。
+//     其余参数  解读文档（本 skill 本次产出的全部 md）。
 //
 // 行为：
-//   - 提取每个展示引用 `[仓库相对路径/文件.ext:start-end](链接可空/可给URL)`，并匹配其紧邻的指纹注释。
+//   - 提取每个展示引用 `[仓库相对路径/文件.ext:start-end]()`，并匹配其紧邻的指纹注释。
 //   - 指纹 = 可信锚点行（模型从源码上下文**逐字复制**的原文），两种形式：
 //       · 首末行双锚点（推荐，产出物不再被整段源码淹没）：
 //           <!-- anchor: <区间首行原文> … <末行原文> -->
@@ -28,7 +28,7 @@
 //   [GROUNDER-UNVERIFIED]  路径不存在 / 文件不可读 / 指纹定位失败（等价 [UNVERIFIED]）
 //   [GROUNDER-TRAVERSAL]   路径越出 source_repo，已阻止
 //
-// 与 check-mermaid.mjs 同理：本脚本是校验工具，只读不改文档。
+// 与 check-mermaid.mjs 同理：本脚本是校验工具，只读不改解读文档。
 
 import { readFileSync, realpathSync } from 'node:fs';
 import { resolve, join, sep } from 'node:path';
@@ -40,9 +40,9 @@ function isWithinRoot(repo, target) {
   return target.startsWith(repo + sep);
 }
 
-// —— 展示引用：`[仓库相对路径/文件.ext:start-end](链接可空/可给URL)` ——
+// —— 展示引用：`[仓库相对路径/文件.ext:start-end]()` ——
 // 路径部分可含字母数字 / . _ -；行号区间 start-end 为数字。
-const CITATION_RE = /\[([^\][]+?\.\w+):(\d+)-(\d+)\]\(([^)]*)\)/g;
+const CITATION_RE = /\[([^\][]+?\.\w+):(\d+)-(\d+)\]\(\)/g;
 
 // —— 指纹注释（新）：首末行双锚点 ——
 // `<!-- anchor:<首行原文> … <末行原文> -->` 或含 `--` 时 `<!-- anchor-base64:<b64> -->`
@@ -265,7 +265,7 @@ function readSources(filePaths) {
 }
 
 /**
- * --diff 增量预检：把"现有分析文档的引用 ↔ 当前源码"重解析为规划输入清单。
+ * --diff 增量预检：把"现有解读文档的引用 ↔ 当前源码"重解析为规划输入清单。
  * 信息源单一 = 文档自身指纹锚点；不读任何外置清单文件。
  * 状态语义如下：
  *   STABLE       锚点精确匹配且行号吻合 → 论断可信，增量不重写该章节。
@@ -348,8 +348,8 @@ async function main() {
   if (args.length < 1) {
     console.error(
       diffMode
-        ? '用法：node verify-references.mjs --diff <source_repo> [分析.md ...]'
-        : '用法：node verify-references.mjs <source_repo> [分析.md ...]（分析.md 省略时从 stdin 读）',
+        ? '用法：node verify-references.mjs --diff <source_repo> [解读.md ...]'
+        : '用法：node verify-references.mjs <source_repo> [解读.md ...]（解读.md 省略时从 stdin 读）',
     );
     process.exit(2);
   }
