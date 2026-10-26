@@ -30,8 +30,8 @@ description: 生成自包含、纯 SVG 的架构图、流程图与概念图。�
 
 - 单一独立 `.svg` 文件，用固定 `viewBox`（如 `viewBox="0 0 1200 800"`）设定尺寸与比例，样式内嵌在 `<svg>` 内的 `<style>`。
 - **根元素只写 `viewBox`，不要写 `width`/`height`**——否则与同目录其它资产写法不一致，出现风格漂移。
-- **必须有 `<title>` 与 `<desc>`，且都不带属性**（写 `<title>`，不要写 `<title id="...">`）：下游 `project-insight` 的 `scan-narrative.mjs` 按**标签名**匹配这两个标签，带属性的写法容易被判为缺失。
-- 若产物将嵌入 `project-insight` 的叙述型文档，还须满足其资产约束：自包含（内联 CSS）、零外部资源、无渐变 / JS / 远程字体，浅深色都能读（`:root` 变量 + `prefers-color-scheme`）。
+- **必须有 `<title>` 与 `<desc>`，且都不带属性**（写 `<title>`，不要写 `<title id="...">`）：下游 `project-insight` 的 `check-doc.mjs` 按**标签名**匹配这两个标签，带属性的写法容易被判为缺失。
+- 若产物将嵌入 `project-insight` 的架构分析文档，还须满足其资产约束：自包含（内联 CSS）、零外部资源、无渐变 / JS / 远程字体，浅深色都能读（`:root` 变量 + `prefers-color-scheme`）。
 - 不用外部字体、JS、图片、渐变、发光、装饰性图形或远程资源。
 - 用语义色，不用彩虹色序：neutral、input、process、storage、external、risk。
 - 先画 connector 再画 node，让箭头位于盒子后方。

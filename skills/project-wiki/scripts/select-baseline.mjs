@@ -37,10 +37,10 @@ const child = spawnSync(process.execPath, [targetScript, ...process.argv.slice(2
   stdio: 'inherit',
 });
 
-// 引擎的输出沿用了 project-insight 的落点话术（解读基线 / CHANGELOG.md）。
-// 本 skill 的落点是首页一行，这里补一句适配说明，避免照抄错落点。
+// 引擎会打印一行通用基线落点（文档开头基线行）。
+// 本 skill 的落点是首页契约行，这里补一句适配说明，避免照抄错落点。
 if ((child.status ?? 1) === 0) {
-  console.log('\n本 skill 的落点（与 project-insight 不同）：把 ref、短 SHA、日期写进首页 README.md 的契约行——');
+  console.log('\n本 skill 的落点：把 ref、短 SHA、日期写进首页 README.md 的契约行——');
   console.log('  **本文档依据**：`<ref>`（`<短SHA>`，<YYYY-MM-DD>）');
   console.log('日期取基线 ref 的提交日期：git -C <源码根> log -1 --format=%cs <ref>');
   console.log('只写这一处（单基线）：不维护 CHANGELOG、不写"已核对至"；它就是下次更新取 diff 的左端。');

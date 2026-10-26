@@ -2,10 +2,11 @@
   "name": "project-insight-scripts",
   "version": "1.0.0",
   "private": true,
-  "description": "project-insight 技能配套脚本（mermaid 语法真解析校验）",
+  "description": "project-insight 技能配套脚本（Mermaid 真解析、文档体检、引用重定位）",
   "type": "module",
   "scripts": {
-    "check-mermaid": "node check-mermaid.mjs"
+    "check-mermaid": "node check-mermaid.mjs",
+    "check-doc": "node check-doc.mjs"
   },
   "dependencies": {
     "jsdom": "^25.0.0",

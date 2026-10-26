@@ -1,15 +1,15 @@
 #!/usr/bin/env node
-// select-baseline.mjs —— 解读版本基线的程序化选择（防"基线靠印象"）。
+// select-baseline.mjs —— 分析基线的程序化选择（防"基线靠印象"）。
 //
 // 用法：
 //   node select-baseline.mjs <本地路径|远端URL> [--ref <ref>] [--package <名>] [--json]
 //                            [--stale-commits N] [--stale-days N]
 //
 // 行为：
-//   按 skill 约定优先级选定"这次解读基于哪个版本"：
+//   按 skill 约定优先级选定"这次分析基于哪个版本"：
 //     稳定 tag > 稳定分支 > 默认分支（main/master/远端 HEAD）> 无 main/master 兜底矩阵。
 //   只读：**不 clone、不 checkout、不改动任何仓库**；只给出选定结果 + 落地建议命令，
-//   落地动作（clone / checkout / worktree）由 skill 流程按 references/version-baseline.md 执行。
+//   落地动作（clone / checkout / worktree）由 skill 流程按 references/evidence.md「基线」执行。
 //
 // 输出状态（[BASELINE-AMBIGUOUS] / [BASELINE-STALE] 参与退出码）：
 //   [BASELINE-TAG]        选定稳定 tag（正式版，排除预发布与移动 tag）
@@ -361,9 +361,8 @@ function report(info, sel, a) {
   lines.push(`  收尾恢复：${l.restore}`);
   lines.push('');
   lines.push('写入产物（不写 frontmatter）：');
-  lines.push(`  README 概览一行：解读基线：\`${sel.ref}\`${sel.sha ? `（\`${sel.sha}\`）` : ''}`);
-  lines.push(`  CHANGELOG.md 顶部条目首行：依据：${sel.ref}${sel.sha ? `@${sel.sha}` : ''}`);
-  if (sel.stale) lines.push('  ⚠ 陈旧基线：先请用户确认，确认后在产物中注明"按 {ref} 解读，已确认接受其陈旧度"。');
+  lines.push(`  文档开头基线行：基线：\`${sel.ref}\`${sel.sha ? `（\`${sel.sha}\`）` : ''}`);
+  if (sel.stale) lines.push('  ⚠ 陈旧基线：先请用户确认，确认后在产物中注明"按 {ref} 分析，已确认接受其陈旧度"。');
   for (const w of sel.warnings) lines.push(`  ⚠ ${w}`);
   return lines;
 }
@@ -375,7 +374,7 @@ function main() {
       [
         '用法：node select-baseline.mjs <本地路径|远端URL> [--ref <ref>] [--package <名>] [--json] [--stale-commits N] [--stale-days N]',
         '',
-        '按 skill 约定优先级选定解读基线：稳定 tag > 稳定分支 > 默认分支(main/master/远端HEAD) > 无 main/master 兜底矩阵。',
+        '按 skill 约定优先级选定分析基线：稳定 tag > 稳定分支 > 默认分支(main/master/远端HEAD) > 无 main/master 兜底矩阵。',
         '只读：不 clone、不 checkout、不改动仓库；输出选定结果与落地建议命令。',
         '退出码：0 = 已选定；2 = 需用户确认或选择。',
       ].join('\n'),
