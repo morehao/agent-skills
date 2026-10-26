@@ -72,7 +72,7 @@ node scripts/check-disk-cleanup-codes.mjs
 ./scripts/opencode-install.sh --check     # 上面两项的 opencode 侧 + 命令软链
 ```
 
-三者都是只读，问题数 >0 退出 1。`skills-install.sh --check` 报「本源与本仓不一致」通常意味着「本仓改了但还没 push/发布」。要试“写”的动作，必须用临时目录（见 installation.md「改脚本注意」），别对着真实 `~/.agents` 跑。
+三者都是只读，问题数 >0 退出 1。`skills-install.sh --check` 报「本源与本仓不一致」通常意味着「本仓改了但还没同步本源」——同步由维护者手动完成，agent 只报告差异、不代跑发布。要试“写”的动作，必须用临时目录（见 installation.md「改脚本注意」），别对着真实 `~/.agents` 跑。
 
 ## project-insight 引擎
 
