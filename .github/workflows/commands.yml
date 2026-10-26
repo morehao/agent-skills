@@ -25,6 +25,9 @@ jobs:
       - name: disk-cleanup 编码表一致性
         run: node scripts/check-disk-cleanup-codes.mjs
 
+      - name: tech-design 文档门禁回归
+        run: node skills/tech-design/scripts/tests/check-design-doc-test.mjs
+
       - name: 安装脚本语法（按 bash 3.2 写）
         run: |
           for f in scripts/*.sh; do

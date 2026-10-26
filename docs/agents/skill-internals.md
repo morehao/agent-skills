@@ -62,6 +62,12 @@ references：`templates.md`（**叙事链 9 问与顺序依赖** + 三档骨架�
 - **取舍对偶**：每个选型写代价、不该选的场景，并回指目标或约束。
 - **宁轻勿重**：不适用的章节删掉，不留 N/A。
 
+**质量靠三道闸，不靠自评**：① 交付前自检（作者侧，`SKILL.md` 26 条）；② 文档门禁 `scripts/check-design-doc.mjs`（机械项：占位符/空壳章节/状态块/备选含不做/追溯表/DDL 与正文一致性/无口径形容词与数字/该有的图缺席（`TD-NO-DIAGRAM`）或图断链（`TD-ASSET-MISSING`）/引用技能内部文件（`TD-INTERNAL-REF`）/体量超 20 屏（`TD-SIZE`，note 级），三档严重度 + `--tier` 与 `--upstream` 编号对账，退出码 0/1/2 与 `project-wiki/scripts/check-docs.mjs` 同契约）；③ 评审 gate `references/review-gate.md`（独立上下文：门禁 → 清单判定 → 并行 lens，各写 `<文档目录>/reviews/` 子目录只回 `VERDICT` + top3）。**门禁只做机械项，语义判断归 gate**——这条分工写死在三个文件里，别互相越界。门禁回归测试 `scripts/tests/check-design-doc-test.mjs`（27 条断言，含「故意违规必须被拦住」与「note 在 `--strict` 下也不阻断」），跑在 CI 的 `contract` job。
+
+骨架与主流模板的对齐点（上下文与边界**前置**、完整档「读者与关切」、**散文优先**、体量红线、不该写方案的判断）以及**有意偏离**（ADR 内嵌成追溯表、不设 degree-of-constraint 章节、不设质量树、不设 prior art）都记在 `references/templates.md` 文末的维护备注里——改骨架时同步那一节，别让下一轮复核把设计选择当成漏洞。
+
+澄清环节**先读后问 + ≤200 字回声**，再按「用途 → 规模 → 落点 → 硬约束 → 上游编号」最多问 5 个，提问前先过六类歧义扫描（功能/数据/交互/非功能/约束/术语）。未定项三记号必须区分：`[待核实]`（事实缺口，去取证）、`[待澄清]`（决策缺口，写默认倾向 + 拍板人）、`[假设]`（替用户定的默认值）。**标准档及以上必须给「决策与需求对照表」**（决策 ID / 承接需求 / 备选含不做 / 验证手段 / 状态 / 置信度），门禁的 `TD-TRACE` 会拦缺列或缺行。
+
 配图 **Mermaid 与 SVG 均为一等公民**，按图的职责选（结构/映射/对比/回边状态机 → SVG，走 `svg-maker` 产出；时序/线性小图 → Mermaid；节点 ≥12 或含分层/泳道/边界即改用 SVG），同一张图不做双份。`scripts/check-mermaid.mjs` / `audit-svg-topology.mjs` / `render-svg-preview.mjs` 均为 project-insight 引擎的薄壳（单一真源）；SVG 结构图新画或重排后必须跑边拓扑审计（唯一能程序化发现「看着对、边连错」的手段），成稿含图必须校验，`[MERMAID-ERROR]` 与审计非 0 不静默放过。
 
 ## svg-maker
