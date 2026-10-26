@@ -157,6 +157,7 @@ description: 编写并落盘「技术方案 / 技术设计文档」（design doc
 | 容量/性能/可用性/成本/收益的数字与口径 | `references/quantification.md` |
 | 图规范、代码原则、反模式、评审清单、措辞 | `references/quality-bar.md` |
 | 独立评审怎么跑、lens 怎么选、裁决怎么给（含评审模式） | `references/review-gate.md` |
+| 出现「先写完再补数字」「不用取证」这类念头 | `references/anti-rationalization.md` |
 | 想看一份过关的完整档长什么样（含追溯表与 DDL） | `scripts/tests/fixtures/good-full.md` |
 
 文档正文的机械项由 `scripts/check-design-doc.mjs` 检查；**规则清单以脚本为唯一真源**：`node <本skill目录>/scripts/check-design-doc.mjs --list-rules`（含图缺席/断链、内部指代、体量、未定记号收口——别只按「占位符 + 形容词」准备）。交付文档里不抄规则枚举，抄了必漂。语义判断不走脚本。
@@ -191,7 +192,7 @@ description: 编写并落盘「技术方案 / 技术设计文档」（design doc
    ```
    `error` 修完重跑；`warn` 逐条裁决（改掉，或在文档里显式豁免并写理由）；`note` 读一遍确认已收口。`--strict` 把 warn 也当失败，完整档建议加。脚本只覆盖机械项，语义判断不归它。
 7. **跑评审 gate**（完整档必跑、标准档建议、轻量档跳过）：按 `references/review-gate.md` 三段走——门禁 → 清单判定 → 并行 lens，收口成单一裁决 `approve / revise`；每条发现按 `autofix / discuss / defer / ignore` 处置。`revise` 改完必须**重跑门禁**（改文档会引入新的机械问题）。
-8. 报告格式：`✅ 技术方案文档已生成: <文件路径>`，并补一句本次落点/场景/档位/专题、门禁与 gate 的结论，以及最需要评审拍板的 1-2 个点。
+8. 报告格式：`✅ 技术方案文档已生成: <文件路径>`，并补三样：① 本次落点/场景/档位/专题；② **门禁原始输出末行 + gate 的 `VERDICT`**（贴原文，不写「应该没问题」；没跑 gate 就写清为什么）；③ 最需要评审拍板的 1-2 个点。
 9. 按场景与档位生成评审检查清单（真源 `references/quality-bar.md`），作为文末小节或口头收口。
 10. **不自动打开文件**（dsh Web 无 `code` 语义）。仅当用户明确要求且本机确有编辑器时才尝试，失败即提示手动打开路径。
 11. 落盘后不做 `git add` / `git commit`。用户接着要独立 SVG 架构图或源码级验证时，分别提示 `svg-maker` / `project-insight`。
