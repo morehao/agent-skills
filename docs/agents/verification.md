@@ -80,30 +80,32 @@ node scripts/check-disk-cleanup-codes.mjs
 
 ## project-insight 引擎
 
-默认模式不跑引用重定位：`check-doc.mjs` 做确定性体检（链接 / 资产 / SVG / 证据路径 / 孤立图），`check-mermaid.mjs` 与 SVG 审计按图运行；**证据模式**才跑 `verify-references.mjs`。
+引用校验只在文档真的带引用时才有条目：`verify-references.mjs` 对含引用的 md 逐条重定位（首末行双锚点）；**零引用文档直接通过**（打印「无引用（允许）」）。`--stats` 只报密度、不阻断。Mermaid / SVG 校验按图运行。
 
 ```bash
 # 在仓库根跑（也可 cd skills/project-insight/scripts 后用 node <script>.mjs）
-node skills/project-insight/scripts/check-doc.mjs [--source-repo <源码根>] [--strict] <文档.md>...
+node skills/project-insight/scripts/verify-references.mjs <source_repo> <文档.md>...       # 含引用才跑；零引用自动通过
+node skills/project-insight/scripts/verify-references.mjs --diff <source_repo> <文档.md>...  # 增量预检
+node skills/project-insight/scripts/verify-references.mjs --stats <文档.md>...              # 密度自查（退出码恒 0）
 node skills/project-insight/scripts/check-mermaid.mjs <文档.md>...
 node skills/project-insight/scripts/audit-svg-topology.mjs <图.svg> [--strict]
 node skills/project-insight/scripts/render-svg-preview.mjs <图.svg>
-node skills/project-insight/scripts/verify-references.mjs <source_repo> <文档.md>...
+node skills/project-insight/scripts/scan-narrative.mjs [--repo-root <解读目录>] <architecture-design.md>...
+node skills/project-insight/scripts/check-narrative-all.mjs <architecture-design.md>...
 node skills/project-insight/scripts/select-baseline.mjs <本地路径|远端URL> [--ref <ref>] [--package <名>] [--json]
 ```
 
-- `check-doc.mjs`：退出码 `0` 通过（可带提示）/ `1` 有错误（`--strict` 下提示也计失败）/ `2` 用法或读取错误；`--source-repo` 用来核对证据附录里的 `[path:start-end]` 与正文 `path:line` 是否存在、行号是否越界。
+- `verify-references.mjs`：首参是源码仓库根（= 声明的基线工作树），不是知识库目录；五态输出，`UNVERIFIED`/`TRAVERSAL` 不静默放过。`--stats` 输出每篇引用数、密度与「单段多引用」段落，仅作自查。
 - `check-mermaid.mjs`：真解析所有 Mermaid 块；`[MERMAID-ERROR]` 必须修到全 `OK`。
 - `audit-svg-topology.mjs` / `render-svg-preview.mjs`：SVG 边拓扑审计与目视预览；新画或重排必跑。
-- `verify-references.mjs`：**证据模式**用；首参是源码仓库根（= 声明的基线工作树），不是知识库目录；五态输出，`UNVERIFIED`/`TRAVERSAL` 不静默放过。
-- `select-baseline.mjs`：默认模式只在文首记一行 `git describe`；远端输入或证据模式才需要程序化选基线；退出码 `2` = 需用户确认/选择。
-- 旧叙述型门禁 `scan-narrative.mjs` / `check-narrative-all.mjs` 已退役（编号、零索引不是新默认产物要求）。
+- `scan-narrative.mjs` / `check-narrative-all.mjs`：叙述型 `architecture-design.md` 的零代码索引、标题编号与交叉引用校验；没有该文档时不跑。
+- `select-baseline.mjs`：稳定 tag > 稳定分支 > 默认分支 > 兜底矩阵；退出码 `2` = 需用户确认/选择。
 
 本地回归（临时目录，不需外部服务）：
 
 ```bash
-bash skills/project-insight/scripts/tests/baseline-smoke.sh     # 基线选择 15 条断言
-bash skills/project-insight/scripts/tests/doc-check-smoke.sh    # 文档体检 12 条断言
+bash skills/project-insight/scripts/tests/baseline-smoke.sh     # 基线选择
+bash skills/project-insight/scripts/tests/references-smoke.sh   # 零引用合法 / 五态 / --stats
 ```
 
 `skills/project-insight/scripts/` 依赖 `mermaid`、`jsdom`（`select-baseline.mjs` 只用 node 内置模块 + `git`，无 npm 依赖）。`node_modules` 被 gitignore，**首次需在其中 `npm install`**；若本机用 `cp -r` 复制注册而非软链，复制后要在副本的 `scripts/` 重装。
