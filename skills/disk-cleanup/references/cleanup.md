@@ -16,6 +16,8 @@ macOS 本机磁盘是主战场：系统缓存、日志、临时文件、Time Mac
 | `--clean --dry-run [--only ids]` | 打印每项的计划命令与预计可删量，不实际删除 | 勾选后、执行前自查 |
 | `--clean --only ids` | 只执行勾选的清理项 | 用户勾选完成后 |
 | `--clean --all` | 执行全部清理项 | **只允许用户本人在终端手动使用** |
+| `--orphans-list` | 只读：显示**全部**疑似卸载残留（默认只显示最大的 15 项） | 用户问「哪个 App 卸了还留着东西」 |
+| `--clean --only orphans --orphans-delete <路径>` | 只删点名的路径（可重复传），路径必须在扫描根下 | 用户挑完具体残留后 |
 | `--json` | stdout 只输出 JSON（进度信息走 stderr） | agent 需要结构化结果时 |
 
 ```bash
@@ -25,6 +27,9 @@ bash skills/disk-cleanup/scripts/mac_cleanup.sh --list                          
 bash skills/disk-cleanup/scripts/mac_cleanup.sh --json                                # 4) 结构化
 bash skills/disk-cleanup/scripts/mac_cleanup.sh --clean --dry-run --only caches,trash  # 5) 自查
 bash skills/disk-cleanup/scripts/mac_cleanup.sh --clean --only caches,trash            # 6) 执行
+bash skills/disk-cleanup/scripts/mac_cleanup.sh --orphans-list                        # 7) 卸载残留全清单
+bash skills/disk-cleanup/scripts/mac_cleanup.sh --clean --dry-run --only orphans \
+  --orphans-delete "$HOME/Library/Application Support/Foo"                            # 8) 残留预览/执行
 ```
 
 > `--dry-run` 单独使用**没有意义**；`--only/--skip` 不带 `--clean` 也不生效（脚本会提示仍是只读查询）。
@@ -74,6 +79,7 @@ bash skills/disk-cleanup/scripts/mac_cleanup.sh --clean --only caches,trash     
 | `appcache` | `~/Library/Application Support/*/{Cache,GPUCache,Code Cache,CachedData,CachedExtensionVSIXs,CacheStorage,…}` | 整目录删，<10MB 不入清单 | 否 | app 首次启动重建缓存；不动配置/登录态 |
 | `updaters` | `crx_cache`、`auto-updater`、`app-recovery-cache`、`UpdateCache` | 整目录删 | 否 | 重新下载更新包 |
 | `projects` | `--projects-roots`（默认 `~/Documents`）下的 `node_modules`、`dist`、`build`、`.next`、`.turbo`、`.venv`、`target`、`Pods` 等 | 只处理 ≥ `--projects-age-days`（默认 30）天未修改的目录，<50MB 不入清单 | 否 | 需重新 install/build |
+| `orphans` | 已卸载 App 留在 `~/Library`、`/Library` 的目录（Application Support / Preferences / Containers / Group Containers / HTTPStorages / LaunchAgents 等） | **只报告**：反推已装 App 名单后列出疑似项；删除只认 `--orphans-delete` 点名的路径 | 部分（`/Library` 下） | 删的是该 App 的配置/缓存/许可数据，不可恢复 |
 
 #### `tmp` 为什么走 `/private/tmp`
 
@@ -117,6 +123,55 @@ Edge / Chrome / Chromium / Brave / Vivaldi / Opera / Firefox / Safari、任何�
 - 报告要给「路径 + 大小 + 多少天未改动」，用户据此勾选；删除后需要重新 install/build，必须写进回执；
 - `dist`/`build` 这类名字在非项目目录也可能出现，所以阈值与根目录限制不能放宽成「全盘扫」。
 
+#### `orphans`：已卸载应用的残留（反推，只报告）
+
+macOS 没有「谁装过什么」的台账，只能反推：
+
+- **已装名单**：`/Applications`、`/System/Applications`、`~/Applications`、`/Library/Input Methods` 下所有 `.app` 的 bundle id + 名称（`plutil` 读 `Info.plist`，不依赖 Spotlight 索引，关掉索引也能用）；
+- **候选**：`ORPHAN_ROOTS` 里的**顶层**条目（不递归）——
+  `~/Library/{Application Support,Caches,Preferences,Containers,Group Containers,HTTPStorages,Logs,LaunchAgents}`、
+  `/Library/{Application Support,Preferences,Caches,LaunchAgents,LaunchDaemons,PrivilegedHelperTools}`；
+- **残留**：既匹配不上已装名单、也不属于系统共用组件的条目。
+
+匹配规则都在 `entry_is_installed`（命中 = 属于已装 App，不列为残留）：
+
+| 规则 | 例子 |
+|---|---|
+| bundle id 完全相等，或是它的子 bundle | `com.tencent.xinWeChat` ↔ `com.tencent.xinWeChat.helper` |
+| 条目以 id 的某一段开头（段长 ≥6，且不是 `desktop`/`helper` 这类通用段） | `bilibili` 对应 `com.bilibili.bilibiliPC`、`mihomo-party` 以 `mihomo` 开头 |
+| 条目里的某一段就是 App 名/名字前缀 | `dev.orbstack.orbstack.privhelper` ⊃ OrbStack、`com.sogou.SogouTaskManager` ⊃ SogouInput |
+| 名字相同 / 条目以 App 名开头 / 条目是 App 名的前缀（≥4 字符）/ 条目是 App 名的词 | `iTerm2` ⊃ iTerm、`LarkShell` ⊃ lark、`Sogou` ⊂ SogouInput、`Code` ⊂ Visual Studio Code |
+| 同厂商的 helper/daemon | `party.mihomo.helper` ↔ `party.mihomo.app` |
+
+**为什么只报告、不自动删**：规则是启发式的，实测踩到过的误报——
+
+- App 可以装在 `/Applications` 之外（例如项目目录里的 `Ollama.app`），脚本按标准位置取名单，会把它判成「已卸载」；
+- 目录名与 App 名可能毫无关系（`GitKrakenCLI`、`app_shell_cache_6383`），也可能同名不同家；
+- helper/更新器的 bundle id 未必与主 App 同厂商前缀（`com.microsoft.EdgeUpdater`、`com.openai.atlas`），只能猜；
+- 漏报同样存在（目录名和 App 名都认不出来时）。
+
+所以 `orphans` **不删任何东西**、也不参与 `--all`；删除必须按路径点名：
+
+```bash
+bash skills/disk-cleanup/scripts/mac_cleanup.sh --orphans-list          # 1) 看完整清单（含 --json 的 candidates）
+bash skills/disk-cleanup/scripts/mac_cleanup.sh --clean --dry-run --only orphans \
+  --orphans-delete "$HOME/Library/Application Support/GitKrakenCLI"     # 2) 预览
+bash skills/disk-cleanup/scripts/mac_cleanup.sh --clean --only orphans \
+  --orphans-delete "$HOME/Library/Application Support/GitKrakenCLI"     # 3) 执行
+```
+
+删除前建议反查「这个 id 是不是真的没有 App 了」，比看目录名可靠：
+
+```bash
+mdfind "kMDItemCFBundleIdentifier == 'com.gitkraken.gitkraken'"   # 无输出 = Spotlight 里没有这个 App
+```
+
+`/Library` 下的条目（LaunchDaemons、PrivilegedHelperTools、Application Support）要 sudo，agent 环境会被跳过并打印 `sudo rm -rf …` 原文，交给用户终端。
+
+**读不到大小写「未知」，不是 0**：`~/Library/Group Containers` 与部分 Container 受 TCC 保护，`du` 直接 `Operation not permitted`；报告里单独计数并写明未计入合计。
+
+**与其它编码的边界**：`~/Library/Caches` 里已知的纯缓存/更新器（浏览器、`*updater*`、App Store）归 `caches`；`Homebrew`/`pnpm`/`go-build` 等工具缓存归 `toolcache`/`bigbuild`；目录名恰好是 `$PATH` 上的命令（`codex`、`gk`）按 CLI 工具处理，不列为 App 残留。
+
 #### `--top`：最占空间清单
 
 只读，不进勾选清单，用来回答「看看什么最占地方」：`du -sk $HOME/*` 取目录 Top N，`find $HOME -xdev -type f -size +100M` 取文件 Top N。
@@ -126,6 +181,10 @@ Edge / Chrome / Chromium / Brave / Vivaldi / Opera / Firefox / Safari、任何�
 ### 权限与 sudo 交接
 
 脚本只在**所选清理项包含 `tmp`/`snapshots` 且要真实执行**时才 `sudo -v` 预取权限；失败则打印告警并**跳过**这两步，命令原文写进报告，其余步骤照常。
+
+脚本刻意不创建临时文件（`usage`/`list` 用 `printf` 而非 here-doc，循环用进程替换而非 here-string）：
+只读沙箱、`TMPDIR` 不可写的环境里也能跑完查询。旧版用 here-doc，实测在只读沙箱里连 `--help` 都会报
+`cannot create temp file for here document`。
 
 agent 环境没有 TTY，这一步必然失败——这是设计内的降级，不是 bug。正确做法：
 
@@ -271,6 +330,7 @@ du -sh ~/Library/Application\ Support/* 2>/dev/null | sort -hr | head -20
 
 - 只处理白名单里的目录；新出现的大户先用 `--top` 定位、人工确认可再生后，再考虑加进脚本与编码表（并跑 `node scripts/check-disk-cleanup-codes.mjs` 校验文档与脚本一致）。
 - 不在 `--projects-roots` 下的项目不会被 `projects` 扫到；全盘扫 `node_modules` 既慢又容易误伤，刻意不做。
+- `orphans` 只看固定扫描根 + 标准安装位置：装在别处的 App 会被误判成「已卸载」，也不会去扫 `~/Downloads` 或第三方目录。
 - 不处理系统「可清除空间」、睡眠镜像、APFS 快照策略——由 macOS 自己回收。
 - 不处理外接盘、网络卷、云盘同步目录、其它卷的 `.Trashes`。
 - `docker system prune` 不删卷；`--volumes` 可能有用户数据，本技能刻意不开。

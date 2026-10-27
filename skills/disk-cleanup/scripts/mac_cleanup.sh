@@ -11,6 +11,10 @@
 #   - 遍历被 TCC/权限拒绝的条目单独计数并写进报告，不当成 0
 #   - 保留运行中程序可能占用的活动文件：未知缓存只清 mtime 过期内容
 #   - 数量校验与更硬的 shell 选项；sudo 项在无 TTY 环境明确跳过并交出原文命令
+#   - 不创建临时文件（here-doc 换 printf、循环用进程替换）：只读沙箱/无 TMPDIR 下也能跑
+#     （旧版 usage 用 here-doc，实测连 --help 都报 cannot create temp file）
+#   - 卸载残留（orphans）靠「已装 App 名单 vs Library 目录名」反推，只报告；
+#     删除必须 --orphans-delete 逐条点名路径，避免按名字猜把活数据删了
 # 使用方法（本脚本随 disk-cleanup 技能分发，位于 skills/disk-cleanup/scripts/）：
 #   1. 只查询占用（默认，不删任何东西）：bash skills/disk-cleanup/scripts/mac_cleanup.sh
 #   2. 查看清理项编码：                 bash ... --list
@@ -19,6 +23,11 @@
 #   5. 清理所选（用户勾选后执行）：      bash ... --clean --only caches,logs,trash
 #   6. 只看最占空间的对象：             bash ... --top 10
 #   7. 全部清理（只建议用户本人在终端手动使用）：bash ... --clean --all
+#   8. 只看「已卸载应用的残留」：        bash ... --orphans-list
+#   9. 按路径删除某几条残留：           bash ... --clean --only orphans --orphans-delete <路径>
+#
+# orphans（卸载残留）与其它编码的区别：判定靠「已装 App 名单反推」，天然会误报/漏报，
+# 因此这一项**只报告、不自动删**；删除必须用 --orphans-delete 逐条点名路径。
 # ============================================
 
 set -uo pipefail
@@ -36,10 +45,34 @@ LOG_AGE_DAYS=7
 PROJECTS_AGE_DAYS=30
 PROJECT_ROOTS="${PROJECT_ROOTS:-$HOME/Documents}"
 PROJECTS_KEEP=""
+ORPHANS_AGE_DAYS=0          # 0 = 不限年龄（残留本身就是「App 不在了」的证据，不看新旧）
+ORPHANS_DELETE_LIST=""     # 换行分隔的绝对路径；只有列在这里的才会被删
+ORPHANS_NEED_SUDO=0
+ORPHANS_LIST_ALL=0
+ORPHANS_MAX=15             # 默认只显示最大的 N 项，--orphans-list 显示全部
 
 # 清理项编码：勾选单位。新增清理项时必须同时更新这里、references/cleanup.md 与 SKILL.md 的清单；
 # scripts/check-disk-cleanup-codes.mjs 会校验三处是否一致（CI 会跑）。
-KNOWN_IDS="caches logs tmp varfolders snapshots trash xcode toolcache bigbuild docker appcache updaters projects"
+KNOWN_IDS="caches logs tmp varfolders snapshots trash xcode toolcache bigbuild docker appcache updaters projects orphans"
+
+# 卸载残留的扫描根（只看顶层条目，不递归）：残留按「App 会往哪几处写东西」枚举，
+# 不做全盘扫描。新增位置要同时改这里和 references/cleanup.md 的 orphans 小节。
+ORPHAN_ROOTS=(
+  "$HOME/Library/Application Support"
+  "$HOME/Library/Caches"
+  "$HOME/Library/Preferences"
+  "$HOME/Library/Containers"
+  "$HOME/Library/Group Containers"
+  "$HOME/Library/HTTPStorages"
+  "$HOME/Library/Logs"
+  "$HOME/Library/LaunchAgents"
+  "/Library/Application Support"
+  "/Library/Preferences"
+  "/Library/Caches"
+  "/Library/LaunchAgents"
+  "/Library/LaunchDaemons"
+  "/Library/PrivilegedHelperTools"
+)
 
 json_esc() {
   printf '%s' "${1:-}" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr -d '\000-\037'
@@ -60,6 +93,7 @@ item_label() {
     appcache)   echo "应用内缓存（Electron/Chromium 型 app）" ;;
     updaters)   echo "应用自动更新残留" ;;
     projects)   echo "项目构建产物（node_modules 等）" ;;
+    orphans)    echo "已卸载应用的残留文件（只报告，按路径删）" ;;
     *)          echo "未知" ;;
   esac
 }
@@ -79,10 +113,13 @@ item_desc() {
     appcache)   echo "各 app 目录下的 Cache/GPUCache/Code Cache 等，app 会重建" ;;
     updaters)   echo "crx_cache / auto-updater 等更新下载残留" ;;
     projects)   echo "只处理 ${PROJECTS_AGE_DAYS} 天前未改动的构建产物目录（需重新 build）" ;;
+    orphans)    echo "反推已装 App 名单后列出疑似残留；删除需 --orphans-delete 逐条指定路径" ;;
     *)          echo "" ;;
   esac
 }
 
+# orphans 是混合项（部分条目在 /Library 下需要 sudo），不能整项标 sudo；
+# 是否 sudo 由具体路径决定，见 is_sudo_path。
 is_sudo_id() {
   case "$1" in
     tmp|snapshots) return 0 ;;
@@ -90,28 +127,40 @@ is_sudo_id() {
   esac
 }
 
+is_sudo_path() {
+  case "${1:-}" in
+    /Library/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 usage() {
-  cat <<EOF
-用法: $0 [--clean] [--dry-run] [--only <ids>] [--skip <ids>] [--all] [--top [N]] [--json]
-
-  默认              只查询并输出各目录占用，不删除任何内容
-  --clean           执行实际清理
-  --dry-run         配合 --clean：只打印计划命令与预计可删量，不实际删除
-  --only <ids>      只清理指定项（英文逗号分隔），如 --only caches,logs；可重复传，会合并
-  --skip <ids>      排除指定项，如 --skip docker,bigbuild；可重复传，会合并
-  --all             显式表示「清理全部项」；不带 --only/--skip 时 --clean 必须配 --all
-  --list            列出全部清理项编码与说明后退出（加 --json 输出机器可读版）
-  --top [N]         只读：列出 \$HOME 下最占空间的 N 项（目录与 >100MB 文件），默认 10，较慢
-  --json            stdout 只输出 JSON（进度信息走 stderr），便于 agent 解析
-  --cache-age-days N     caches/tmp 的 mtime 阈值（默认 1）
-  --log-age-days N       logs 的 mtime 阈值（默认 7）
-  --projects-age-days N  projects 只处理该天数前未改动的构建产物（默认 30）
-  --projects-roots <p>   projects 的扫描根（默认 \$HOME/Documents，可用冒号分隔多个）
-  --projects-keep <p>    projects 里排除的具体路径（可重复传）
-
-可用编码: $KNOWN_IDS
-需 sudo 的项: tmp snapshots（agent 环境会被跳过，命令交给用户自己的终端执行）
-EOF
+  # 用 printf 而不是 here-doc：here-doc 需要临时文件，只读沙箱/无 TMPDIR 时会直接失败
+  # （实测 `cannot create temp file for here document`，连 --help 都跑不出来）。
+  printf '%s\n' \
+    "用法: $0 [--clean] [--dry-run] [--only <ids>] [--skip <ids>] [--all] [--top [N]] [--json]" \
+    "" \
+    "  默认              只查询并输出各目录占用，不删除任何内容" \
+    "  --clean           执行实际清理" \
+    "  --dry-run         配合 --clean：只打印计划命令与预计可删量，不实际删除" \
+    "  --only <ids>      只清理指定项（英文逗号分隔），如 --only caches,logs；可重复传，会合并" \
+    "  --skip <ids>      排除指定项，如 --skip docker,bigbuild；可重复传，会合并" \
+    "  --all             显式表示「清理全部项」；不带 --only/--skip 时 --clean 必须配 --all" \
+    "  --list            列出全部清理项编码与说明后退出（加 --json 输出机器可读版）" \
+    "  --top [N]         只读：列出 \$HOME 下最占空间的 N 项（目录与 >100MB 文件），默认 10，较慢" \
+    "  --json            stdout 只输出 JSON（进度信息走 stderr），便于 agent 解析" \
+    "  --cache-age-days N     caches/tmp 的 mtime 阈值（默认 1）" \
+    "  --log-age-days N       logs 的 mtime 阈值（默认 7）" \
+    "  --projects-age-days N  projects 只处理该天数前未改动的构建产物（默认 30）" \
+    "  --projects-roots <p>   projects 的扫描根（默认 \$HOME/Documents，可用冒号分隔多个）" \
+    "  --projects-keep <p>    projects 里排除的具体路径（可重复传）" \
+    "  --orphans-list         卸载残留：显示全部疑似条目（默认只显示最大的 15 项）" \
+    "  --orphans-age-days N   卸载残留：只列出该天数前未改动的条目（默认 0 = 不限）" \
+    "  --orphans-delete <p>   卸载残留：要删除的绝对路径（可重复传；必须落在扫描根下）" \
+    "" \
+    "可用编码: $KNOWN_IDS" \
+    "需 sudo 的项: tmp snapshots（agent 环境会被跳过，命令交给用户自己的终端执行）" \
+    "orphans 例外：只报告；删除只认 --orphans-delete 点名的路径，不参与 --all"
 }
 
 list_items() {
@@ -124,12 +173,11 @@ list_items() {
     fi
     printf '  %-11s   %s\n' "" "$(item_desc "$id")"
   done
-  cat <<EOF
-
-不含在本脚本里的：
-  opencode 数据库瘦身：由 disk-cleanup skill 走 cleanup-opencode.sh（先备份、先闭库、再 VACUUM）
-  iOS 设备备份、聊天记录、虚拟机镜像等用户数据：只报告大小与路径，不代删
-EOF
+  printf '%s\n' \
+    "" \
+    "不含在本脚本里的：" \
+    "  opencode 数据库瘦身：由 disk-cleanup skill 走 cleanup-opencode.sh（先备份、先闭库、再 VACUUM）" \
+    "  iOS 设备备份、聊天记录、虚拟机镜像等用户数据：只报告大小与路径，不代删"
 }
 
 list_items_json() {
@@ -238,6 +286,15 @@ while [[ $# -gt 0 ]]; do
       if [[ $# -ge 2 ]] && is_pos_int "$2"; then TOP_N="$2"; shift; fi
       shift ;;
     --top=*) TOP_N="${1#--top=}"; is_pos_int "$TOP_N" || { echo "--top 需要整数" >&2; exit 1; }; shift ;;
+    --orphans-list) ORPHANS_LIST_ALL=1; shift ;;
+    --orphans-age-days)
+      if [[ $# -lt 2 ]] || ! is_pos_int "$2"; then echo "--orphans-age-days 需要一个非负整数天数" >&2; exit 1; fi
+      ORPHANS_AGE_DAYS="$2"; shift 2 ;;
+    --orphans-delete)
+      if [[ $# -lt 2 ]]; then echo "--orphans-delete 需要一个绝对路径" >&2; exit 1; fi
+      ORPHANS_DELETE_LIST="${ORPHANS_DELETE_LIST}${2}"$'\n'; shift 2 ;;
+    --orphans-delete=*)
+      ORPHANS_DELETE_LIST="${ORPHANS_DELETE_LIST}${1#--orphans-delete=}"$'\n'; shift ;;
     --list) LIST=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *)
@@ -255,6 +312,34 @@ fi
 
 validate_ids "$ONLY_RAW" "--only"
 validate_ids "$SKIP_RAW" "--skip"
+
+# --orphans-delete 的路径校验：只接受扫描根下的绝对路径，且路径要真实存在。
+# 目的不是「信任用户输入」，而是防止手滑删掉 $HOME、/、或别的应用的活数据——
+# 这条命令的执行者常常是 agent，路径错了没人拦得住。
+if [[ -n "$ORPHANS_DELETE_LIST" ]]; then
+  while IFS= read -r p; do
+    p="${p%$'\r'}"
+    [[ -z "$p" ]] && continue
+    case "$p" in
+      /*) ;;
+      *) echo "--orphans-delete 需要绝对路径: ${p}" >&2; exit 1 ;;
+    esac
+    _ok=0
+    for _root in "${ORPHAN_ROOTS[@]}"; do
+      [[ "$p" == "$_root"/* ]] && _ok=1
+    done
+    if [[ "$_ok" != "1" ]]; then
+      echo "--orphans-delete 只接受扫描根下的路径: ${p}" >&2
+      echo "  扫描根: ${ORPHAN_ROOTS[*]}" >&2
+      exit 1
+    fi
+    if [[ ! -e "$p" ]]; then
+      echo "--orphans-delete 路径不存在: ${p}" >&2
+      exit 1
+    fi
+    is_sudo_path "$p" && ORPHANS_NEED_SUDO=1
+  done < <(printf '%s\n' "$ORPHANS_DELETE_LIST")
+fi
 
 ONLY_NORM=$(normalize_ids "$ONLY_RAW")
 SKIP_NORM=$(normalize_ids "$SKIP_RAW")
@@ -301,12 +386,16 @@ fi
 # 预取 sudo 权限（仅 --clean 且非 dry-run，且所选清理项里确有 sudo 步骤时）
 SUDO_OK=0
 if [[ "$CLEAN" == "1" && "$DRY_RUN" != "1" ]]; then
-  if want tmp || want snapshots; then
+  NEED_SUDO=0
+  want tmp && NEED_SUDO=1
+  want snapshots && NEED_SUDO=1
+  if [[ "$ORPHANS_NEED_SUDO" == "1" ]] && want orphans; then NEED_SUDO=1; fi
+  if [[ "$NEED_SUDO" == "1" ]]; then
     if sudo -v 2>/dev/null; then
       SUDO_OK=1
     else
       echo "⚠️ 无法获取 sudo 权限（可能已取消或环境无 TTY）。" >&2
-      echo "   涉及 /tmp、Time Machine 的步骤将被跳过；请在用户自己的终端执行对应 --only 命令。" >&2
+      echo "   涉及 /tmp、Time Machine 或 /Library 下残留的步骤将被跳过；请在用户自己的终端执行对应 --only 命令。" >&2
       echo "" >&2
     fi
   fi
@@ -501,11 +590,11 @@ clean_caches() {
     [[ -n "$p" ]] || continue
     n=$((n + 1))
     rm -rf "$p" 2>/dev/null || fails=$((fails + 1))
-  done <<< "$CACHE_PURGE_LIST"
+  done < <(printf '%s\n' "$CACHE_PURGE_LIST")
   while IFS= read -r p; do
     [[ -n "$p" ]] || continue
     find "$p" -mindepth 1 -mtime +"$CACHE_AGE_DAYS" -delete 2>/dev/null || true
-  done <<< "$CACHE_AGED_LIST"
+  done < <(printf '%s\n' "$CACHE_AGED_LIST")
   say "      纯缓存整删 ${n} 个目录（失败 ${fails} 个）；其余按 ${CACHE_AGE_DAYS} 天阈值清理"
   STEP_NOTE="整删 ${n} 个目录（失败 ${fails} 个）"
   return 0
@@ -901,7 +990,7 @@ clean_appcache() {
     [[ -n "$p" ]] || continue
     n=$((n + 1))
     rm -rf "$p" 2>/dev/null || fails=$((fails + 1))
-  done <<< "$APPCACHE_LIST"
+  done < <(printf '%s\n' "$APPCACHE_LIST")
   say "      删除 ${n} 个目录，失败 ${fails} 个（app 正在写入的多半会失败，可退出 app 后重试）"
   STEP_NOTE="删除 ${n} 个目录，失败 ${fails} 个"
   return 0
@@ -947,7 +1036,7 @@ clean_updaters() {
     [[ -n "$p" ]] || continue
     n=$((n + 1))
     rm -rf "$p" 2>/dev/null || fails=$((fails + 1))
-  done <<< "$UPD_LIST"
+  done < <(printf '%s\n' "$UPD_LIST")
   say "      删除 ${n} 个目录，失败 ${fails} 个"
   STEP_NOTE="删除 ${n} 个目录，失败 ${fails} 个"
   return 0
@@ -965,7 +1054,7 @@ if [[ -d "$APPSUPPORT" ]]; then
     UPD_TOTAL_KB=$((UPD_TOTAL_KB + sz))
     UPD_LIST="${UPD_LIST}${d}"$'\n'
     UPD_TOP="${UPD_TOP}${sz}	${d#"$APPSUPPORT"/}"$'\n'
-  done <<< "$UPD_FOUND"
+  done < <(printf '%s\n' "$UPD_FOUND")
   say "  本次可删合计: $(human "$UPD_TOTAL_KB")（浏览器扩展更新缓存、app 自动更新包）"
   printf '%s' "$UPD_TOP" | sort -rn | head -8 | while IFS=$'\t' read -r kb nm; do
     [[ -n "${nm:-}" ]] && say "    - $(human "$kb")  ${nm}"
@@ -989,7 +1078,7 @@ clean_projects() {
     [[ -n "$p" ]] || continue
     n=$((n + 1))
     rm -rf "$p" 2>/dev/null || fails=$((fails + 1))
-  done <<< "$PROJ_DEL_LIST"
+  done < <(printf '%s\n' "$PROJ_DEL_LIST")
   say "      删除 ${n} 个构建产物目录，失败 ${fails} 个"
   STEP_NOTE="删除 ${n} 个目录，失败 ${fails} 个"
   return 0
@@ -1032,7 +1121,7 @@ for root in $PROJECT_ROOTS; do
     else
       PROJ_TOP="${PROJ_TOP}${sz}	$(human "$sz")  ${d#"$HOME"/}  （${age_days} 天内有改动，跳过）"$'\n'
     fi
-  done <<< "$PROJ_FOUND"
+  done < <(printf '%s\n' "$PROJ_FOUND")
   IFS=':'
 done
 IFS="$OLD_IFS"
@@ -1051,9 +1140,332 @@ PLAN_CMD="rm -rf <上列 ≥${PROJECTS_AGE_DAYS} 天未改动的构建产物目�
 run projects "清理项目构建产物（构建产物可再生）" clean_projects
 say ""
 
-# ---------- 13. 最占空间 Top N（只读） ----------
+# ---------- 13. 已卸载应用的残留 [orphans] ----------
+say "----- 13. 已卸载应用的残留文件 [orphans] -----"
+# 判定方式：macOS 没有「谁装过什么」的台账，只能反推——
+#   已装名单 = /Applications、/System/Applications、~/Applications、Input Methods 下所有 .app 的
+#              bundle id + 名称（plutil 读 Info.plist，不依赖 Spotlight，索引关了也能用）
+#   候选     = ORPHAN_ROOTS 下的顶层条目
+#   残留     = 候选里既匹配不上已装名单、也不属于系统共用组件的条目
+# 这是启发式：App 可能装在别处（例如项目目录里的 Ollama.app）、目录名可能与 App 名无关、
+# 更新器 / helper 的 bundle id 也和主 App 不同。所以本项**只报告**，
+# 删除只认 --orphans-delete 点名的路径，避免「按名字猜」把活数据删了。
+
+# alnum_only_var <str>：只留字母数字，结果写进全局 ALNUM_OUT。
+# 不用 $(norm ...)：命令替换会为每个条目 fork 一个子 shell，扫描 1600 个条目就是 1600 次 fork。
+ALNUM_OUT=""
+alnum_only_var() {
+  local s="${1:-}" i c
+  ALNUM_OUT=""
+  for ((i = 0; i < ${#s}; i++)); do
+    c="${s:i:1}"
+    case "$c" in
+      [a-z0-9]) ALNUM_OUT="${ALNUM_OUT}${c}" ;;
+    esac
+  done
+}
+
+# orphan_skip <小写原名>：系统/共用组件不参与判定——它们不是「某个 App 的残留」
+orphan_skip() {
+  case "$1" in
+    com.apple|com.apple.*|group.com.apple|group.com.apple.*) return 0 ;;
+    apple|"app store"|appstore|"script editor"|btserver|livefsd|proapps|ilifemediabrowser) return 0 ;;
+    cloudkit|familycircle|crashreporter|diagnosticreports|install|installation|dws) return 0 ;;
+    # /Library 下的系统自身配置，不是任何 App 的残留
+    systemconfiguration|logging|opendirectory|directoryservice|xsan|security|audio) return 0 ;;
+    org.cups.*) return 0 ;;   # 系统打印配置
+    homebrew|pnpm|go-build|ms-playwright|cocoapods) return 0 ;;   # 已由 toolcache / bigbuild 覆盖
+  esac
+  return 1
+}
+
+# 反查用的是「集合串」而不是逐条循环：条目数 × 已装 App 数会到十万级比较，
+# 用 while read 拼进程替换会把这个函数拖成十几秒（实测）。这里统一
+# "|a|b|c|" 形式的集合串 + glob 判断，纯内建、零 fork。
+APP_ID_SET="|"       # 已装 App 的 bundle id（小写）
+APP_SEG_SET="|"      # bundle id 的段（≥6 字符，剔除 desktop/helper 之类通用段）
+APP_NAME_SET="|"     # 已装 App 名（只留 a-z0-9）
+APP_TOKEN_SET="|"    # 已装 App 名按空格/标点切出的词（≥4 字符），用于 Code ⊂ Visual Studio Code
+APP_NAME_PREFIX_SET="|"  # 已装 App 名自身的所有前缀（≥4 字符），用于「条目比 App 名短」：Sogou ⊂ SogouInput
+APP_VENDORS=""       # bundle id 前两段（com.tencent、party.mihomo），识别「同一厂商的 helper」
+
+# bundle id 里过于通用的段不能拿来反推归属，否则「StepFun Desktop」会被其它 App 的 ".desktop" 掩盖
+is_generic_seg() {
+  case "$1" in
+    desktop|client|helper|update|updater|service|shared|plugin|widget|launcher|extension) return 0 ;;
+    framework|runtime|electron|binary|server|daemon|installer|preferences|application) return 0 ;;
+  esac
+  return 1
+}
+
+load_installed_apps() {
+  local root app bid nm id seg tok raw_name old_ifs v1 v2 rest i
+  for root in "/Applications" "/System/Applications" "$HOME/Applications" \
+              "/Library/Input Methods" "$HOME/Library/Input Methods"; do
+    [[ -d "$root" ]] || continue
+    while IFS= read -r app; do
+      [[ -n "$app" ]] || continue
+      bid=$(plutil -extract CFBundleIdentifier raw -o - "$app/Contents/Info.plist" 2>/dev/null) || bid=""
+      raw_name=$(lower "$(basename "$app" .app)")
+      if [[ -n "$bid" ]]; then
+        id=$(lower "$bid")
+        APP_ID_SET="${APP_ID_SET}${id}|"
+        v1="${id%%.*}"
+        rest="${id#*.}"
+        if [[ "$rest" == *.* ]]; then
+          v2="${rest%%.*}"
+          APP_VENDORS="${APP_VENDORS}${v1}.${v2}"$'\n'
+        fi
+        # 段（com.bilibili.bilibiliPC → bilibili / bilibilipc）：认「目录名 = 厂商/产品名」
+        old_ifs="$IFS"; IFS='.'
+        for seg in $id; do
+          [[ ${#seg} -ge 6 ]] || continue
+          is_generic_seg "$seg" && continue
+          APP_SEG_SET="${APP_SEG_SET}${seg}|"
+        done
+        IFS="$old_ifs"
+      fi
+      alnum_only_var "$raw_name"; nm="$ALNUM_OUT"
+      if [[ -n "$nm" ]]; then
+        APP_NAME_SET="${APP_NAME_SET}${nm}|"
+        i=4
+        while [[ "$i" -le "${#nm}" ]]; do
+          APP_NAME_PREFIX_SET="${APP_NAME_PREFIX_SET}${nm:0:i}|"
+          i=$((i + 1))
+        done
+      fi
+      old_ifs="$IFS"; IFS=' .-_'
+      for tok in $raw_name; do
+        [[ ${#tok} -ge 4 ]] && APP_TOKEN_SET="${APP_TOKEN_SET}${tok}|"
+      done
+      IFS="$old_ifs"
+    done < <(find "$root" -maxdepth 3 -name '*.app' -prune -print 2>/dev/null)
+  done
+}
+
+# entry_is_installed <小写原名> <名字归一串>：命中返回 0（= 属于已装 App，不是残留）
+entry_is_installed() {
+  local lc="$1" nm="$2" cur t p i comp old_ifs
+  # 1) bundle id：完全相等 / 子 bundle（com.x.y ↔ com.x.y.helper）/ 以段开头（bilibili、mihomo-party）
+  cur="$lc"
+  while :; do
+    t="${cur#"${cur%%[a-z0-9]*}"}"     # 去掉开头的非字母数字（@deepseek-ai → deepseek-ai）
+    [[ -n "$t" ]] || t="$cur"
+    [[ "$APP_ID_SET" == *"|${t}|"* ]] && return 0
+    [[ "$APP_SEG_SET" == *"|${t}|"* ]] && return 0
+    case "$cur" in
+      *[.-]*) cur="${cur%[.-]*}" ;;
+      *) break ;;
+    esac
+  done
+  # 2) 名字：完全相等 / 条目以 App 名开头（LarkShell ⊃ lark）/ 条目是 App 名的前缀
+  #    （Sogou ⊂ SogouInput，≥4 字符才认）/ 条目是 App 名的独立词（Code）
+  if [[ -n "$nm" ]]; then
+    [[ "$APP_NAME_SET" == *"|${nm}|"* ]] && return 0
+    [[ "$APP_TOKEN_SET" == *"|${nm}|"* ]] && return 0
+    [[ "$APP_NAME_PREFIX_SET" == *"|${nm}|"* ]] && return 0   # 条目比 App 名短：Sogou ⊂ SogouInput
+    i=${#nm}
+    while [[ "$i" -ge 4 ]]; do                                 # 条目比 App 名长：LarkShell ⊃ lark
+      [[ "$APP_NAME_SET" == *"|${nm:0:i}|"* ]] && return 0
+      i=$((i - 1))
+    done
+  fi
+  # 3) 条目中的某一段就是 App 名/名字前缀，视为它的组件
+  #    （dev.orbstack.orbstack.privhelper ⊃ OrbStack、com.sogou.SogouTaskManager ⊃ SogouInput）
+  old_ifs="$IFS"
+  IFS='.-'
+  for comp in $lc; do
+    comp="${comp#"${comp%%[a-z0-9]*}"}"   # 去掉开头的非字母数字（@leros → leros）
+    if [[ ${#comp} -ge 4 ]] && { [[ "$APP_NAME_SET" == *"|${comp}|"* ]] \
+         || [[ "$APP_TOKEN_SET" == *"|${comp}|"* ]] \
+         || [[ "$APP_NAME_PREFIX_SET" == *"|${comp}|"* ]]; }; then
+      IFS="$old_ifs"
+      return 0
+    fi
+  done
+  IFS="$old_ifs"
+  # 4) helper/daemon：与已装 App 同厂商前缀，视为它的组件（party.mihomo.helper）
+  case "$lc" in
+    *helper*|*daemon*|*.agent|*.service|*.xpc|*.plugin)
+      while IFS= read -r p; do
+        [[ -n "$p" ]] || continue
+        [[ "$lc" == "$p".* ]] && return 0
+      done < <(printf '%s\n' "$APP_VENDORS")
+      ;;
+  esac
+  return 1
+}
+
+load_installed_apps
+ORPHAN_NOW=$(date +%s)
+ORPHAN_TOTAL_KB=0
+ORPHAN_N=0
+ORPHAN_UNKNOWN=0
+ORPHAN_ROWS=""
+for root in "${ORPHAN_ROOTS[@]}"; do
+  [[ -d "$root" ]] || continue
+  ORPHAN_PATHS=()
+  ORPHAN_NAMES=()
+  for entry in "$root"/*; do
+    [[ -e "$entry" ]] || continue
+    ORPHAN_PATHS+=("$entry")
+    ORPHAN_NAMES+=("${entry##*/}")
+  done
+  [[ ${#ORPHAN_PATHS[@]} -eq 0 ]] && continue
+  # 一个目录只 fork 一次 tr：逐条目 `tr`/`basename` 会把扫描拖到 50 秒级（实测）
+  ORPHAN_LOWER=$(printf '%s\n' "${ORPHAN_NAMES[@]}" | tr '[:upper:]' '[:lower:]')
+  oi=0
+  while IFS= read -r lc; do
+    entry="${ORPHAN_PATHS[$oi]}"
+    base="${ORPHAN_NAMES[$oi]}"
+    oi=$((oi + 1))
+    lc="${lc%.plist}"
+    alnum_only_var "$lc"; nm="$ALNUM_OUT"
+    orphan_skip "$lc" && continue
+    # ~/Library/Caches 里「已知纯缓存/更新器」由 caches 编码负责，这里不重复报
+    [[ "$root" == "$HOME/Library/Caches" ]] && is_purge_cache "$base" && continue
+    entry_is_installed "$lc" "$nm" && continue
+    # 目录名恰好是 $PATH 上的命令（codex、gitkraken 的 gk、pdfcpu 等 CLI）：
+    # 这类是命令行工具的数据目录，不是「卸载了 GUI App」的残留，不列入
+    case "$lc" in
+      *[!a-z0-9_-]*) ;;
+      *) command -v "$lc" >/dev/null 2>&1 && continue ;;
+    esac
+    if [[ -f "$entry" ]]; then
+      kb=$(( ($(stat -f '%z' "$entry" 2>/dev/null || printf '0') + 1023) / 1024 ))
+    else
+      kb=$(du -sk "$entry" 2>/dev/null | awk '{print $1}')
+      # 读不到大小就记「未知」，不能当 0：Group Containers 常见 Operation not permitted
+      [[ -z "$kb" ]] && ORPHAN_UNKNOWN=$((ORPHAN_UNKNOWN + 1))
+    fi
+    mtime=$(stat -f '%m' "$entry" 2>/dev/null || printf '0')
+    mtime="${mtime:-0}"
+    age=$(( ( ORPHAN_NOW - mtime ) / 86400 ))
+    [[ "$age" -lt 0 ]] && age=0
+    [[ "$ORPHANS_AGE_DAYS" -gt 0 && "$age" -lt "$ORPHANS_AGE_DAYS" ]] && continue
+    flags=""
+    is_sudo_path "$entry" && flags="需 sudo"
+    [[ -z "$kb" ]] && flags="${flags:+${flags}，}大小未知"
+    ORPHAN_N=$((ORPHAN_N + 1))
+    [[ -n "$kb" ]] && ORPHAN_TOTAL_KB=$((ORPHAN_TOTAL_KB + kb))
+    ORPHAN_ROWS="${ORPHAN_ROWS}${kb:-0}	${entry}	${age}	${flags}"$'\n'
+  done < <(printf '%s\n' "$ORPHAN_LOWER")
+done
+
+say "  扫描根 ${#ORPHAN_ROOTS[@]} 个，命中 ${ORPHAN_N} 项疑似残留，合计 $(human "$ORPHAN_TOTAL_KB")"
+if [[ "$ORPHAN_UNKNOWN" -gt 0 ]]; then
+  say "  ⚠️ 另有 ${ORPHAN_UNKNOWN} 项大小读不到（TCC/权限拒绝），未计入合计——按未知处理，不是 0。"
+fi
+if [[ "$ORPHAN_N" -eq 0 ]]; then
+  say "  未发现疑似残留。"
+else
+  SHOW_N="$ORPHANS_MAX"
+  [[ "$ORPHANS_LIST_ALL" == "1" ]] && SHOW_N="$ORPHAN_N"
+  say "  按体积排序（显示 ${SHOW_N} 项；--orphans-list 看全部）:"
+  printf '%s' "$ORPHAN_ROWS" | sort -t$'\t' -k1,1 -rn | head -n "$SHOW_N" | \
+  while IFS=$'\t' read -r kb p age flags; do
+    [[ -n "${p:-}" ]] || continue
+    say "    - $(human "$kb")  ${p/#$HOME/~}  （${age} 天未改动${flags:+，$flags}）"
+  done
+fi
+say "  判据是「已装 App 名单 vs 目录名」的反推，不是系统卸载记录：可能误报（App 装在别处）或漏报。"
+say "  只报告、不自动删除，也不参与 --all；确认后按路径删："
+say "    bash $0 --clean --only orphans --orphans-delete <路径> [--orphans-delete <路径> ...]"
+say "  反查某个 id 是否真的没有 App：mdfind \"kMDItemCFBundleIdentifier == '<bundle-id>'\""
+
+json_orphans() {
+  local status="$1" obj cands="" sep="" kb p age flags sudo
+  obj=$(printf '{"id":"orphans","label":"%s","status":"%s","total_kb":%s,"deletable_kb":0' \
+    "$(json_esc "$(item_label orphans)")" "$status" "$ORPHAN_TOTAL_KB")
+  obj="${obj},\"unknown_size\":${ORPHAN_UNKNOWN}"
+  obj="${obj},\"note\":\"$(json_esc "只报告；删除用 --orphans-delete <路径> 逐条指定")\""
+  while IFS=$'\t' read -r kb p age flags; do
+    [[ -n "${p:-}" ]] || continue
+    sudo=false
+    is_sudo_path "$p" && sudo=true
+    cands="${cands}${sep}{\"path\":\"$(json_esc "$p")\",\"kb\":${kb:-0},\"age_days\":${age:-0},\"sudo\":${sudo}}"
+    sep=","
+  done < <(printf '%s\n' "$ORPHAN_ROWS")
+  JSON_ITEMS+=("${obj},\"candidates\":[${cands}]}")
+}
+
+clean_orphans() {
+  local p n=0 fails=0 sudo_n=0
+  while IFS= read -r p; do
+    [[ -z "$p" ]] && continue
+    if is_sudo_path "$p" && [[ "$SUDO_OK" != "1" ]]; then
+      say "      [跳过·需 sudo] ${p}"
+      sudo_n=$((sudo_n + 1))
+      continue
+    fi
+    if is_sudo_path "$p"; then
+      sudo rm -rf "$p" 2>/dev/null && n=$((n + 1)) || fails=$((fails + 1))
+    else
+      rm -rf "$p" 2>/dev/null && n=$((n + 1)) || fails=$((fails + 1))
+    fi
+  done < <(printf '%s\n' "$ORPHANS_DELETE_LIST")
+  STEP_NOTE="删除 ${n} 项，失败 ${fails} 项"
+  [[ "$sudo_n" -gt 0 ]] && STEP_NOTE="${STEP_NOTE}，${sudo_n} 项待 sudo"
+  say "      完成：删除 ${n} 项，失败 ${fails} 项，待 sudo ${sudo_n} 项"
+  if [[ "$sudo_n" -gt 0 ]]; then
+    say "      需在用户自己的终端执行："
+    while IFS= read -r p; do
+      [[ -z "$p" ]] && continue
+      is_sudo_path "$p" && say "        sudo rm -rf ${p}"
+    done < <(printf '%s\n' "$ORPHANS_DELETE_LIST")
+  fi
+  return 0
+}
+
+run_orphans() {
+  if [[ "$CLEAN" == "1" ]] && ! want orphans; then
+    LAST_RUN_SELECTED=0
+    mark_unselected orphans
+    say "   [跳过] 卸载残留（未勾选：orphans）"
+    json_orphans "skipped-unselected"
+    return 0
+  fi
+  LAST_RUN_SELECTED=1
+  if [[ -z "$ORPHANS_DELETE_LIST" ]]; then
+    if [[ "$CLEAN" == "1" ]]; then
+      say "   [未删] 勾了 orphans 但没给 --orphans-delete 路径：本次只报告，不删除。"
+      SKIPPED_STEPS+=("卸载残留：只报告未删除（需 --orphans-delete 点名路径）")
+      json_orphans "reported"
+    else
+      say "   [查询] 卸载残留只做报告（删除需 --clean + --orphans-delete）"
+      json_orphans "queried"
+    fi
+    return 0
+  fi
+  if [[ "$CLEAN" != "1" ]]; then
+    say "   [查询] 已给出 --orphans-delete 路径，但未加 --clean，本次不删除"
+    json_orphans "queried"
+    return 0
+  fi
+  ORPHAN_DEL_N=0
+  while IFS= read -r p; do
+    [[ -n "$p" ]] && ORPHAN_DEL_N=$((ORPHAN_DEL_N + 1))
+  done < <(printf '%s\n' "$ORPHANS_DELETE_LIST")
+  if [[ "$DRY_RUN" == "1" ]]; then
+    say "   [预览] 将删除 ${ORPHAN_DEL_N} 项（路径已校验在扫描根下）："
+    while IFS= read -r p; do
+      [[ -n "$p" ]] || continue
+      if is_sudo_path "$p"; then say "      sudo rm -rf ${p}"; else say "      rm -rf ${p}"; fi
+    done < <(printf '%s\n' "$ORPHANS_DELETE_LIST")
+    json_orphans "dry-run"
+    return 0
+  fi
+  say "   [执行] 删除 --orphans-delete 指定的 ${ORPHAN_DEL_N} 项残留"
+  clean_orphans
+  REPORT_STEPS+=("删除 ${ORPHAN_DEL_N} 项卸载残留（${STEP_NOTE}）")
+  json_orphans "done"
+}
+run_orphans
+say ""
+
+# ---------- 14. 最占空间 Top N（只读） ----------
 if [[ "$TOP_N" -gt 0 ]]; then
-  say "----- 13. \$HOME 下最占空间的 ${TOP_N} 项（只读）-----"
+  say "----- 14. \$HOME 下最占空间的 ${TOP_N} 项（只读）-----"
   say "  正在扫描（-xdev 全量遍历，100G+ 的 HOME 可能要几分钟；这一步只在 --top 时跑）..."
   say ""
   say "  目录 Top ${TOP_N}:"
