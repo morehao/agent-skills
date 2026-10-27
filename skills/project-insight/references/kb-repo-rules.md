@@ -8,10 +8,10 @@
 
 默认输入是本地源码仓库的绝对路径，如 `/Users/me/src/wukong`：
 
-1. 解析为统一 `source_repo`，用 `os.path.realpath` 规范化并确认存在，作为所有真源引用验证的根。
+1. 解析为统一 `source_repo`，用 `os.path.realpath` 规范化并确认存在，作为所有引用校验的根。
 2. 用户只给远端地址（如 `github.com/xx/foo`）时，**先定基线再克隆**（step 0.5，见 [version-baseline.md](version-baseline.md)）：`git ls-remote`（`--tags --refs` / `--heads` / `--symref HEAD`，只枚举不下载）→ 按优先级选定 ref → `git clone --branch <ref> --depth=1` 落地。**禁止裸 `--depth=1`**（丢 tags、锁死默认分支）；需要 `git diff` 历史时用 `--filter=blob:none`。真源验证必须读本地真实文件，不能对着远端记忆写；网络不可用则明确告知并请求本地路径。
 3. **本地路径同样要定基线**：按 [version-baseline.md](version-baseline.md) 选定 ref 后就地 `git checkout <ref>`（脏工作树**不静默覆盖**，走 `git worktree` 兜底），`source_repo` 即该基线工作树；收尾恢复原 HEAD 并报告。
-4. 所有 `文件:行号` 引用以 `source_repo` 为根校验，防路径穿越。
+4. 凡出现的 `文件:行号` 引用以 `source_repo` 为根校验，防路径穿越；整篇无引用不影响校验根语义。
 
 ### 临时分析判别
 

@@ -5,7 +5,8 @@
   "description": "project-insight 技能配套脚本（mermaid 语法真解析校验）",
   "type": "module",
   "scripts": {
-    "check-mermaid": "node check-mermaid.mjs"
+    "check-mermaid": "node check-mermaid.mjs",
+    "test": "bash tests/references-smoke.sh && bash tests/baseline-smoke.sh"
   },
   "dependencies": {
     "jsdom": "^25.0.0",

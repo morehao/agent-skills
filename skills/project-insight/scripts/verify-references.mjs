@@ -5,6 +5,10 @@
 //   node verify-references.mjs <source_repo> <解读.md> [file2.md ...]
 //     <source_repo>  源码仓库根（= 本次选定基线的工作树），作为所有 `文件:行号` 引用验证的锚点。
 //     其余参数  解读文档（本 skill 本次产出的全部 md）。
+//   node verify-references.mjs --diff <source_repo> <解读.md> [...]
+//   node verify-references.mjs --stats <解读.md> [...]      # 密度自查，不校验、不阻断、退出码恒 0
+//
+// 引用是可选证据：整篇没有引用同样通过校验（打印"无引用（允许）"），不判失败。
 //
 // 行为：
 //   - 提取每个展示引用 `[仓库相对路径/文件.ext:start-end]()`，并匹配其紧邻的指纹注释。
@@ -338,18 +342,67 @@ function runDiff(repoReal, sources) {
   return unresolvedCount === 0 && staleCount === 0;
 }
 
+// —— 引用密度自查（--stats）：只报告，不校验、不阻断 ——
+function stripNonBody(text) {
+  // 去掉围栏代码块与 HTML 注释（锚点指纹属元数据，不计入正文密度），保留行号结构。
+  let inFence = false;
+  const noFence = text.split('\n').map((line) => {
+    if (/^\s*(```|~~~)/.test(line)) { inFence = !inFence; return ''; }
+    return inFence ? '' : line;
+  }).join('\n');
+  return noFence.replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\n]/g, ''));
+}
+
+function runStats(sources) {
+  console.log('## 引用密度自查（--stats，仅供参考、不阻断）');
+  let total = 0;
+  for (const src of sources) {
+    const clean = stripNonBody(src.text);
+    CITATION_RE.lastIndex = 0;
+    const citations = [...clean.matchAll(CITATION_RE)];
+    const chars = clean.replace(/\s/g, '').length;
+    const density = chars > 0 ? citations.length / (chars / 1000) : 0;
+    const crowded = [];
+    let paraStart = 0;
+    let paraCount = 0;
+    const flush = () => {
+      if (paraCount > 1) crowded.push({ line: paraStart, count: paraCount });
+      paraCount = 0;
+    };
+    clean.split('\n').forEach((line, i) => {
+      if (line.trim() === '') { flush(); return; }
+      if (paraCount === 0) paraStart = i + 1;
+      paraCount += [...line.matchAll(CITATION_RE)].length;
+    });
+    flush();
+    console.log(`[stats] ${src.name}: 引用 ${citations.length} 处 / 有效字符 ${chars} / 密度 ${density.toFixed(2)} 处每千字 / 单段多引用 ${crowded.length} 段`);
+    for (const p of crowded.slice(0, 10)) console.log(`  - 第 ${p.line} 行起的段落含 ${p.count} 处引用`);
+    total += citations.length;
+  }
+  console.log(`\n合计：${sources.length} 篇，引用 ${total} 处。提示：引用是可选证据，没有配额；单段多引用时优先去掉不影响可信度的那些。`);
+}
+
 async function main() {
   let args = process.argv.slice(2).filter((a) => a !== '--');
   let diffMode = false;
-  if (args[0] === '--diff') {
-    diffMode = true;
-    args = args.slice(1);
+  let statsMode = false;
+  if (args[0] === '--diff') { diffMode = true; args = args.slice(1); }
+  else if (args[0] === '--stats') { statsMode = true; args = args.slice(1); }
+
+  if (statsMode) {
+    if (args.length < 1) {
+      console.error('用法：node verify-references.mjs --stats <解读.md> [file2.md ...]');
+      process.exit(2);
+    }
+    runStats(readSources(args));
+    process.exit(0);
   }
+
   if (args.length < 1) {
     console.error(
       diffMode
         ? '用法：node verify-references.mjs --diff <source_repo> [解读.md ...]'
-        : '用法：node verify-references.mjs <source_repo> [解读.md ...]（解读.md 省略时从 stdin 读）',
+        : '用法：node verify-references.mjs <source_repo> [解读.md ...]（解读.md 省略时从 stdin 读）\n      node verify-references.mjs --stats [解读.md ...]（密度自查，不校验）',
     );
     process.exit(2);
   }
@@ -369,6 +422,7 @@ async function main() {
     sources = [{ name: '<stdin>', text: chunks.join('') }];
   }
   let okCount = 0;
+  let totalCitations = 0;
   let weakCount = 0;
   let mismatchCount = 0;
   let unverifiedCount = 0;
@@ -382,8 +436,9 @@ async function main() {
 
   for (const src of sources) {
     const citations = parseCitations(src.text);
+    totalCitations += citations.length;
     if (citations.length === 0) {
-      console.log(`[${src.name}] 未发现 [path:start-end]() 引用`);
+      console.log(`[${src.name}] 无引用（允许）`);
       continue;
     }
     console.log(`[${src.name}] 共 ${citations.length} 条引用`);
@@ -455,7 +510,10 @@ async function main() {
   }
 
   console.log(`\n校验结果：OK=${okCount} WEAK=${weakCount} MISMATCH=${mismatchCount} UNVERIFIED=${unverifiedCount} TRAVERSAL=${traversalCount}`);
-  if (traversalCount > 0) {
+  if (totalCitations === 0) {
+    console.log('无引用（允许），跳过校验。');
+    process.exitCode = 0;
+  } else if (traversalCount > 0) {
     console.log('存在路径穿越，请立即修复（可能是幻觉路径或漏了防穿越）。');
     process.exitCode = 2;
   } else if (mismatchCount > 0 || unverifiedCount > 0) {
