@@ -20,19 +20,18 @@ Git 工作流（message / commit-push / branch / pr-create / pr-merge / tag / re
 
 ## project-insight
 
-开源项目架构设计分析。`SKILL.md` 只做意图路由（双模式 / 三档深度 / 六步主干 / 骨架 / 证据规则 / 红线），细节按需加载：
+面向工程师产出「架构解构 + 设计判断」，落进知识库仓库（`{分类}/{项目}/`，README + 关注面子文档）。**正文以叙述为主，代码引用是可选证据**：只给反直觉结论、具体数字、安全边界、用户指定核验这几类论断，整篇零引用合法；凡写出的 `文件:行号` 必须经 `verify-references.mjs` 重定位（首末行锚点），`--stats` 只报密度、不阻断。
 
-- **默认学习分析，零代码索引**；主产物是「决策卡 + 模式卡 + 学习路径」，不是证据型 README。证据核验是可选模式，只有五类触发（反直觉论断 / 与自述冲突 / 数字 / 用户要求 / 增量 diff）才在附录给 `文件:行号`。
-- **证据模式**：`scripts/verify-references.mjs` 程序化重定位（首末行双锚点，不整段贴码），`[UNVERIFIED]` 保留不静默放过；引用链接允许空括号或真实 URL。
-- **默认模式门禁**：`scripts/check-doc.mjs` 查本地链接/引用资产/SVG 元信息/证据路径/孤立图；Mermaid 仍由 `scripts/check-mermaid.mjs` 真解析；SVG 由 `svg-maker` 产出并跑 `audit-svg-topology.mjs` + `render-svg-preview.mjs`。
-- **基线**：默认只在文首记一行 `git describe`；证据模式才用 `scripts/select-baseline.mjs` 程序化选基线（稳定 tag > 稳定分支 > 默认分支 > 兜底矩阵），且写作/校验必须同树。
-- references：`method.md`（原型判定 / 垂直切片 / 大仓 / README 对账）、`artifact.md`（骨架 / 逐章必答 / 长文骨架 / 入库模式）、`decisions.md`（决策卡 / 模式卡 / 反事实）、`diagrams.md`、`evidence.md`（引用 / 基线 / 增量证据）、`incremental.md`、`examples.md`（好坏对照）、`types/`（7 类提问清单，不是产出规格）。
-- 默认落点 `<项目>-架构分析.md`，**不写进 `source_repo`**；知识库入库（`{分类}/{项目}/` + 索引）仅在用户明确要求时启用；落盘后不做 `git add/commit`。
-- 与 `project-wiki` 的分工从"受众不同"改为"**产出性质不同**"：本 skill 产设计判断（为什么、代价、可迁移），后者产系统说明（是什么、怎么用）。
+`SKILL.md` = 路由 + 铁律（真源验证 / 图表校验 / 增量先读 / 不代提交 / 基线先行）。流程：**0 落点 → 0.5 基线 → 1 模式（全新 / 增量）→ 2 规模分流 → 3 探索 → 4 类型 → 5 定维度 → 6 写作 → 7 校验 → 8 索引**。
+
+- **基线**：`select-baseline.mjs`（稳定 tag > 稳定分支 > 默认分支 > 兜底矩阵）程序化选定；写作/校验必须同一棵基线工作树，基线写进 README 概览 + `CHANGELOG.md`。
+- **校验**：`verify-references.mjs`（含引用才跑，零引用自动通过；`--diff` 增量预检、`--stats` 密度自查）、`check-mermaid.mjs` 真解析、`scan-narrative.mjs` / `check-narrative-all.mjs`（叙述型文档）、`audit-svg-topology.mjs` + `render-svg-preview.mjs`（SVG）。
+- references：`kb-repo-rules.md`（落点与入库）、`version-baseline.md`（基线与陈旧裁决）、`flow-new.md` / `flow-incremental.md`、`large-repo-workflow.md`（大而深并行）、`dimension-triggers.md` + `project-types/*`（类型与关注面规格）、`analysis-guide.md`（Why>What / 权衡 / 四要素）、`writing-guide.md`（写作与图表）、`grounding-guide.md`（引用与真源校验）、`data-model-guide.md`、`figure-batch-workflow.md`、`narrative-design-template.md`、`quantification.md`、`errors-and-fixes.md`。
+- 落盘后不做 `git add/commit`；与 `project-wiki` 的分工是**产出性质不同**：本 skill 产设计判断（为什么、代价、可迁移），后者产系统说明（是什么、怎么用）。
 
 ## project-wiki
 
-面向**不读源码的广泛读者**产出项目 Wiki（Markdown：内嵌 Mermaid + 可选 `assets/*.svg`，不依赖渲染服务与外链解析）。与 `project-insight` 的分工是**产出性质不同**：那边产设计判断（决策卡 / 模式卡 / 可迁移），默认零代码索引；这边产系统说明，表达手段按**读者成本**排序（散文 → 图 → 表 → 代码），出处**收进章末一行** `> 依据：`（**不写可点击链接**，用 code span），正文**禁止出现任何校验痕迹**（锚点指纹、`Sources:`）。
+面向**不读源码的广泛读者**产出项目 Wiki（Markdown：内嵌 Mermaid + 可选 `assets/*.svg`，不依赖渲染服务与外链解析）。与 `project-insight` 的分工是**产出性质不同**：那边产设计判断与可迁移模式，代码引用按需；这边产系统说明，表达手段按**读者成本**排序（散文 → 图 → 表 → 代码），出处**收进章末一行** `> 依据：`（**不写可点击链接**，用 code span），正文**禁止出现任何校验痕迹**（锚点指纹、`Sources:`）。
 
 `SKILL.md` = 意图路由 + **七条铁律**，其中两条最容易违规：
 

@@ -9,13 +9,13 @@
 3. **确认覆盖范围。** 先定位现有文档已覆盖内容，避免重复；先在仓库或上游核对**真实地址与版本**：从既有解读取出记录的基线 ref（`README.md` 概览 / `CHANGELOG.md` 顶部）→ 用 `select-baseline.mjs` 选定新 ref → `git diff <旧ref>..<新ref>`（或对 release notes）取实际变更作依据，不只听口头描述；基线记录缺失时退化为代码快照比对并在文中声明。
 4. **最小破坏结构。** 已有 `##` 章节标题原样保留，不移动、不删除、不重排标题。
 
-5. **引用预检门禁（程序化输入）**：**先定新基线并 checkout 到基线工作树**（[version-baseline.md](version-baseline.md)；引用重定位只对基线快照有意义），再增量**动笔前必须先跑**
+5. **引用预检（有引用才跑）**：**先定新基线并 checkout 到基线工作树**（[version-baseline.md](version-baseline.md)；引用重定位只对基线快照有意义），再增量**动笔前跑**
    `node scripts/verify-references.mjs --diff <source_repo> <现有解读.md>...`，
-   把现有解读里每条 `文件:行号` 引用对**基线源码**重解析，得到
+   把现有解读里每处 `文件:行号` 引用对**基线源码**重解析，得到
    `STABLE / STALE / UNRESOLVED` 清单。**仅 STALE（带真实行号）与
    UNRESOLVED 对应章节允许改动；STABLE 章节原文保留，不得重写。**
-   此清单即增量差异依据之一，与上游 diff / release notes 并列；拿不到
-   diff 时以本清单为主。
+   此清单是增量差异依据之一，与上游 diff / release notes 并列。文档没有
+   引用时 `--diff` 无条目，改以上游 `git diff` / release notes 判定改动范围。
 
 ## 变更粒度（从轻到重，够用就好）
 
@@ -32,10 +32,10 @@
 
 ## 增量止损（noop）
 
-`--diff` 预检**全部引用均返回 STABLE**、且当前无新 release / 无提交变更时，
-判为"无需增量"：输出预检清单，提示"本次无改动的引用依据"并停笔——源码无实质
-变化且零 issue 时直接跳过重写。仅在疑似漏检
-（既有解读缺强引用、用户明确要求重梳）时才继续增量。
+`--diff` 预检**全部引用均返回 STABLE**（或文档本就没有引用）、且当前无新 release /
+无提交变更时，判为"无需增量"：输出预检清单，提示"本次无改动的引用依据"并停笔——
+源码无实质变化且零 issue 时直接跳过重写。文档无引用时，以 `git diff` 是否为空作为
+止损依据；仅在疑似漏检（既有解读缺关键事实、用户明确要求重梳）时才继续增量。
 
 ## 版本变更汇总：独立 CHANGELOG.md
 
@@ -57,5 +57,5 @@
 - 删掉的现状数字不直接抹掉，用 `> **演进说明(版本号)**` 引用块保留历史轨迹，再写新现状。
 - 文档头更新版本号，加一段"本版增量更新说明"，简述相比上一版的主要变更；同时更新 README 概览的「解读基线：`<ref>`（`<短SHA>`）」一行（见 [version-baseline.md](version-baseline.md)「基线记录」）；并在 `CHANGELOG.md` 顶部按「版本变更汇总」追加对应版本条目（与文档头的本版说明呼应，文档头只说当前这版，历史一览交给 CHANGELOG）。
 - 能力清单、技术栈表、架构图、对比表里的数字要**同步更新**，只改正文会漏。全篇 grep 核对一致性。
-- 真源校验与全新分析流程一致：改完后重跑一遍 `scripts/verify-references.mjs` 与 `scripts/check-mermaid.mjs`（用法见 [grounding-guide.md](grounding-guide.md)），新增/改动的引用同样经程序重定位，失败标 `[UNVERIFIED]`；`[MERMAID-ERROR]` 修复至全 `OK`。
+- 真源校验与全新分析流程一致：改完后重跑 `scripts/verify-references.mjs`（有引用则必须全过，无引用自动通过）与 `scripts/check-mermaid.mjs`（用法见 [grounding-guide.md](grounding-guide.md)），新增/改动的引用同样经程序重定位，失败标 `[UNVERIFIED]`；`[MERMAID-ERROR]` 修复至全 `OK`。
 - 落盘后同样只提示变更清单，不代为 `git commit`。

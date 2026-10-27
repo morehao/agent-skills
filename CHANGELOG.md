@@ -4,6 +4,14 @@
 
 本文件只记**本仓**变更，跟随里程碑 tag（`vX.Y.Z`，无 npm 制品）；未打 tag 的改动直接看 `git log`。
 
+## [Unreleased]
+
+### Changed
+
+- **project-insight**: 代码引用从"每个论断强制"改为**按需证据**——正文以叙述为主，只有反直觉结论 / 数字 / 安全边界 / 用户指定核验才给一处出处，整篇零引用合法；新增「四给四不给」判据，不设引用配额
+- **project-insight**: `verify-references.mjs` 支持零引用文档直接通过（打印「无引用（允许）」），新增 `--stats` 密度自查（只报告不阻断）；新增 `tests/references-smoke.sh` 回归
+- **project-insight**: 同步 SKILL.md、11 个 references / 8 个类型规格与仓库文档（`docs/skills.md`、`docs/agents/*`），清除 #57 回退遗留的 `check-doc.mjs`、决策卡等失效描述
+
 ## [v0.2.0] - 2026-10-23
 
 ### Features
