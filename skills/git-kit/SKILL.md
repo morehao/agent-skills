@@ -21,6 +21,7 @@ Git 常见操作的统一入口。先按「意图路由」理解用户要做什�
 | `pr-create` | 创建/更新 PR/MR（"提PR""创建合并请求""更新MR"） | `references/pr-create.md` |
 | `pr-merge` | 合并 PR/MR 并回主干更新（"合并PR""合并MR""merge PR""把PR合掉""合入主干"）；命中后 head 为稳定分支时保留不删 | `references/pr-merge.md` |
 | `tag` | 只给分支打版本标签并推送（"打tag""打个tag""打标签""release tag""给分支打标签"） | `references/tag.md` |
+| `checkout-tag` | 切换到当前仓库的最新 tag（"切到最新tag""切换到最新标签""checkout最新tag""检出最新tag""切到最新版本"）；只切不改，默认 detached HEAD | `references/checkout-tag.md` |
 | `release` | `pr-merge` 之后的发布段（"发版""发个版本""发布新版本""上线这个版本""走一遍release流程"）；从已合并的稳定分支打 tag → **默认创建 GitHub/GitLab Release** → 跟踪其他后效并逐项校验（不假定是 npm） | `references/release.md` |
 | `slim` | 仓库瘦身/浅克隆/减小体积（"瘦身""清理git历史""shallow clone"） | `references/slim.md` |
 | `star-classify` | 拉取并分类自己 star 的 GitHub 仓库（"分类我的star""把我star的仓库整理成清单"） | `references/star-classify.md` |
@@ -37,11 +38,12 @@ Git 常见操作的统一入口。先按「意图路由」理解用户要做什�
 - `pr-merge`：优先取用户显式提供的编号/URL；没有则探测当前分支关联的开放 PR/MR；无论来源，合并前都展示「编号 + 标题 + 目标分支 + head 分支及其去向（将删除 / 稳定分支保留）」并给用户**三选项（是 / 否 / 自定义 id）**确认；探测不到则要求用户提供编号，不猜测。head 为稳定分支时**一律保留不删**，判定与覆盖规则见 `references/stable-branch.md` 与 `references/pr-merge.md`。
 - `release`：至少给 `--version <v> [--version-file <路径>]` 或 `--tag <v1.1.0>`。**哪个文件是版本源由你读仓库判定**（脚本不认识任何清单格式；先验与每类现成命令见 `references/version-conventions.md`）：字面常量型用 `--version` + `--version-file`（边界匹配回查 + 回报行号），派生/注入型（Go ldflags、setuptools-scm、`${revision}`、Composer）只用 `--tag`；发布流水硬校验版本的仓库加 `--require-version-match`。`STATE=NEEDS_TARGET` 表示还没定目标版本（不是要用户报 tag），`STATE=BLOCKED` 按 `BLOCKERS` 处理（含多版本线 `target-tag-ambiguous`：必须显式给完整 tag）；不自行改版本号。
 - `tag`：可选分支名或 tag 名（`$1`）；没有则探测最新 tag 与来源分支、候选分支、候选版本号并**先展示给用户选择确认**，不擅自决定打哪个分支/版本。目标是**发布**的仓库要额外对齐版本号（tag 版本必须等于版本源文件里的声明值，否则发布流水拒绝发布）——版本源文件由读仓库决定，不一致时先走 `commit-push` + `pr-create` 升版本，见 `references/tag.md`「发版约束」。
+- `checkout-tag`：可选目标 tag 名；没有则探测最新 tag（按版本号，非 semver 退化为最近创建）。默认切到 detached HEAD，用户明确要基于该 tag 开发时才建分支。
 - `slim`：可选保留天数 `N`；没有则默认 `30 days ago`。
 
 **两类消息的上下文约束：**
 - 命中 `commit-message` 或 `branch` 分支时，只处理用户提供的话术/描述，**忽略任何代码、文件、git diff、git status 等上下文**。
-- 命中 `commit-push`、`pr-create`、`pr-merge`、`tag`、`release`、`slim` 分支时，主动读取 git 状态是必要的（diff/remote/历史）。
+- 命中 `commit-push`、`pr-create`、`pr-merge`、`tag`、`release`、`checkout-tag`、`slim` 分支时，主动读取 git 状态是必要的（diff/remote/历史）。
 
 ## 按需加载
 
@@ -53,5 +55,6 @@ Git 常见操作的统一入口。先按「意图路由」理解用户要做什�
 - `pr-merge`：先 `read references/stable-branch.md`（判定 head 是否保留）与 `read references/repo-id.md`（gh/glab 的仓库参数规则），再 `read references/pr-merge.md`。
 - `tag`：先 `read references/stable-branch.md`（候选分支的稳定分支偏好），再 `read references/tag.md`（含「发版约束」：版本号对齐与升版本顺序），用 `scripts/changelog.sh --link-to <tag>` 生成原文层后，再在其上写**中文摘要层**（普通用户可读），两层拼成注记正文（推送前让用户确认）。
 - `release`：先 `read references/ask-options.md`（**决策点一律用选项式提问**，不打印现状等人用自然语言回答），再 `read references/version-conventions.md`（**先认出仓库属于哪类版本约定，照该类命令取证**），再 `read references/release.md`（发布段流程与计划卡），再 `read references/tag.md`「发版约束」（版本对齐与注记 tag），运行 `scripts/release-preflight.sh` 做只读预检（**版本源要自己读仓库声明**：`--version <v> --version-file <路径>` 或 `--tag <tag>`，脚本只回查「声明的文件里有没有这个版本」；返回 `STATE` 决定是打 tag、只验证、还是先定版本源；同时给出 `RELEASE_PLATFORM` / `RELEASE_CLI_READY` / `RELEASE_EXISTS` 决定 Release 是创建还是只校验，`EFFECT_HINTS` 给出发布步骤原文；`BLOCKERS` 非空即停，`WARN` 只如实报告），用 `scripts/changelog.sh --link-to <tag>` 生成**原文层**，再在其上写**中文摘要层**，两层拼成并**落盘冻结**变更说明（`BODY` 进 tag 注记与 Release body，推送前过目；之后不再重算，`TAGGED` 重跑从 tag 注记读回）；**Release 默认由流程创建**（`EFFECT_RELEASE=workflow` 时只校验，不重复建）。打 tag 与创建/校验 Release 后，用 `scripts/release-verify.sh --platform <p> --tag <tag> [--probe-url <产物 URL>]` 等流水 + 验 Release + 验产物（一次出 `KEY=VALUE` 回执；产物无公开地址就不传，以流水结论为准；npm 仓可用 `--npm-pkg <包名>` 别名；默认 3 分钟 / 5 秒，`VERIFY_REASONS` 给出失败/未知原因）。若用户选择把变更写进 `CHANGELOG.md`：`changelog.sh --from <上个 tag> --to <BASE_REF> --version <tag> --link-to <tag> --write CHANGELOG.md` → 开 `docs/changelog-<tag>` 分支 → `pr-create` → `pr-merge` → 重新预检，再打 tag（正文仍用先前冻结那份）。
+- `checkout-tag`：`read references/checkout-tag.md`（探测最新 tag → 冲突预检不丢改动 → 切到 detached HEAD；只切不改，要开发才建分支）。
 - `slim`：`read references/slim.md`，按其中指引运行 `scripts/git-slim.sh`（脚本为单一真源，与 `/git/slim` 命令共用）。
 - `star-classify`：`read references/star-classify.md`，按其中指引运行 `scripts/git-star.sh`。

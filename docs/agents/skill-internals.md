@@ -4,7 +4,7 @@
 
 ## git-kit
 
-Git 工作流（message / commit-push / branch / pr-create / pr-merge / tag / release / slim / star）。**请求分叉点：多文件结构**。`SKILL.md` 只做「意图路由」+「按需加载」指引；真实逻辑在 `references/`（各分支 .md）与 `scripts/`（.sh 脚本）。
+Git 工作流（message / commit-push / branch / pr-create / pr-merge / tag / checkout-tag / release / slim / star）。**请求分叉点：多文件结构**。`SKILL.md` 只做「意图路由」+「按需加载」指引；真实逻辑在 `references/`（各分支 .md）与 `scripts/`（.sh 脚本）。
 
 `release` 只做 **`pr-merge` 之后**的发布段（打 tag → **默认创建 GitHub/GitLab Release** → 跟踪其他后效并逐项校验），**不改版本号、不开无关 PR**。唯一例外：用户选择写 `CHANGELOG.md` 时由 `changelog.sh --write` 写入并走一次分支 + PR（必须在打 tag 前合入，否则 tag 指向的提交没有这条记录）。
 
