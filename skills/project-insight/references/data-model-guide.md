@@ -21,7 +21,7 @@
 
 ## 实体关系总览
 
-优先用 Mermaid `erDiagram` 画实体/表及其关系（一对多、多对多经中间表等）；不适用 `erDiagram` 的场景（文档型 / 键值型）用 `graph TB` 表达实体集合与引用。同受 [writing-guide.md](writing-guide.md)「图表约束」的 `check-mermaid.mjs` 程序校验，落盘前全 `OK`。关系图是本节主体，文字只做图外补叙与权衡说明。
+优先用 Mermaid `erDiagram` 画实体/表及其关系（一对多、多对多经中间表等）；不适用 `erDiagram` 的场景（文档型 / 键值型）用 `flowchart TB` 表达实体集合与引用。同受 [writing-guide.md](writing-guide.md)「图表约束」的 `check-mermaid.mjs` 程序校验，落盘前全 `OK`。关系图是本节主体，文字只做图外补叙与权衡说明。
 
 ## 存储选型与理由
 
