@@ -4,7 +4,7 @@
 >
 > 与 [`skills/git-kit/SKILL.md`](../skills/git-kit/SKILL.md) 的分工：**SKILL.md 是给模型看的操作指令**（意图路由 + 按需加载），**本文是给人看的解释**——为什么这样切分、每条链路的边界在哪、失败时怎么处置。两者不互相替代。
 
-![git-kit 架构：三条入口、一个意图路由、九个分支](assets/git-kit-architecture.svg)
+![git-kit 架构：三条入口、一个意图路由、十个分支](assets/git-kit-architecture.svg)
 
 ## 三条入口，一个实现
 
@@ -42,7 +42,7 @@ flowchart TD
 | 一个请求同时含多步 | 按链路顺序连续执行（如「改了代码，提交并提个 PR」→ `commit-push` → `pr-create`），不拆成多次询问 |
 | 信号不足 | **不猜**：停下来问。合并、删除、打 tag 都难回收，宁可多一轮 |
 
-## 九个分支速查
+## 十个分支速查
 
 | 分支 | 做什么 | 典型说法 | 逻辑在 |
 |---|---|---|---|
@@ -52,6 +52,7 @@ flowchart TD
 | `pr-create` | 建或更新 PR/MR，自动识别 gh/glab | 「提个 PR」 | `references/pr-create.md` |
 | `pr-merge` | 按编号合并 → 切回主干 → 更新代码 → 处理 head 去留 | 「把 #12 合了」 | `references/pr-merge.md` |
 | `tag` | 打 annotated tag 并推送（含注记正文） | 「打个 tag」 | `references/tag.md` |
+| `checkout-tag` | 切到最新 tag（只切不改，默认 detached HEAD） | 「切到最新 tag」 | `references/checkout-tag.md` |
 | `release` | `pr-merge` 之后的发布段：打 tag → 跟踪后效 → 回执 | 「发版」 | `references/release.md` |
 | `slim` | 当前仓库瘦身为浅克隆 | 「把仓库瘦身」 | `references/slim.md` |
 | `star-classify` | 拉取并分类 GitHub star | 「分类我的 star」 | `references/star-classify.md` |

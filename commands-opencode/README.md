@@ -20,6 +20,7 @@
 | `git/pr-merge` | 按编号合并 PR/MR，删除原分支（head 为稳定分支时保留），切回主干并更新代码（自动识别 gh/glab） |
 | `git/release` | pr-merge 之后的发布段：打 tag → 默认创建 GitHub/GitLab Release → 按仓库探测跟踪后效并逐项校验；tag 注记与 Release body 共用同一份变更说明（中文摘要 + 折叠原文，推送前确认并冻结） |
 | `git/tag` | 查看最新 tag 与来源分支，选择分支与版本号，构建注记 tag（中文摘要 + 折叠原文）并推送 |
+| `git/checkout-tag` | 切换到当前仓库的最新 tag（按版本号取最高，非 semver 退化为最近创建）；只切不改，默认 detached HEAD |
 | `git/commit-push` | 基于代码变更自动生成 commit message 并执行提交推送 |
 | `git/slim` | 将当前 git 仓库瘦身为浅克隆，默认保留 30 天历史 |
 | `git/star-classify` | 拉取并分类自己的 GitHub star 仓库，输出中文分组清单 |
@@ -36,6 +37,7 @@
 | `git/pr-merge` | `git-kit` pr-merge |
 | `git/release` | `git-kit` release |
 | `git/tag` | `git-kit` tag |
+| `git/checkout-tag` | `git-kit` checkout-tag |
 | `git/commit-push` | `git-kit` commit-push |
 | `git/slim` | `git-kit` slim |
 | `git/star-classify` | `git-kit` star-classify |
@@ -51,6 +53,7 @@
 - `/git/pr-create [目标分支]` → 基于差异创建/更新 PR/MR（默认探测 main/master）
 - `/git/pr-merge [编号]` → 合并 PR/MR（无编号时探测当前分支关联的 PR/MR 并确认），删除原分支（head 为稳定分支时保留），切回主干并更新（默认 squash）
 - `/git/tag [tag名或分支名]` → 探测最新 tag 与来源分支，选择分支与版本号后打注记 tag（变更说明 = 中文摘要 + 折叠原文）并推送
+- `/git/checkout-tag [tag名]` → 切换到当前仓库的最新 tag（按版本号取最高，非 semver 退化为最近创建）；默认 detached HEAD，只切不改，要基于该 tag 开发才另建分支
 - `/git/release` → pr-merge 之后的发布段：只读预检 → 一次确认 → 打 tag → **默认创建 GitHub/GitLab Release** → 按仓库探测跟踪后效（流水 / 产物）并出校验回执；变更说明由 tag 注记与 Release body 共用（推送前冻结，只打标签用 `/git/tag`）
 - `/git/commit-push` → 分析当前变更自动提交并推送
 - `/git/slim [天数]` → 瘦身当前仓库（默认保留 30 天历史）

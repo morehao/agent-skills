@@ -16,6 +16,7 @@ Git 工作流的唯一真源。`SKILL.md` 只做意图路由：先判断命中�
 | `pr-create` | 创建/更新 PR/MR（自动识别 gh/glab） |
 | `pr-merge` | 合并 PR/MR、删 head（稳定分支保留）、回主干更新 |
 | `tag` | 打注记 tag 并推送 |
+| `checkout-tag` | 切换到当前仓库的最新 tag（只切不改，默认 detached HEAD） |
 | `release` | `pr-merge` 之后的发布段：预检 → 打 tag → 默认建 Release → 校验后效 |
 | `slim` | 仓库瘦身为浅克隆 |
 | `star-classify` | 拉取并分类 GitHub star |
