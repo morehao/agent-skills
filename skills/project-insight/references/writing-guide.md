@@ -63,8 +63,8 @@ Mermaid 侧的**类型映射**：
 
 | 图表用途 | Mermaid 类型 | 说明 |
 |---------|-------------|------|
-| 架构总览 | `graph TB` / `graph LR` | 模块层次、整体架构 |
-| 流程图 / 启动流程 | `graph TB` | 步骤、请求链路、程序流程 |
+| 架构总览 | `flowchart TB` / `flowchart LR` | 模块层次、整体架构 |
+| 流程图 / 启动流程 | `flowchart TB` | 步骤、请求链路、程序流程 |
 | 时序图 | `sequenceDiagram` | 模块间交互、请求时序（Mermaid 强项） |
 | 状态图 | `stateDiagram-v2` | 状态流转、生命周期（回边多时改用 SVG） |
 
@@ -83,7 +83,7 @@ Mermaid 侧的**类型映射**：
 
 | 触发 | 必给图 |
 |------|--------|
-| 架构总览 | `graph TB/LR` 模块图 |
+| 架构总览 | `flowchart TB/LR` 模块图 |
 | 启动流程 / 主请求链路 | `sequenceDiagram` 或 `graph` 阶段图 |
 | 连接 / 会话生命周期 | `stateDiagram-v2` 或 `sequenceDiagram` |
 | 跨模块数据流 / 时序 | `sequenceDiagram` |

@@ -46,11 +46,15 @@ function isWithinRoot(repo, target) {
 
 // —— 展示引用：`[仓库相对路径/文件.ext:start-end]()` ——
 // 路径部分可含字母数字 / . _ -；行号区间 start-end 为数字。
-const CITATION_RE = /\[([^\][]+?\.\w+):(\d+)-(\d+)\]\(\)/g;
+// 括号内允许为空（未补链接），也允许已补真实链接（如 `[pkg/a.ts:3-4](https://host/…/blob/<ref>/pkg/a.ts#L3-L4)`）。
+// 后者不放过、仍走同一套锚点定位——「已补链接」不等于「已验证」。
+const CITATION_RE = /\[([^\][]+?\.\w+):(\d+)-(\d+)\]\((?:https?:\/\/[^)\s]*)?\)/g;
 
 // —— 指纹注释（新）：首末行双锚点 ——
-// `<!-- anchor:<首行原文> … <末行原文> -->` 或含 `--` 时 `<!-- anchor-base64:<b64> -->`
-const ANCHOR_RE = /<!--\s*anchor-base64:([A-Za-z0-9+/=]+)\s*-->|<!--\s*anchor:([\s\S]*?)-->/g;
+// 明文：`<!-- anchor:<首行原文> … <末行原文> -->`
+// base64：单锚 `<!-- anchor-base64:<b64> -->`，或双锚 `<!-- anchor-base64:<b64首> … <b64末> -->`
+//        （锚点行含 `--` 或中英混排时用 base64，两段各自编码）
+const ANCHOR_RE = /<!--\s*anchor-base64:\s*([A-Za-z0-9+/=]+)\s*(?:…\s*([A-Za-z0-9+/=]+)\s*)?-->|<!--\s*anchor:([\s\S]*?)-->/g;
 
 // —— 指纹注释（旧，存量文档兼容）：整段 snippet ——
 // `<!-- snippet:<整段原文> -->` 或 `<!-- snippet-base64:<b64> -->`
@@ -196,13 +200,18 @@ function collectFingerprints(text) {
   let m;
   ANCHOR_RE.lastIndex = 0;
   while ((m = ANCHOR_RE.exec(text)) !== null) {
-    const b64 = m[1];
-    const raw = m[2];
+    const b64First = m[1];
+    const b64Last = m[2];
+    const plain = m[3];
     let content = null;
-    if (b64) {
-      try { content = Buffer.from(b64, 'base64').toString('utf8'); } catch { content = null; }
-    } else if (raw !== undefined && !raw.includes('--')) {
-      content = raw.trim();
+    if (b64First) {
+      try {
+        const first = Buffer.from(b64First, 'base64').toString('utf8').trim();
+        const last = b64Last ? Buffer.from(b64Last, 'base64').toString('utf8').trim() : first;
+        content = `${first} … ${last}`;
+      } catch { content = null; }
+    } else if (plain !== undefined) {
+      content = plain.trim();
     }
     if (content) {
       const [first, last] = splitAnchors(content);
@@ -242,12 +251,22 @@ function parseCitations(text) {
     });
   }
   const fingerprints = collectFingerprints(text);
-  // 引用 ↔ 指纹配对：取"注释行号 ∈ [引用行, 引用行 + PROXIMITY]"的最先一个；已用即消耗。
+  // 引用 ↔ 指纹配对。
+  // ① 若全文「引用数 == 指纹数」，按出现顺序一对一配对。这覆盖「引用与其指纹之间
+  //    夹了一行说明」的合法写法——就近配对会把指纹错位给下一条引用，造成假 MISMATCH。
+  //    （注意：一对一配对不放宽校验，锚点仍须在该引用声称的行号邻域命中。）
+  // ② 否则退回就近配对：注释行号 ∈ [引用行, 引用行 + PROXIMITY] 的最先未被占用者。
+  if (citations.length === fingerprints.length && citations.length > 0) {
+    for (let i = 0; i < citations.length; i += 1) citations[i].fingerprint = fingerprints[i];
+    return citations;
+  }
   let fi = 0;
+  const used = new Set();
   for (const cit of citations) {
-    while (fi < fingerprints.length && fingerprints[fi].lineNo < cit.lineNo) fi += 1;
+    while (fi < fingerprints.length && (fingerprints[fi].lineNo < cit.lineNo || used.has(fi))) fi += 1;
     if (fi < fingerprints.length && fingerprints[fi].lineNo <= cit.lineNo + FINGERPRINT_PROXIMITY) {
       cit.fingerprint = fingerprints[fi];
+      used.add(fi);
       fi += 1;
     }
   }
