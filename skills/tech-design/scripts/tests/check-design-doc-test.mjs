@@ -42,6 +42,10 @@ function expectTags(name, res, tags) {
 const good = join(fixtures, 'good-full.md');
 const bad = join(fixtures, 'bad-full.md');
 const warnOnly = join(fixtures, 'warn-only.md');
+const edgeOk = join(fixtures, 'edge-ok.md');
+const edgeDdlType = join(fixtures, 'edge-ddl-type.md');
+const edgeLogo = join(fixtures, 'edge-logo.md');
+const edgeStandard = join(fixtures, 'edge-standard.md');
 
 // ① 合规文档必须通过（含 --strict：note 永不参与失败判定）
 {
@@ -64,6 +68,7 @@ const warnOnly = join(fixtures, 'warn-only.md');
   expectTags('违规文档报出 warn 级 tag', r, [
     'TD-VAGUE', 'TD-GOAL-NO-NUMBER', 'TD-EMPTY-WORDS', 'TD-NUM-BASIS', 'TD-INTERNAL-REF',
     'TD-NO-DIAGRAM', 'TD-DDL-MISMATCH',
+    'TD-TIER-STRUCTURE', 'TD-GOAL-ANTI', 'TD-SILENT-LIST', 'TD-KNOWN-GAP',
   ]);
 }
 
@@ -87,10 +92,10 @@ const warnOnly = join(fixtures, 'warn-only.md');
   expectTags('图引用不存在被报出', plain, ['TD-ASSET-MISSING']);
 }
 
-// ⑤ 档位推断（不传 --tier 时按结构判）
+// ⑤ 档位推断（不传 --tier 时按结构判；标准档不得被误判为完整档）
 {
   const r = run([good]);
-  ok('完整档结构可被推断（追溯表仍校验）', r.code === 0, r.out + r.err);
+  ok('完整档结构可被推断（追溯表仍校验）', r.code === 0 && r.out.includes('推断为「full」'), r.out + r.err);
 }
 
 // ⑥ 用法与目标错误
@@ -140,6 +145,29 @@ const warnOnly = join(fixtures, 'warn-only.md');
   ok('轻量档示例通过（无 error 无 warn）', r.code === 0 && !r.out.includes('✗ ') && !r.out.includes('! '), r.out);
   ok('记号收口到「假设与约束」不报未收口', !r.out.includes('TD-MARKER-UNCOLLECTED'), r.out);
   ok('验收百分比不误判为「数字缺口径」', !r.out.includes('TD-NUM-BASIS'), r.out);
+}
+
+// ⑪ 修复回归：档位误判 / DDL 属性 / 标题形容词误伤 / 内部引用误伤 / 选项同义词 / 多行状态块 / 装饰图
+{
+  const std = run([edgeStandard]);
+  ok('标准档不再被误判为完整档', std.out.includes('推断为「standard」') && !std.out.includes('推断为「full」'), std.out);
+
+  const light = run([join(fixtures, 'light-assumption.md')]);
+  ok('轻量档可被推断为 light', light.out.includes('推断为「light」'), light.out);
+
+  const edge = run([edgeOk, '--tier', 'light', '--json']);
+  let codes = [];
+  try { codes = JSON.parse(edge.out).findings.map((f) => f.code); } catch { /* 断言会失败 */ }
+  ok('多行状态块不再误报 TD-STATUS-BLOCK', !codes.includes('TD-STATUS-BLOCK'), edge.out);
+  ok('「保持当前实现不动」算不作为基线（不报 TD-OPTION）', !codes.includes('TD-OPTION'), edge.out);
+  ok('仓库自有 data-model.md 不再误报 TD-INTERNAL-REF', !codes.includes('TD-INTERNAL-REF'), edge.out);
+  ok('结构标题「高可用设计」不再误报 TD-VAGUE', !codes.includes('TD-VAGUE'), edge.out);
+
+  const ddl = run([edgeDdlType, '--tier', 'light']);
+  ok('DDL 类型不一致被检出', ddl.out.includes('TD-DDL-MISMATCH') && ddl.out.includes('类型'), ddl.out);
+
+  const logo = run([edgeLogo, '--tier', 'standard']);
+  ok('装饰性 logo 不当作架构图', logo.out.includes('TD-NO-DIAGRAM'), logo.out);
 }
 
 // ⑩ 规则清单是唯一真源：--list-rules 与源码里 report() 的码一一对应
