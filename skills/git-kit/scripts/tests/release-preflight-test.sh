@@ -322,6 +322,20 @@ run_pre "$REAL_PATH" --version 1.2.3 --version-file RELEASE_NOTES.txt --changelo
 assert_kv "$OUT" "CHANGELOG=docs/history.md" "--changelog 覆盖生效"
 assert_kv "$OUT" "CHANGELOG_HAS_VERSION=yes" "v 前缀 + 日期后缀的标题也认"
 
+# 16b. 命中项在前、后面几千行历史：管道输出超过缓冲区时，grep -q 提前退出会触发 SIGPIPE，
+# 在 pipefail 下把整条管道判成失败（macOS 实测的 CHANGELOG_HAS_VERSION 假阴性）。
+new_repo
+printf 'version: 1.2.3\n' | w RELEASE_NOTES.txt
+{
+  printf '# Changelog\n\n## [v1.2.3] - 2026-10-29\n\n'
+  awk 'BEGIN { for (i = 0; i < 6000; i++) printf "- 历史条目 %d：用于把 CHANGELOG 撑过管道缓冲区，验证 pipefail 下不会假阴性\n", i }'
+} | w CHANGELOG.md
+commit_all
+tag v1.2.2
+wire_remote
+run_pre "$REAL_PATH" --version 1.2.3 --version-file RELEASE_NOTES.txt
+assert_kv "$OUT" "CHANGELOG_HAS_VERSION=yes" "大 CHANGELOG（命中在前）不因 SIGPIPE 假阴性"
+
 # 19. EFFECT_HINTS 只摘可执行行（run:/uses:），不摘 job/step 名
 new_repo
 printf 'x\n' | w a.txt

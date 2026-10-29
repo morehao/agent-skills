@@ -330,11 +330,15 @@ fi
 
 # 小节匹配放宽到「版本号出现过」：`## [v1.1.0]` / `## 1.1.0` / `## v1.1.0 - 2026-10-22` 都算，
 # 且用数字边界避免 1.1.0 命中 11.1.0。与 changelog.sh 的写入判定保持同一语义。
+#
+# 注意：本文件里的管道匹配一律用 `grep -c … >/dev/null` 而不是 `grep -q`。脚本开了 pipefail，
+# 上游（git show / awk / grep）输出较大时，`grep -q` 命中即退出会让上游收到 SIGPIPE，
+# 整条管道被判为失败（macOS 实测：CHANGELOG 稍大就会让这里出现 CHANGELOG_HAS_VERSION 假阴性）。
 CHANGELOG_HAS_VERSION=na
 if [ -n "$CHANGELOG_FILE" ] && [ -n "$VERSION" ]; then
   VER_ESC_CL="$(printf '%s' "$VERSION" | sed 's/[][\\.^$*+?(){}|]/\\&/g')"
   if git show "${BASE_REF}:${CHANGELOG_FILE}" 2>/dev/null \
-     | grep -Eqi "(^|[^0-9])(v)?${VER_ESC_CL}([^0-9]|$)"; then
+     | grep -Eci "(^|[^0-9])(v)?${VER_ESC_CL}([^0-9]|$)" >/dev/null; then
     CHANGELOG_HAS_VERSION=yes
   else
     CHANGELOG_HAS_VERSION=no
@@ -359,7 +363,7 @@ TAG_WORKFLOWS=""
 if [ -d "${ROOT}/.github/workflows" ]; then
   for f in "${ROOT}"/.github/workflows/*.yml "${ROOT}"/.github/workflows/*.yaml; do
     [ -f "$f" ] || continue
-    if awk '/^jobs:/{exit} {print}' "$f" | grep -vE '^[[:space:]]*#' | grep -qE '(^|[[:space:]])tags:'; then
+    if awk '/^jobs:/{exit} {print}' "$f" | grep -vE '^[[:space:]]*#' | grep -cE '(^|[[:space:]])tags:' >/dev/null; then
       TAG_WORKFLOWS="${TAG_WORKFLOWS}${f##*/} "
     fi
   done
@@ -396,13 +400,13 @@ fi
 #   GitLab：.gitlab-ci.yml 由 CI_COMMIT_TAG 触发，且含 release: 或 glab release create
 EFFECT_RELEASE=none
 if [ "$RELEASE_PLATFORM" = github ]; then
-  if [ -n "$TAG_WORKFLOWS" ] && grep -rhE 'action-gh-release|gh release create' "${ROOT}/.github/workflows" 2>/dev/null | grep -vE '^[[:space:]]*#' | grep -q .; then
+  if [ -n "$TAG_WORKFLOWS" ] && grep -rhE 'action-gh-release|gh release create' "${ROOT}/.github/workflows" 2>/dev/null | grep -vE '^[[:space:]]*#' | grep -c . >/dev/null; then
     EFFECT_RELEASE=workflow
   fi
 elif [ "$RELEASE_PLATFORM" = gitlab ]; then
   if [ -f "${ROOT}/.gitlab-ci.yml" ] \
-     && grep -vE '^[[:space:]]*#' "${ROOT}/.gitlab-ci.yml" | grep -q 'CI_COMMIT_TAG' \
-     && grep -vE '^[[:space:]]*#' "${ROOT}/.gitlab-ci.yml" | grep -qE '^[[:space:]]*release:[[:space:]]*$|glab release create'; then
+     && grep -vE '^[[:space:]]*#' "${ROOT}/.gitlab-ci.yml" | grep -c 'CI_COMMIT_TAG' >/dev/null \
+     && grep -vE '^[[:space:]]*#' "${ROOT}/.gitlab-ci.yml" | grep -cE '^[[:space:]]*release:[[:space:]]*$|glab release create' >/dev/null; then
     EFFECT_RELEASE=workflow
   fi
 fi
@@ -415,7 +419,7 @@ if [ -f "${ROOT}/.gitlab-ci.yml" ]; then
 fi
 [ -n "$CI_SYSTEM" ] || CI_SYSTEM=none
 GITLAB_TAG_CI=no
-if [ -f "${ROOT}/.gitlab-ci.yml" ] && grep -vE '^[[:space:]]*#' "${ROOT}/.gitlab-ci.yml" | grep -q 'CI_COMMIT_TAG'; then
+if [ -f "${ROOT}/.gitlab-ci.yml" ] && grep -vE '^[[:space:]]*#' "${ROOT}/.gitlab-ci.yml" | grep -c 'CI_COMMIT_TAG' >/dev/null; then
   GITLAB_TAG_CI=yes
 fi
 
