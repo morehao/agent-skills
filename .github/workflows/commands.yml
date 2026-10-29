@@ -51,5 +51,12 @@ jobs:
         with:
           node-version: "22"
 
+      # dsh-commands v0.4.0 起仓库只提交 TS 源码（lib/*.ts，dist/ 不入库），比对前先构建出 dist/index.js。
+      - name: Build dsh-commands（TS → dist）
+        working-directory: .ci/dsh-commands
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+
       - name: 跨仓比对「命令 → skill 分支」
         run: node scripts/check-opencode-commands.mjs --dsh .ci/dsh-commands
