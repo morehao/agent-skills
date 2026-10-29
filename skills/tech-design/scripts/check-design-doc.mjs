@@ -51,9 +51,14 @@ const RULES = [
   ['TD-OPTION', 'error', '缺备选章节，或备选里没有「不做/维持现状/否决」'],
   ['TD-TRACE', 'error', '缺决策↔需求追溯表，或某行缺承接需求/验证手段'],
   ['TD-TRACE-UPSTREAM', 'warn', '承接需求编号在上游文档里找不到'],
-  ['TD-DDL-MISMATCH', 'warn', '附录 DDL 与正文字段表不一致'],
+  ['TD-TIER', 'note', '未指定 --tier 时按结构推断的档位（轻量跳过追溯/图，标准与完整共享机械项）'],
+  ['TD-TIER-STRUCTURE', 'warn', '--tier full 却缺完整档必备章节（摘要/部署/安全/可观测/成本）'],
+  ['TD-GOAL-ANTI', 'warn', '目标与非目标缺少「反目标」（做成了也算失败的情形）'],
+  ['TD-DDL-MISMATCH', 'warn', '附录 DDL 与正文字段表不一致（列名/类型/可空/默认值/索引）'],
   ['TD-MARKER', 'note', '[待核实]/[待澄清]/[假设] 的收口提醒'],
   ['TD-MARKER-UNCOLLECTED', 'warn', '有未定记号，但没有开放问题/假设与约束章节'],
+  ['TD-SILENT-LIST', 'warn', '标准档及以上缺少「方案沉默清单」'],
+  ['TD-KNOWN-GAP', 'warn', '标准档及以上缺少「已知未覆盖」章节'],
 ];
 
 // ———————————————————————————— 参数 ————————————————————————————
@@ -243,8 +248,9 @@ const PERF_CONTEXT_RE = /QPS|TPS|RPS|RT\b|延迟|耗时|吞吐|并发|水位|可
 const PLACEHOLDER_RE = /\b(TBD|TODO|FIXME|TKTK)\b|待补充|待填写|待填|＜[^＞]*占位[^＞]*＞|<[^<>\n]*(占位|placeholder)[^<>\n]*>/i;
 const SHELL_RE = /^(N\/A|n\/a|不适用|无|略|待填|待补充|同上|暂略)$/;
 const STATUS_VALUES = ['草案待评', '评审中', '已批准'];
-const OPTION_HEAD_RE = /备选|选型|方案对比/;
-const OPTION_KEYWORD_RE = /不做|维持现状|不选|否决|放弃|不采用|现状不动/;
+const OPTION_HEAD_RE = /备选|选型对比|方案对比/;
+// 不作为基线允许同义表述：不做 / 维持现状 / 保持当前实现 / 沿用现状 / 否决…
+const OPTION_KEYWORD_RE = /不做|不实施|不引入|不采用|不选|维持现状|保持现状|保持当前|维持当前|沿用现状|保留现状|现状不动|否决|放弃/;
 const TRACE_HEAD_RE = /决策/;
 const TRACE_NEED_COL_RE = /承接需求|需求|目标/;
 const TRACE_VERIFY_COL_RE = /验证/;
@@ -256,7 +262,10 @@ function checkStatusBlock(scanLines, offset) {
       '缺少文档状态块（`> 状态：草案待评 ｜ 作者：… ｜ 评审人：… ｜ 拍板人：… ｜ 最后更新：YYYY-MM-DD`）');
     return;
   }
-  const line = scanLines[idx];
+  // 支持多行 blockquote 状态块：把从「状态」开始的连续 `>` 行拼成一段再校验字段
+  const parts = [];
+  for (let i = idx; i < scanLines.length && /^\s*>/.test(scanLines[i]); i += 1) parts.push(scanLines[i]);
+  const line = parts.join(' ');
   const missing = ['作者', '评审人', '拍板人', '最后更新'].filter((f) => !line.includes(f));
   if (missing.length) {
     report('error', 'TD-STATUS-BLOCK', offset + idx + 1, `状态块缺字段：${missing.join('、')}`);
@@ -308,6 +317,8 @@ function checkVague(scanLines, offset) {
   for (let i = 0; i < scanLines.length; i += 1) {
     const t = scanLines[i];
     if (!t.trim() || hasDigit(t)) continue;
+    // 标题是结构标记，不是论断：「## 高可用设计」不该按形容词判
+    if (/^\s*#{1,6}\s/.test(t)) continue;
     if (isTableHeaderRow(scanLines, i)) continue;
     if (enclosingHeadings(scanLines, i).some((h) => /术语|词汇|名词|glossary/i.test(h))) continue;
     for (const w of VAGUE_WORDS) {
@@ -394,6 +405,49 @@ function checkGoalNumbers(scanLines, offset) {
   }
 }
 
+/** 目标与非目标章节必须有「反目标」：技术指标全达标、业务上仍算失败的情形 */
+const GOAL_HEAD_RE = /目标\s*与\s*(非目标|范围)|目标与非目标/;
+function checkGoalAnti(scanLines, headings, offset) {
+  for (let k = 0; k < headings.length; k += 1) {
+    if (!GOAL_HEAD_RE.test(headings[k].text)) continue;
+    const [from, to] = sectionRange(headings, k, scanLines.length);
+    const body = scanLines.slice(from, to).join('\n');
+    if (!/反目标/.test(body)) {
+      report('warn', 'TD-GOAL-ANTI', offset + headings[k].line + 1,
+        `「${headings[k].text}」没有「反目标」——技术上全达标但业务上仍算失败的情形（越过即回滚/重做）`);
+    }
+  }
+}
+
+/** 标准档及以上的两个易漏章节：方案沉默清单、已知未覆盖 */
+function checkTierSections(headings, tier) {
+  if (tier === 'light') return;
+  if (!headings.some((h) => /沉默清单/.test(h.text))) {
+    report('warn', 'TD-SILENT-LIST', 1,
+      '标准档及以上缺少「方案沉默清单」——方案没提、线上一定会遇到、遇到就出事的输入/状态');
+  }
+  if (!headings.some((h) => /已知未覆盖|未覆盖/.test(h.text))) {
+    report('warn', 'TD-KNOWN-GAP', 1,
+      '标准档及以上缺少「已知未覆盖」——明确知道本期不解决的缺口');
+  }
+}
+
+/** 完整档的必备章节（章节名可语义化重命名，按正则匹配） */
+const FULL_SECTIONS = [
+  { key: '摘要', re: /摘要|TL;?DR/i },
+  { key: '部署与资源拓扑', re: /部署|资源拓扑/ },
+  { key: '安全设计', re: /安全/ },
+  { key: '可观测性设计', re: /可观测|监控|告警/ },
+  { key: '成本分析', re: /成本/ },
+];
+function checkTierStructure(headings, tier, explicit) {
+  if (tier !== 'full' || !explicit) return;
+  const missing = FULL_SECTIONS.filter((s) => !headings.some((h) => s.re.test(h.text))).map((s) => s.key);
+  if (!missing.length) return;
+  report('warn', 'TD-TIER-STRUCTURE', 1,
+    `--tier full 但缺少完整档必备章节：${missing.join('、')}（章节可重命名，但语义要有承载；确不需要请显式豁免并写理由）`);
+}
+
 /** 空话风控：出现即返工的那几句 */
 const EMPTY_PHRASE_RE = /加强监控|做好兜底|持续关注|高度重视|保障稳定|注意性能|关注性能|做好保障|加强保障/;
 function checkEmptyPhrases(scanLines, offset) {
@@ -409,7 +463,7 @@ function checkEmptyPhrases(scanLines, offset) {
 function checkOptions(scanLines, headings, offset) {
   const hits = headings.map((h, k) => ({ h, k })).filter(({ h }) => OPTION_HEAD_RE.test(h.text));
   if (!hits.length) {
-    report('error', 'TD-OPTION', offset + 1, '全文没有「备选/选型/方案对比」章节——单一方案视为未完成');
+    report('error', 'TD-OPTION', offset + 1, '全文没有「备选 / 方案对比 / 选型对比」章节——单一方案视为未完成');
     return;
   }
   const pooled = hits.flatMap(({ h, k }) => {
@@ -418,7 +472,7 @@ function checkOptions(scanLines, headings, offset) {
   }).join('\n');
   if (!OPTION_KEYWORD_RE.test(pooled)) {
     report('error', 'TD-OPTION', offset + hits[0].h.line + 1,
-      '备选章节里没有「不做 / 维持现状 / 否决」对照项——必须含不作为的基线');
+      '备选章节里没有「不做 / 维持现状 / 保持当前实现」这类不作为基线——必须含对照项');
   }
 }
 
@@ -459,13 +513,33 @@ function checkTrace(scanLines, offset, tier, upstreamTokens) {
   }
 }
 
-/** 从 CREATE TABLE 体里抽列名（跳过约束关键字） */
+/** 归一化 DDL/正文里的类型文本：去反引号、压空格、大写 */
+function normType(s) {
+  return (s || '').replace(/[`*]/g, '').replace(/\s+/g, ' ').trim().toUpperCase();
+}
+
+/** 类型族（去掉长度/精度括号） */
+function baseType(s) {
+  return normType(s).replace(/\(.*$/, '').trim();
+}
+
+/** 正文类型与 DDL 类型是否相容：类型族必须一致；正文若写了长度/精度，DDL 也必须一致 */
+function typeCompatible(bodyType, ddlType) {
+  if (!bodyType || !ddlType) return true;
+  if (baseType(bodyType) !== baseType(ddlType)) return false;
+  const paren = (s) => { const m = normType(s).match(/\(([^)]*)\)/); return m ? m[1].replace(/\s/g, '') : ''; };
+  const bp = paren(bodyType);
+  const dp = paren(ddlType);
+  return !(bp && dp && bp !== dp);
+}
+
+/** 从 fenced SQL 里解析 CREATE TABLE 的列：name -> {type, notNull, rawDef} */
 function ddlColumns(blocks) {
   const SKIP = new Set([
     'primary', 'foreign', 'unique', 'key', 'index', 'constraint', 'check', 'create',
     'table', 'if', 'not', 'exists', 'references', 'on', 'default', 'comment',
   ]);
-  const cols = new Set();
+  const cols = new Map();
   for (const b of blocks) {
     if (!/create\s+table/i.test(b.lines.join('\n'))) continue;
     let inside = false;
@@ -474,27 +548,77 @@ function ddlColumns(blocks) {
       if (/^create\s+table/i.test(line)) { inside = true; continue; }
       if (!inside) continue;
       if (/^\)/.test(line)) { inside = false; continue; }
-      const m = line.match(/^`?([A-Za-z_][A-Za-z0-9_]*)`?\s+\S/);
-      if (m && !SKIP.has(m[1].toLowerCase())) cols.add(m[1]);
+      if (/^(primary|foreign|unique|key|index|constraint|check)\b/i.test(line)) continue;
+      const m = line.match(/^`?([A-Za-z_][A-Za-z0-9_]*)`?\s+([A-Za-z][A-Za-z0-9_]*(?:\s*\([^)]*\))?)/);
+      if (!m || SKIP.has(m[1].toLowerCase())) continue;
+      const dm = line.match(/\bdefault\s+(.+?)(?:,|$)/i);
+      cols.set(m[1], {
+        type: normType(m[2]),
+        notNull: /not\s+null|primary\s+key/i.test(line),
+        rawDef: dm ? dm[1].trim() : '',
+      });
     }
   }
   return cols;
 }
 
-function tableColumns(tables) {
-  const cols = new Set();
-  for (const t of tables) {
-    const h = t.header.join(' ');
-    if (!/字段|列名/.test(h)) continue;
-    if (!/类型|说明|注释|含义/.test(h)) continue;
-    const col = t.header.findIndex((x) => /字段|列名/.test(x));
-    for (const row of t.rows) {
-      const raw = (row.cells[col] || '').replace(/[`*]/g, '').trim();
-      const m = raw.match(/^([A-Za-z_][A-Za-z0-9_]*)$/);
-      if (m) cols.add(m[1]);
+/** 从 fenced SQL 里解析索引名：name -> {table, cols} */
+function ddlIndexes(blocks) {
+  const out = new Map();
+  for (const b of blocks) {
+    const text = b.lines.join('\n');
+    const re = /create\s+(?:unique\s+)?index\s+`?([A-Za-z_][A-Za-z0-9_]*)`?\s+on\s+`?([A-Za-z_][A-Za-z0-9_]*)`?\s*\(([^)]*)\)|(?:unique\s+)?key\s+`?([A-Za-z_][A-Za-z0-9_]*)`?\s*\(([^)]*)\)/gi;
+    for (const m of text.matchAll(re)) {
+      const name = m[1] || m[4];
+      const idxCols = (m[3] || m[5] || '')
+        .split(',').map((s) => s.trim().replace(/`/g, '').replace(/\s+(asc|desc)$/i, '').replace(/\(\d+\)$/, ''))
+        .filter(Boolean);
+      out.set(name, { table: m[2] || '', cols: idxCols });
     }
   }
-  return cols;
+  return out;
+}
+
+/** 正文的字段表与索引表：cols -> name -> {type, nullable, def}；indexNames -> name -> {query} */
+function tableColumns(tables) {
+  const cols = new Map();
+  const indexNames = new Map();
+  for (const t of tables) {
+    const h = t.header.join(' ');
+    const fi = t.header.findIndex((x) => /字段|列名/.test(x));
+    if (fi >= 0 && /类型/.test(h)) {
+      const ti = t.header.findIndex((x) => /类型/.test(x));
+      const ni = t.header.findIndex((x) => /可空|null|非空/i.test(x));
+      const di = t.header.findIndex((x) => /默认/.test(x));
+      for (const row of t.rows) {
+        const name = (row.cells[fi] || '').replace(/[`*]/g, '').trim();
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) continue;
+        let nullable;
+        if (ni >= 0) {
+          const v = (row.cells[ni] || '').replace(/[`*\s]/g, '');
+          if (/^(否|no|false|n|非空|notnull)$/i.test(v)) nullable = false;
+          else if (/^(是|yes|true|y|可空|null)$/i.test(v)) nullable = true;
+        }
+        cols.set(name, {
+          type: ti >= 0 ? normType(row.cells[ti]) : '',
+          nullable,
+          def: di >= 0 ? (row.cells[di] || '').replace(/[`*]/g, '').trim() : '',
+        });
+      }
+      continue;
+    }
+    if (/索引/.test(h) || /index/i.test(h)) {
+      const ii = t.header.findIndex((x) => /索引|index/i.test(x));
+      const qi = t.header.findIndex((x) => /查询|说明|用途|服务/.test(x));
+      if (ii < 0) continue;
+      for (const row of t.rows) {
+        const name = (row.cells[ii] || '').replace(/[`*]/g, '').trim();
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) continue;
+        indexNames.set(name, { query: qi >= 0 ? (row.cells[qi] || '').trim() : '' });
+      }
+    }
+  }
+  return { cols, indexNames };
 }
 
 function checkDdl(scanLines, rawScanLines, headings, offset) {
@@ -502,19 +626,44 @@ function checkDdl(scanLines, rawScanLines, headings, offset) {
   const blocks = fencedBlocks(rawScanLines);
   const ddl = ddlColumns(blocks);
   if (!ddl.size) return;
-  const tables = findTables(scanLines);
-  const body = tableColumns(tables);
+  const { cols: body, indexNames } = tableColumns(findTables(scanLines));
   if (!body.size) return;
-  const onlyDdl = [...ddl].filter((c) => !body.has(c));
-  const onlyBody = [...body].filter((c) => !ddl.has(c));
-  if (onlyDdl.length || onlyBody.length) {
-    const anchor = headings.find((h) => /附录|DDL/i.test(h.text));
-    const parts = [];
-    if (onlyDdl.length) parts.push(`只在 DDL：${onlyDdl.join('、')}`);
-    if (onlyBody.length) parts.push(`只在正文表：${onlyBody.join('、')}`);
-    report('warn', 'TD-DDL-MISMATCH', offset + (anchor ? anchor.line + 1 : 1),
-      `附录 DDL 与正文字段表不一致（${parts.join('；')}）——附录 DDL 是唯一可执行真源，必须逐项一致`);
+  const parts = [];
+  const onlyDdl = [...ddl.keys()].filter((c) => !body.has(c));
+  const onlyBody = [...body.keys()].filter((c) => !ddl.has(c));
+  if (onlyDdl.length) parts.push(`只在 DDL：${onlyDdl.join('、')}`);
+  if (onlyBody.length) parts.push(`只在正文表：${onlyBody.join('、')}`);
+
+  const normDef = (s) => normType(s).replace(/^DEFAULT\s+/i, '').replace(/[()'"`:]/g, '');
+  const diff = [];
+  for (const [name, b] of body) {
+    const d = ddl.get(name);
+    if (!d) continue;
+    if (b.type && d.type && !typeCompatible(b.type, d.type)) {
+      diff.push(`${name} 类型「正文 ${b.type} / DDL ${d.type}」`);
+    }
+    if (b.nullable !== undefined && b.nullable === d.notNull) {
+      diff.push(`${name} 可空「正文 ${b.nullable ? '是' : '否'} / DDL ${d.notNull ? '否' : '是'}」`);
+    }
+    if (b.def && d.rawDef && normDef(b.def) !== normDef(d.rawDef)) {
+      diff.push(`${name} 默认值「正文 ${b.def} / DDL ${d.rawDef}」`);
+    }
   }
+  if (diff.length) parts.push(`字段属性不一致：${diff.join('；')}`);
+
+  // 索引：只在正文给了索引表时才比，避免把「没写索引表」误判成索引漂移
+  if (indexNames.size) {
+    const ddlIdx = ddlIndexes(blocks);
+    const onlyDdlIdx = [...ddlIdx.keys()].filter((n) => !indexNames.has(n));
+    const onlyBodyIdx = [...indexNames.keys()].filter((n) => !ddlIdx.has(n));
+    if (onlyDdlIdx.length) parts.push(`索引只在 DDL：${onlyDdlIdx.join('、')}`);
+    if (onlyBodyIdx.length) parts.push(`索引只在正文表：${onlyBodyIdx.join('、')}`);
+  }
+
+  if (!parts.length) return;
+  const anchor = headings.find((h) => /附录|DDL/i.test(h.text));
+  report('warn', 'TD-DDL-MISMATCH', offset + (anchor ? anchor.line + 1 : 1),
+    `附录 DDL 与正文字段表不一致（${parts.join('；')}）——附录 DDL 是唯一可执行真源，必须逐项一致`);
 }
 
 function checkMarkers(scanLines, offset) {
@@ -545,11 +694,12 @@ function checkMarkers(scanLines, offset) {
 function checkDiagrams(rawLines, scanLines, offset, tier) {
   if (tier === 'light') return;
   const text = rawLines.join('\n');
-  // 「有图」只认三种真形态：mermaid 围栏、markdown 图片、内联 svg。
-  // 不能把正文里出现的 .jpg 当图——商品图 URL 会把这条规则骗过去。
-  const hasDiagram = /```\s*mermaid|```\s*(dot|plantuml)/i.test(text)
-    || /!\[[^\]]*\]\(/.test(text)
-    || /<svg[\s>]/i.test(text);
+  // mermaid/dot/plantuml 围栏（``` 或 ~~~）、内联 SVG、或真正用来表达结构的图片。
+  // logo/icon/badge 这类装饰图不算——否则一张图标就能骗过「必须有图」。
+  const fence = /(?:```|~~~)\s*(?:mermaid|dot|plantuml)/i.test(text);
+  const images = [...text.matchAll(/!\[[^\]]*\]\(\s*[^)\s]+[^)]*\)/g)]
+    .some((m) => !/logo|icon|badge|shield|avatar|sprite/i.test(m[0]));
+  const hasDiagram = fence || images || /<svg[\s>]/i.test(text);
   if (hasDiagram) return;
   const structural = scanLines.some((l) => /^#{1,6}\s*.*(架构|上下文|拓扑|流程|数据模型|部署|边界)/.test(l));
   if (!structural) return;
@@ -575,7 +725,8 @@ function checkAssets(rawLines, docAbs, offset) {
 }
 
 /** 交付文档不该引用技能内部文件：读者手上没有 quality-bar.md / templates.md */
-const INTERNAL_REF_RE = /(quality-bar|templates|scenarios|focus-areas|data-model|quantification|review-gate)\.md|references\/[a-z-]+\.md|\bSKILL\.md\b|本技能/;
+// 只认「技能专属」文件名；data-model.md / templates.md 这类可能是仓库自有文件，必须带 references/ 前缀才算。
+const INTERNAL_REF_RE = /references\/[a-z-]+\.md|(?:^|[^/A-Za-z0-9_.-])(?:quality-bar|scenarios|focus-areas|quantification|review-gate)\.md|(?:^|[^/A-Za-z0-9_.-])templates\.md|\bSKILL\.md\b|本技能/;
 function checkInternalRefs(scanLines, offset) {
   const hits = [];
   for (let i = 0; i < scanLines.length; i += 1) {
@@ -597,9 +748,14 @@ function checkSize(rawLines, offset) {
 
 function inferTier(scanLines) {
   const text = scanLines.join('\n');
-  if (/^##\s*摘要/m.test(text)) return 'full';
-  if (/^##\s*(待确认与开放问题|方案与选型对比)/m.test(text)) return 'full';
-  if (/^###\s*(阶段与里程碑|资源需求)/m.test(text)) return 'standard';
+  // 完整档：同时具备「摘要」与「方案与选型对比 / 部署拓扑」两个完整档标志，避免标准档被单个
+  // 「待确认与开放问题」标题误判为完整档（旧实现在每条标准档文档上都会误判）。
+  const hasSummary = /^##\s*摘要/m.test(text);
+  const hasFullBody = /^##\s*(方案与选型对比|部署与资源拓扑|部署拓扑)/m.test(text);
+  if (hasSummary && hasFullBody) return 'full';
+  if (/^###\s*(阶段与里程碑|资源需求)/m.test(text)
+    || /^##\s*(详细技术设计|详细设计)/m.test(text)
+    || /^###\s*(接口设计|数据模型)/m.test(text)) return 'standard';
   return 'light';
 }
 
@@ -626,7 +782,12 @@ for (const target of targets) {
   const { body, offset } = splitFrontmatter(raw);
   const scan = blankFences(body);
   const headings = parseHeadings(scan);
+  const explicitTier = tierOpt !== null;
   const tier = tierOpt || inferTier(scan);
+  if (!explicitTier) {
+    report('note', 'TD-TIER', 1,
+      `未指定 --tier，按结构推断为「${tier}」；档位只影响机械检查范围（light 跳过追溯表/图），语义义务按所选档位由评审 gate 覆盖`);
+  }
 
   checkStatusBlock(scan, offset);
   checkPlaceholders(scan, offset);
@@ -637,10 +798,13 @@ for (const target of targets) {
   checkAssets(body, abs, offset);
   checkVague(scan, offset);
   checkGoalNumbers(scan, offset);
+  checkGoalAnti(scan, headings, offset);
   checkEmptyPhrases(scan, offset);
   checkNumbers(scan, offset);
   checkOptions(scan, headings, offset);
   checkTrace(scan, offset, tier, upstreamTokens);
+  checkTierStructure(headings, tier, explicitTier);
+  checkTierSections(headings, tier);
   checkDdl(scan, body, headings, offset);
   checkMarkers(scan, offset);
 }
