@@ -226,7 +226,24 @@ function usage() {
 }
 
 async function compareDsh(dshPath, commands) {
-	const entry = join(dshPath, "lib", "index.js");
+	// dsh-commands v0.4.0 起仓库只提交 TS 源码（lib/*.ts），运行时入口是构建产物 dist/index.js；
+	// 旧布局是 lib/index.js。优先用 dist，回退旧路径，兼容两种形态。
+	const candidates = [join(dshPath, "dist", "index.js"), join(dshPath, "lib", "index.js")];
+	let entry = null;
+	for (const candidate of candidates) {
+		try {
+			if ((await stat(candidate)).isFile()) {
+				entry = candidate;
+				break;
+			}
+		} catch {
+			// 不存在就试下一个
+		}
+	}
+	if (entry === null) {
+		fail(`找不到 dsh 插件入口：已尝试 ${candidates.join(" 与 ")}（v0.4.0 起源仓不含 dist，跨仓校验前需先 npm run build）`);
+		return;
+	}
 	let module;
 	try {
 		module = await import(pathToFileURL(entry).href);
