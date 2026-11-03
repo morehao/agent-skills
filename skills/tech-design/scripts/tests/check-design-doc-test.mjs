@@ -192,6 +192,30 @@ const edgeStandard = join(fixtures, 'edge-standard.md');
     `源码用：${used.join(',')}\n清单：${listedSet.join(',')}`);
 }
 
+// ⑫ 配图：轻量档不再跳过；按章节查（一张图不能放行全篇）；图豁免可显式收口
+{
+  const ddl = run([edgeDdlType, '--tier', 'light', '--json']);
+  let ddlCodes = [];
+  try { ddlCodes = JSON.parse(ddl.out).findings.map((f) => f.code); } catch { /* 断言会失败 */ }
+  ok('轻量档也要求数据模型配图', ddlCodes.includes('TD-NO-DIAGRAM'), ddl.out);
+
+  const partial = run([join(fixtures, 'diagram-partial.md'), '--tier', 'light', '--json']);
+  let pf = [];
+  try { pf = JSON.parse(partial.out).findings.filter((f) => f.code === 'TD-NO-DIAGRAM'); } catch { /* 断言会失败 */ }
+  ok('按章节查图：总体架构缺图仍报出，不因其它章节有图而放行',
+    pf.length === 1 && pf[0].msg.includes('总体架构'), partial.out);
+
+  const exempt = run([join(fixtures, 'diagram-exempt.md'), '--tier', 'light', '--json']);
+  let ef = [];
+  try { ef = JSON.parse(exempt.out).findings.filter((f) => f.code === 'TD-NO-DIAGRAM'); } catch { /* 断言会失败 */ }
+  ok('「图豁免：理由」可显式收口，不静默放过', ef.length === 0, exempt.out);
+
+  const std = run([edgeStandard, '--tier', 'standard', '--json']);
+  let stdCodes = [];
+  try { stdCodes = JSON.parse(std.out).findings.map((f) => f.code); } catch { /* 断言会失败 */ }
+  ok('标准档低于最小图集报 TD-DIAGRAM-MIN', stdCodes.includes('TD-DIAGRAM-MIN'), std.out);
+}
+
 // ———————————————————————————— 汇总 ————————————————————————————
 
 if (failures) {

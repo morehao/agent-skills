@@ -30,13 +30,13 @@ node skills/tech-design/scripts/tests/check-design-doc-test.mjs
 
 退出码：`0` 全部断言通过 / `1` 有断言失败。
 
-这个测试守的是门禁脚本本身：合规文档必须通过、**故意违规必须被拦住**（缺状态块、残留 `TBD`、`N/A` 空壳章节、备选无「不做」、缺追溯表、DDL 与正文两说）、`--strict` 只提升 warn、`note` 在任何模式下都不阻断、`--tier light` 不要求追溯表。夹具在 `skills/tech-design/scripts/tests/fixtures/`，其中 `good-full.md` 同时是「高质量完整档」的可参照样例。
+这个测试守的是门禁脚本本身：合规文档必须通过、**故意违规必须被拦住**（缺状态块、残留 `TBD`、`N/A` 空壳章节、备选无「不做」、缺追溯表、DDL 与正文两说、**按章节缺图与档位最小图集**）、`--strict` 只提升 warn、`note` 在任何模式下都不阻断、`--tier light` 只免追溯表（图照查）。夹具在 `skills/tech-design/scripts/tests/fixtures/`，其中 `good-full.md`（含 Mermaid 时序/ER 与同目录 `architecture.svg`）同时是「高质量完整档」的可参照样例。
 
 改了 `check-design-doc.mjs` 的规则或严重度，必须同步改夹具与断言——夹具不跟着改，等于把门禁调松而不自知。
 
 规则与严重度的**唯一清单**用 `node skills/tech-design/scripts/check-design-doc.mjs --list-rules` 查；文档里不抄枚举，回归测试会断言清单与源码里 `report()` 发出的码一一对应。
 
-`skills/tech-design/scripts/tests/behavior/baseline.md` 是**人工行为回归**（要跑模型，不进 CI）：技能新增或大改后按其中三个场景复跑，把新出现的偷懒话术追加到 `references/anti-rationalization.md`。
+`skills/tech-design/scripts/tests/behavior/baseline.md` 是**人工行为回归**（要跑模型，不进 CI）：技能新增或大改后按其中 B1–B5 场景复跑，把新出现的偷懒话术追加到 `references/anti-rationalization.md`。
 
 ## disk-cleanup 编码表校验
 
@@ -76,7 +76,7 @@ node scripts/check-disk-cleanup-codes.mjs
 ./scripts/opencode-install.sh --check     # 上面两项的 opencode 侧 + 命令软链
 ```
 
-三者都是只读，问题数 >0 退出 1。`skills-install.sh --check` 报「本源与本仓不一致」通常意味着「本仓改了但还没同步本源」——同步由维护者手动完成，agent 只报告差异、不代跑发布。要试“写”的动作，必须用临时目录（见 installation.md「改脚本注意」），别对着真实 `~/.agents` 跑。
+三者都是只读，问题数 >0 退出 1。`skills-install.sh --check` 报「本源与本仓不一致」通常意味着「本仓改了但还没发布到本源」。要试“写”的动作，必须用临时目录（见 installation.md「改脚本注意」），别对着真实 `~/.agents` 跑。
 
 ## project-insight 引擎
 

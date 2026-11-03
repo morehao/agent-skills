@@ -8,6 +8,11 @@
 
 ### Changed
 
+- **docs**: 移除「技能改动必须由维护者手动同步、agent 不得发布」的约定；保留「编辑源 → 本源 → 软链」的两层链路与 `skills-install.sh`，发布动作不再由仓库约定限制
+- **tech-design**: 配图从「有就好」升级为**配图下限**——轻量档有结构类章节即须有图、标准 ≥2、完整 ≥3；工作流改为「先填视图清单、先出骨架图再写正文」，交付报告带图清单
+- **tech-design**: 门禁 `TD-NO-DIAGRAM` 改为**按章节**检查（一张图不再放行全篇），新增 `TD-DIAGRAM-MIN`（档位最小图集）；轻量档不再跳过；`图豁免：<理由>` 可显式收口
+- **tech-design**: 评审 gate 新增「图与论证」lens；`good-full.md` 补齐 Mermaid 上下文/ER 与同目录 `architecture.svg` 范例
+- **tech-design**: 评审 gate 的必跑条件写进自检与红牌：标准档在跨团队 / SLA / 动契约或表结构时必跑，无 subagent 就顺序执行，**缺 `VERDICT` 即未完成**
 - **project-insight**: 代码引用从"每个论断强制"改为**按需证据**——正文以叙述为主，只有反直觉结论 / 数字 / 安全边界 / 用户指定核验才给一处出处，整篇零引用合法；新增「四给四不给」判据，不设引用配额
 - **project-insight**: `verify-references.mjs` 支持零引用文档直接通过（打印「无引用（允许）」），新增 `--stats` 密度自查（只报告不阻断）；新增 `tests/references-smoke.sh` 回归
 - **project-insight**: 同步 SKILL.md、11 个 references / 8 个类型规格与仓库文档（`docs/skills.md`、`docs/agents/*`），清除 #57 回退遗留的 `check-doc.mjs`、决策卡等失效描述
