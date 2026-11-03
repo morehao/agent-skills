@@ -1,0 +1,82 @@
+<svg viewBox="0 0 960 470" xmlns="http://www.w3.org/2000/svg" role="img">
+  <title>订单服务接入库存预占的分层架构</title>
+  <desc>下单 API 进入订单服务，订单服务同步调用库存服务做预占；订单库记录预占结果，库存库保存可售库存，支付回调后由库存域扣减兜底。</desc>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --layer: #f6f8fb;
+      --line: #c9d2e3;
+      --text: #1f2937;
+      --muted: #5b6779;
+      --accent: #2563eb;
+      --node: #ffffff;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f141b;
+        --layer: #151c26;
+        --line: #364252;
+        --text: #e5e9f0;
+        --muted: #9aa6b6;
+        --accent: #6ea8fe;
+        --node: #1b2431;
+      }
+    }
+    text {
+      font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      text-anchor: middle;
+      dominant-baseline: middle;
+    }
+    .bg { fill: var(--bg); }
+    .layer { fill: var(--layer); stroke: var(--line); stroke-width: 1.5; }
+    .layer-label { fill: var(--muted); font-size: 12px; letter-spacing: 2px; text-anchor: start; }
+    .node { fill: var(--node); stroke: var(--accent); stroke-width: 1.5; }
+    .node-text { fill: var(--text); font-size: 13px; font-weight: 600; }
+    .edge { stroke: var(--line); stroke-width: 1.8; fill: none; }
+    .edge-text { fill: var(--muted); font-size: 12px; }
+    .footnote { fill: var(--muted); font-size: 12px; }
+    .arrow-head { fill: var(--line); }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="arrow-head" d="M0 0 L10 5 L0 10 z" />
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="960" height="470" />
+
+  <g>
+    <rect class="layer" x="24" y="28" width="912" height="80" rx="10" />
+    <text class="layer-label" x="44" y="70">接入层</text>
+    <rect class="layer" x="24" y="128" width="912" height="80" rx="10" />
+    <text class="layer-label" x="44" y="170">应用层</text>
+    <rect class="layer" x="24" y="228" width="912" height="80" rx="10" />
+    <text class="layer-label" x="44" y="270">领域层</text>
+    <rect class="layer" x="24" y="328" width="912" height="90" rx="10" />
+    <text class="layer-label" x="44" y="378">资源层</text>
+  </g>
+
+  <g>
+    <path class="edge" d="M480 92 V148" marker-end="url(#arrow)" />
+    <path class="edge" d="M480 192 V248" marker-end="url(#arrow)" />
+    <path class="edge" d="M480 192 V214 H300 V352" marker-end="url(#arrow)" />
+    <path class="edge" d="M480 292 V314 H660 V352" marker-end="url(#arrow)" />
+    <text class="edge-text" x="494" y="122">下单请求</text>
+    <text class="edge-text" x="494" y="224">预占（200ms 超时）</text>
+  </g>
+
+  <g>
+    <rect class="node" x="380" y="48" width="200" height="44" rx="8" />
+    <text class="node-text" x="480" y="71">下单 API</text>
+    <rect class="node" x="380" y="148" width="200" height="44" rx="8" />
+    <text class="node-text" x="480" y="171">order-service（编排与降级）</text>
+    <rect class="node" x="380" y="248" width="200" height="44" rx="8" />
+    <text class="node-text" x="480" y="271">stock-service（预占）</text>
+    <rect class="node" x="200" y="352" width="200" height="44" rx="8" />
+    <text class="node-text" x="300" y="375">order DB</text>
+    <rect class="node" x="560" y="352" width="200" height="44" rx="8" />
+    <text class="node-text" x="660" y="375">stock DB</text>
+  </g>
+
+  <text class="footnote" x="480" y="446">支付回调后由 stock-service 扣减，属兜底链路，本期不改</text>
+</svg>

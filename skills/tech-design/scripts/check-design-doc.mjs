@@ -10,9 +10,9 @@
 //   warn   程序可判定，但属质量偏好                          → 默认 0；--strict 下 1
 //   note   作者侧口径，或程序判不了、只有人能判的事           → **任何模式下都是 0**，但默认打印（不静默）
 //
-// 它只做「机械那半」：占位符、空壳章节、缺状态块、无备选、追溯缺列、DDL 与正文两说。
-// 「这条 Rule 是否真可执行」「边界是否合理」这类语义判断归 references/review-gate.md 的评审者，
-// 不在这里猜——假阳性会让门禁被弃用。
+// 它只做「机械那半」：占位符、空壳章节、缺状态块、无备选、追溯缺列、DDL 与正文两说、
+// 按章节缺图与档位最小图集。「这条 Rule 是否真可执行」「边界是否合理」这类语义判断归
+// references/review-gate.md 的评审者，不在这里猜——假阳性会让门禁被弃用。
 //
 // 行号对齐（BMAD lint_spine 的做法）：扫描前把 fenced code block 换成**等量空行**，
 // 这样 mermaid / 源码树 / DDL 不产生假阳性，而报出的行号仍是文件真实行号；带 frontmatter 时再加偏移。
@@ -42,7 +42,8 @@ const RULES = [
   ['TD-SECTION-THIN', 'warn', '多个章节只有 1 行有效内容'],
   ['TD-SIZE', 'note', '超过 ~900 行，建议拆总纲 + 子方案'],
   ['TD-INTERNAL-REF', 'warn', '交付文档引用了技能内部文件或「本技能」'],
-  ['TD-NO-DIAGRAM', 'warn', '有架构/流程/数据模型章节但全文无图'],
+  ['TD-NO-DIAGRAM', 'warn', '架构/流程/数据模型类章节本节没有图（可写「图豁免：理由」显式豁免）'],
+  ['TD-DIAGRAM-MIN', 'warn', '低于档位最小图集（标准 ≥2、完整 ≥3）'],
   ['TD-ASSET-MISSING', 'warn', '图引用指向的本地文件不存在'],
   ['TD-VAGUE', 'warn', '无数字支撑的形容词（高性能/海量/显著…）'],
   ['TD-GOAL-NO-NUMBER', 'warn', '目标/验收里的提升/降低没有数字与口径'],
@@ -51,7 +52,7 @@ const RULES = [
   ['TD-OPTION', 'error', '缺备选章节，或备选里没有「不做/维持现状/否决」'],
   ['TD-TRACE', 'error', '缺决策↔需求追溯表，或某行缺承接需求/验证手段'],
   ['TD-TRACE-UPSTREAM', 'warn', '承接需求编号在上游文档里找不到'],
-  ['TD-TIER', 'note', '未指定 --tier 时按结构推断的档位（轻量跳过追溯/图，标准与完整共享机械项）'],
+  ['TD-TIER', 'note', '未指定 --tier 时按结构推断的档位（轻量只跳过追溯表；图按章节与最小图集照查）'],
   ['TD-TIER-STRUCTURE', 'warn', '--tier full 却缺完整档必备章节（摘要/部署/安全/可观测/成本）'],
   ['TD-GOAL-ANTI', 'warn', '目标与非目标缺少「反目标」（做成了也算失败的情形）'],
   ['TD-DDL-MISMATCH', 'warn', '附录 DDL 与正文字段表不一致（列名/类型/可空/默认值/索引）'],
@@ -690,21 +691,83 @@ function checkMarkers(scanLines, offset) {
   }
 }
 
-/** 有架构/流程/数据模型章节却一张图都没有：结构关系用文字写，读者要自己脑内连线 */
+// 这些章节的「活」是图：结构、边界、流转、关系。按节查，不再用全文布尔（一张图放行全篇）。
+// 命名是语义示例，按标题关键词识别；原则/选型/风险/DDL 等非视图章节排除。
+const DIAGRAM_SECTIONS = [
+  { key: 'context', label: '系统上下文', re: /系统上下文|上下文与边界/, tiers: ['full'] },
+  { key: 'architecture', label: '总体架构', re: /总体架构|系统架构|架构设计|架构图|架构概览|架构总览/, tiers: ['light', 'standard', 'full'] },
+  { key: 'flow', label: '核心流程', re: /核心流程|关键流程|主流程|业务流程|交互流程|核心链路|关键链路|时序设计|交互时序/, tiers: ['light', 'standard', 'full'] },
+  { key: 'model', label: '数据模型', re: /数据模型|数据库设计|表结构|数据表设计|领域模型/, tiers: ['light', 'standard', 'full'] },
+];
+const DIAGRAM_SECTION_SKIP = /原则|选型|对比|风险|决策|评审|清单|记录|演进|术语|成本|DDL|附录|迁移/;
+// 显式豁免也算收口：写「图豁免：<理由>」比无声跳过可审计；门禁只认这一种写法。
+// 反例：原样抄占位符「图豁免：<理由>」不算（必须写真实理由）。
+const DIAGRAM_EXEMPT = /图豁免\s*[:：]\s*(?!<|＜)\S/;
+const MIN_DIAGRAMS = { light: 0, standard: 2, full: 3 };
+const FENCE_DIAGRAM = /^\s*(?:```+|~~~+)\s*(?:mermaid|dot|plantuml)\b/i;
+const DECORATIVE = /logo|icon|badge|shield|avatar|sprite/i;
+
+/** 区间内是否有一张真图：mermaid/dot/plantuml 围栏、内联 SVG、或非装饰图片 */
+function hasDiagramIn(lines, from, to) {
+  for (let i = from; i < to; i += 1) {
+    const l = lines[i];
+    if (FENCE_DIAGRAM.test(l)) return true;
+    if (/<svg[\s>]/i.test(l)) return true;
+    const imgs = l.match(/!\[[^\]]*\]\(\s*[^)\s]+[^)]*\)/g);
+    if (imgs && imgs.some((m) => !DECORATIVE.test(m))) return true;
+  }
+  return false;
+}
+
+/** 全文图数（含 Mermaid 围栏、内联 SVG、非装饰图片各算一张） */
+function countDiagrams(lines) {
+  let n = 0;
+  for (const l of lines) {
+    if (FENCE_DIAGRAM.test(l)) { n += 1; continue; }
+    if (/<svg[\s>]/i.test(l)) { n += 1; continue; }
+    const imgs = l.match(/!\[[^\]]*\]\(\s*[^)\s]+[^)]*\)/g) || [];
+    n += imgs.filter((m) => !DECORATIVE.test(m)).length;
+  }
+  return n;
+}
+
+/**
+ * 结构类章节逐节查图 + 档位最小图集。
+ * 旧实现是「全文有一张图就放行」，结果架构章节纯文字、只在数据模型放一张 ER 也能过；
+ * 轻量档更是直接跳过。现在：每类章节各查各的，轻量档也不豁免（有这类章节就得有图或图豁免），
+ * 再按档位卡最低张数，避免「一张图交差」。
+ */
 function checkDiagrams(rawLines, scanLines, offset, tier) {
-  if (tier === 'light') return;
-  const text = rawLines.join('\n');
-  // mermaid/dot/plantuml 围栏（``` 或 ~~~）、内联 SVG、或真正用来表达结构的图片。
-  // logo/icon/badge 这类装饰图不算——否则一张图标就能骗过「必须有图」。
-  const fence = /(?:```|~~~)\s*(?:mermaid|dot|plantuml)/i.test(text);
-  const images = [...text.matchAll(/!\[[^\]]*\]\(\s*[^)\s]+[^)]*\)/g)]
-    .some((m) => !/logo|icon|badge|shield|avatar|sprite/i.test(m[0]));
-  const hasDiagram = fence || images || /<svg[\s>]/i.test(text);
-  if (hasDiagram) return;
-  const structural = scanLines.some((l) => /^#{1,6}\s*.*(架构|上下文|拓扑|流程|数据模型|部署|边界)/.test(l));
-  if (!structural) return;
-  report('warn', 'TD-NO-DIAGRAM', offset + 1,
-    '有架构/流程/数据模型类章节，但全文一张图都没有——结构与流转是图的活，纯文字等于让评审在脑内连线');
+  const headings = parseHeadings(scanLines);
+  const chosen = new Map(); // 同一类图只查最浅的一章，父子标题不重复报
+  for (let i = 0; i < headings.length; i += 1) {
+    const h = headings[i];
+    if (h.level === 1) continue; // 文档标题不是章节，别拿「XX 架构设计」当架构节
+    if (DIAGRAM_SECTION_SKIP.test(h.text)) continue;
+    for (const spec of DIAGRAM_SECTIONS) {
+      if (!spec.tiers.includes(tier)) continue;
+      if (!spec.re.test(h.text)) continue;
+      const prev = chosen.get(spec.key);
+      if (!prev || h.level < prev.level) chosen.set(spec.key, { spec, index: i, level: h.level });
+    }
+  }
+  const reported = new Set();
+  for (const { spec, index } of chosen.values()) {
+    if (reported.has(index)) continue; // 一个章节同时命中两类（如「总体架构与关键流程」）只报一次
+    const [from, to] = sectionRange(headings, index, rawLines.length);
+    const body = rawLines.slice(from, to).join('\n');
+    if (DIAGRAM_EXEMPT.test(body)) continue;
+    if (hasDiagramIn(rawLines, from, to)) continue;
+    reported.add(index);
+    report('warn', 'TD-NO-DIAGRAM', offset + headings[index].line + 1,
+      `「${headings[index].text}」是${spec.label}类章节，本节没有图——补图（结构类走 SVG，时序/线性/ER 走 Mermaid），或写「图豁免：<理由>」`);
+  }
+  const total = countDiagrams(rawLines);
+  const min = MIN_DIAGRAMS[tier] || 0;
+  if (total < min) {
+    report('warn', 'TD-DIAGRAM-MIN', offset + 1,
+      `${tier} 档至少 ${min} 张图（架构/上下文/时序/ER 合计），本文只有 ${total} 张——补图；若确实没有可画的结构/流转，按轻量档重评，别用单节「图豁免」绕过档位下限`);
+  }
 }
 
 /** 图引用必须落地：写了 ![](x.svg) 但文件不存在，评审看到的是断链 */
@@ -786,7 +849,7 @@ for (const target of targets) {
   const tier = tierOpt || inferTier(scan);
   if (!explicitTier) {
     report('note', 'TD-TIER', 1,
-      `未指定 --tier，按结构推断为「${tier}」；档位只影响机械检查范围（light 跳过追溯表/图），语义义务按所选档位由评审 gate 覆盖`);
+      `未指定 --tier，按结构推断为「${tier}」；档位只影响机械检查范围（light 只跳过追溯表，图按章节与最小图集照查），语义义务按所选档位由评审 gate 覆盖`);
   }
 
   checkStatusBlock(scan, offset);
