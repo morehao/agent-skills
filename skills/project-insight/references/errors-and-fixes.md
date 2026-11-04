@@ -49,12 +49,13 @@
 | 标签内 `<br>` 乱用导致预览挤压 | 换行统一用无斜杠 `<br>`、只用在引号标签内；长标签在语义断点补 `<br>`，跑 `check-mermaid.mjs` 使 `[MERMAID-WARN]` 收敛为 0。 |
 | 读源码文件无路径防护 | realpath 规范化 + 公共前缀白名单校验（`verify-references.mjs` 内已实现），对 kb_repo 同样适用。 |
 | 落盘后擅自 git commit | 只列变更清单，是否提交交给用户决定。 |
-| SVG 的 `<title>`/`<desc>` 带属性（`<title id="...">`） | 校验按**标签名**匹配，带属性容易被判 `[SVG-NO-META]`；统一写不带属性的 `<title>`/`<desc>`（`svg-maker` 模板已同步加注）。 |
+| SVG 的 `<title>`/`<desc>` 带属性（`<title id="...">`） | 已不再报错：`scan-narrative.mjs` 按标签名匹配、明确允许带属性（`diagram-design` 产物都带 id）。要保证的是两个标签都在，缺任一才报 `[SVG-NO-META]`。 |
 | SVG 根元素写了 `width`/`height` | 与同目录其它资产写法不一致，统一只保留固定 `viewBox`。 |
 | 长链 / 带分叉的流程仍用 mermaid，观感差被要求重画 | 命中复杂度阈值（节点 ≥12、含分叉汇合分区、纵向分层）一律用 SVG：见 [writing-guide.md](writing-guide.md)「图表约束」。 |
 | 小节里只有一张图、没有正文 | 图前补导读段、图后补"该看什么"；只有图会被 `[FIGURE-ONLY]` 提示。 |
 | 手绘 / 子代理产出的 SVG 看着对、边连错了 | 跑 `scripts/audit-svg-topology.mjs` 打印「起点 → 终点」与期望清单核对；这是唯一能程序化发现该错误的手段。 |
-| 用 rsvg 预览 SVG 全黑，误以为图坏了 | SVG 用 `var()` + 暗色适配，librsvg 不解析自定义属性；用 `scripts/render-svg-preview.mjs` 先展平字面色再出 PNG。 |
+| 用 rsvg 预览 SVG 全黑，误以为图坏了 | 只发生在自绘产物：`var()` + 暗色适配的写法 librsvg 不解析。用 `scripts/render-svg-preview.mjs` 先展平字面色再出 PNG；`diagram-design` 的产物是字面色值，不会全黑。 |
+| 结构图边连错却看不出来（`audit` 只报「端点全部贴合」） | 先确认审计是否识别到了节点：`diagram-design` 产物走推断模式，`[EDGE-UNPARSED]` 表示节点没识别；「未识别到任何连线」表示连线的 marker/class 写法没被认出来，别把这两种当成通过。 |
 | 重排章节后小节编号重复、交叉引用失效 | 跑 `scripts/scan-narrative.mjs`（`[HEADING-SEQ]` / `[XREF-DANGLING]`）；重排脚本不要用"只替换首位数字"的正则。 |
 | 量化指标没有实测数据，于是编造或只写"缺失" | 走三档口径：实测 / 可校准口径模型 / 显式不可复原（见 [quantification.md](quantification.md)）。 |
 | 把未完成项写成"刻意的设计选择" | 欠账一律落在「已知边界 / 开放问题」；叙述型的设计输入必须分级（证实 / 推断 / 不可复原）。 |

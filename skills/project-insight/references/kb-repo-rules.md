@@ -128,9 +128,9 @@ tags: [项目名, 技术域]
   - **时序类 → Mermaid**（`sequenceDiagram` 是 Mermaid 强项，**不要**升级为 SVG）。
   - **线性流程 / 简单拓扑 → Mermaid**：节点少、无交叉、位置不承载论据时，纯文本更易维护、可 diff。
   - 若一张图用文字/表格承载信息更多，**改用文字或表格**，不要为了凑图而画。
-  - **SVG 生成走 `svg-maker` skill**：选型判定为 SVG 的图，**调用 `svg-maker` skill 产出**（`architecture-svg` 用于软件/基础设施拓扑，`clean-svg` 用于概念/流程/生命周期），不要自行临时编写一套样式规范——那会与既有的图和其它项目的图产生风格漂移。**若当前环境无 `svg-maker`，先说明再退回自绘**，此时必须守住下方自包含约束。
+  - **SVG 生成走 `diagram-design` skill**：选型判定为 SVG 的图，**调用 `diagram-design` skill 产出**（按图型加载它的 `type-*.md`，软件/基础设施拓扑用架构或高层图型），导出用它的 `scripts/export_svg.py --system-fonts`（默认导出内联 Google Fonts `@import`，会命中下方自包含约束），不要自行临时编写一套样式规范——那会与既有的图和其它项目的图产生风格漂移。**若当前环境无该 skill，先说明再退回自绘**，此时必须守住下方自包含约束。
   - **SVG 资产约束**（无论走哪条路线都必须满足，`scripts/scan-narrative.mjs` 会校验）：自包含（内联 CSS）、零外部资源（无 `<image>`/远程字体/JS/渐变）、`<title>`+`<desc>` 齐备、固定 `viewBox`、可离线双击打开；放 md 同目录（或该目录下的 `assets/`），命名用**英文语义名**（不用 `01-` 序号前缀）。
-  - **SVG 写法一致性（校验按标签名匹配，别指望字面巧合）**：`<title>`/`<desc>` **不带属性**（写成 `<title id="...">` 会被 `scripts/scan-narrative.mjs` 判为缺失，已实际踩过）；根元素**只写 `viewBox`**，不写 `width`/`height`；调色板沿用 `:root` 变量 + `prefers-color-scheme` 暗色适配；先画 connector 再画 node；盒内文字留 ≥24px；中文标点统一全角（`：`、`（）`）。多图批量产出见 [figure-batch-workflow.md](figure-batch-workflow.md)。
+  - **SVG 写法一致性**：`<title>`/`<desc>` 必须存在（`scripts/scan-narrative.mjs` 按标签名匹配，**允许带属性**——`diagram-design` 产物带 id 也能过）；根元素**只写 `viewBox`**，不写 `width`/`height`（导出物已符合）；自绘时调色板沿用 `:root` 变量 + `prefers-color-scheme` 暗色适配（`diagram-design` 产物无此结构、深色是另一份文件，深浅色须在浏览器里各看一眼）；先画 connector 再画 node；盒内文字留 ≥24px；中文标点统一全角（`：`、`（）`）。多图批量产出见 [figure-batch-workflow.md](figure-batch-workflow.md)。
   - **一处编号只写一次**：正文不写「图 N」，SVG 的 `<title>` 里也不要写序号——正文一改结构编号就错位（本项目已踩过：删掉一章后图号整体失效）。确需编号时由正文按出现顺序统一生成。
 - **命名**：子文档**统一主题语义命名**（如 `architecture.md`、`deployment.md`、`data-model.md`、`memory-system.md`、`llm-route-system.md`），**不用 `01-`/`02-` 序号前缀**（个别存量项目的历史编号式命名不沿用）；图与引用它的 md 同目录。
 
@@ -166,7 +166,7 @@ node scripts/scan-narrative.mjs [--repo-root <解读目录>] <architecture-desig
 node scripts/check-narrative-all.mjs [--repo-root <解读目录>] [--preview] [--strict-topology] <architecture-design.md>
 ```
 
-- `scripts/audit-svg-topology.mjs`：逐张 SVG 打印「起点节点 → 终点节点」，核对边拓扑（`--expect <清单>` 可逐条断言；`--strict` 让提示级间隙也算失败）。**新画或重排图后必跑**——"看着对、边连错"只能靠它发现。端点间隙分两级：>40px 记 `[EDGE-DANGLING]`（错误），6-40px 记 `[EDGE-GAP]`（提示，标签式箭头可能有意留白）；独立文字锚点（`起点`/`终点` 这类标签）也算合法落点。
-- `scripts/render-svg-preview.mjs`：先把 `var()` 展平成字面色再出 PNG，供目视核验（librsvg 不解析 CSS 自定义属性，直接渲染会全黑）。
+- `scripts/audit-svg-topology.mjs`：逐张 SVG 打印「起点节点 → 终点节点」，核对边拓扑（`--expect <清单>` 可逐条断言；`--strict` 让提示级间隙也算失败）。**新画或重排图后必跑**——"看着对、边连错"只能靠它发现。两类产物识别口径不同：有 `class="node"/"edge"` 的走严格模式；`diagram-design` 导出的无 class 产物自动改走**几何推断**（含文本的矩形=节点，带 marker 且至少一端贴节点的 path/line=连线，两端都悬空的图例箭头按装饰忽略），输出中标「推断模式」。**解析不到节点即报 `[EDGE-UNPARSED]` 并退出 1**，不存在 0 节点 0 连线的假绿。端点间隙分两级：>40px 记 `[EDGE-DANGLING]`（错误），6-40px 记 `[EDGE-GAP]`（提示，标签式箭头可能有意留白）；独立文字锚点（`起点`/`终点` 这类标签）也算合法落点。
+- `scripts/render-svg-preview.mjs`：**自绘 SVG 的目视兜底**——先把 `var()` 展平成字面色再出 PNG（librsvg 不解析 CSS 自定义属性）。`diagram-design` 的产物是字面色值、无变量，直接看它的 HTML 源即可，不进必跑清单。
 
 **同源兜底不落盘**：不产出"段落↔锚点"映射表——落盘会在解读目录留下带行号的第二份文件，给完全隔离开破口。改为**每次改完叙述型文档重跑一次人工复核**：对文中每一条具体技术论断，回证据型文档找出对应锚点；找不到对应的论断就删掉、或补进证据型文档。此检查每次重跑、不保存结果。

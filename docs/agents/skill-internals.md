@@ -25,7 +25,7 @@ Git 工作流（message / commit-push / branch / pr-create / pr-merge / tag / ch
 `SKILL.md` = 路由 + 铁律（真源验证 / 图表校验 / 增量先读 / 不代提交 / 基线先行）。流程：**0 落点 → 0.5 基线 → 1 模式（全新 / 增量）→ 2 规模分流 → 3 探索 → 4 类型 → 5 定维度 → 6 写作 → 7 校验 → 8 索引**。
 
 - **基线**：`select-baseline.mjs`（稳定 tag > 稳定分支 > 默认分支 > 兜底矩阵）程序化选定；写作/校验必须同一棵基线工作树，基线写进 README 概览 + `CHANGELOG.md`。
-- **校验**：`verify-references.mjs`（含引用才跑，零引用自动通过；`--diff` 增量预检、`--stats` 密度自查）、`check-mermaid.mjs` 真解析、`scan-narrative.mjs` / `check-narrative-all.mjs`（叙述型文档）、`audit-svg-topology.mjs` + `render-svg-preview.mjs`（SVG）。
+- **校验**：`verify-references.mjs`（含引用才跑，零引用自动通过；`--diff` 增量预检、`--stats` 密度自查）、`check-mermaid.mjs` 真解析、`scan-narrative.mjs` / `check-narrative-all.mjs`（叙述型文档）、`audit-svg-topology.mjs`（SVG 边拓扑，含无 class 产物的几何推断）、`render-svg-preview.mjs`（自绘 SVG 的目视兜底）。
 - references：`kb-repo-rules.md`（落点与入库）、`version-baseline.md`（基线与陈旧裁决）、`flow-new.md` / `flow-incremental.md`、`large-repo-workflow.md`（大而深并行）、`dimension-triggers.md` + `project-types/*`（类型与关注面规格）、`analysis-guide.md`（Why>What / 权衡 / 四要素）、`writing-guide.md`（写作与图表）、`grounding-guide.md`（引用与真源校验）、`data-model-guide.md`、`figure-batch-workflow.md`、`narrative-design-template.md`、`quantification.md`、`errors-and-fixes.md`。
 - 落盘后不做 `git add/commit`；与 `project-wiki` 的分工是**产出性质不同**：本 skill 产设计判断（为什么、代价、可迁移），后者产系统说明（是什么、怎么用）。
 
@@ -70,11 +70,11 @@ references：`templates.md`（**叙事链 9 问与顺序依赖** + 三档骨架�
 
 澄清环节**先读后问 + ≤200 字回声**，再按「用途 → 规模 → 落点 → 硬约束 → 上游编号」最多问 5 个，提问前先过六类歧义扫描（功能/数据/交互/非功能/约束/术语）。未定项三记号必须区分：`[待核实]`（事实缺口，去取证）、`[待澄清]`（决策缺口，写默认倾向 + 拍板人）、`[假设]`（替用户定的默认值）。**标准档及以上必须给「决策与需求对照表」**（决策 ID / 承接需求 / 备选含不做 / 验证手段 / 状态 / 置信度），门禁的 `TD-TRACE` 会拦缺列或缺行。
 
-配图 **Mermaid 与 SVG 均为一等公民**，按图的职责选（结构/映射/对比/回边状态机 → SVG，走 `svg-maker` 产出；时序/线性小图/ER → Mermaid；节点 ≥12 或含分层/泳道/边界即改用 SVG），同一张图不做双份。**先图后文**：动笔前先填视图清单（章节 → 图 → 工具 → 承载关切 → 导读/落着）；下限为轻量档有结构类章节即须有图、标准 ≥2、完整 ≥3，由门禁 `TD-NO-DIAGRAM`（按章节）与 `TD-DIAGRAM-MIN`（档位下限）卡住，确不适用写 `图豁免：<理由>`。`scripts/check-mermaid.mjs` / `audit-svg-topology.mjs` / `render-svg-preview.mjs` 均为 project-insight 引擎的薄壳（单一真源）；SVG 结构图新画或重排后必须跑边拓扑审计（唯一能程序化发现「看着对、边连错」的手段），成稿含图必须校验，`[MERMAID-ERROR]` 与审计非 0 不静默放过。
+配图 **Mermaid 与 SVG 均为一等公民**，按图的职责选（结构/映射/对比/回边状态机 → SVG，走 `diagram-design` 产出；时序/线性小图/ER → Mermaid；节点 ≥12 或含分层/泳道/边界即改用 SVG），同一张图不做双份。**先图后文**：动笔前先填视图清单（章节 → 图 → 工具 → 承载关切 → 导读/落着）；下限为轻量档有结构类章节即须有图、标准 ≥2、完整 ≥3，由门禁 `TD-NO-DIAGRAM`（按章节）与 `TD-DIAGRAM-MIN`（档位下限）卡住，确不适用写 `图豁免：<理由>`。`scripts/check-mermaid.mjs` / `audit-svg-topology.mjs` / `render-svg-preview.mjs` 均为 project-insight 引擎的薄壳（单一真源）；SVG 结构图新画或重排后必须核对边拓扑（「看着对、边连错」是这类图最常见的隐性错误）——审计对无 class 的 `diagram-design` 产物会自动改走几何推断（含文本的矩形=节点、带 marker 且贴节点的线=连线），输出标「推断模式」；**`[EDGE-UNPARSED]` 或非 0 退出码一律视为未通过**，不要再当成「空跑即通过」；成稿含图必须校验，`[MERMAID-ERROR]` 与审计非 0 不静默放过。
 
-## svg-maker
+## diagram-design（外部，不 vendor）
 
-独立 SVG 图表生成（`SKILL.md` + `references/svg-template.md`）。
+图的生产者，来自上游 [`cathrynlavery/diagram-design`](https://github.com/cathrynlavery/diagram-design)，本仓不做任何改动、也不纳入 `skills/` 与安装脚本。内部结构（45 个 `type-*.md` + `primitives-core.md` + `style-guide.md` + 213 个示例 HTML）由上游维护，本仓只记三条验收口径：导出带 `--system-fonts`（否则 `[SVG-EXTERNAL]`）、产物无 `node/edge` 钩子（审计自动切几何推断，`[EDGE-UNPARSED]` 即未通过）、无 `:root`/`prefers-color-scheme`（深色看 HTML，不看预览图）。
 
 ## disk-cleanup
 

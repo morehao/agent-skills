@@ -97,7 +97,8 @@ node skills/project-insight/scripts/select-baseline.mjs <本地路径|远端URL>
 
 - `verify-references.mjs`：首参是源码仓库根（= 声明的基线工作树），不是知识库目录；五态输出，`UNVERIFIED`/`TRAVERSAL` 不静默放过。`--stats` 输出每篇引用数、密度与「单段多引用」段落，仅作自查。
 - `check-mermaid.mjs`：真解析所有 Mermaid 块；`[MERMAID-ERROR]` 必须修到全 `OK`。
-- `audit-svg-topology.mjs` / `render-svg-preview.mjs`：SVG 边拓扑审计与目视预览；新画或重排必跑。
+- `audit-svg-topology.mjs`：SVG 边拓扑审计，结构图新画或重排必跑。有 `class="node"/"edge"` 走严格模式，`diagram-design` 产物自动走几何推断（输出标「推断模式」）；`[EDGE-UNPARSED]`（识别不到节点）与非 0 退出码都必须修。
+- `render-svg-preview.mjs`：自绘 SVG 的目视兜底（展平 `var()` 后出 PNG）。`diagram-design` 产物直接看其 HTML，不进必跑清单。
 - `scan-narrative.mjs` / `check-narrative-all.mjs`：叙述型 `architecture-design.md` 的零代码索引、标题编号与交叉引用校验；没有该文档时不跑。
 - `select-baseline.mjs`：稳定 tag > 稳定分支 > 默认分支 > 兜底矩阵；退出码 `2` = 需用户确认/选择。
 
