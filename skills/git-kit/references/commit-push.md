@@ -42,3 +42,4 @@
 - message 不含 `"`（防引号配对损坏）
 - 起点为稳定分支时必须落在新建工作分支上（`git branch --show-current` 不再是那个稳定分支）才算通过；**直接提交到稳定分支 = 失败**
 - `nothing to commit` / `git add` 无内容 → 如实报告，不继续
+- 回显一行交接信息（本地可算，不联网）：`BRANCH=<当前分支> BASE=<origin/HEAD 指向的默认分支，取不到写 unknown> AHEAD=<BASE..HEAD 的提交数>`

@@ -40,7 +40,7 @@
 
 - `installation.md` — opencode / dsh 接入、命令契约校验、新增命令。
 - `skills.md` — 技能定位与分工。
-- `git-kit.md` — 入口与路由、九个分支、稳定分支唯一定义、提交 → PR → 合并、发版段。刻意保持单篇：它是一条链路读下来的流程文档。
+- `git-kit.md` — 入口与路由、十个分支、稳定分支唯一定义、提交 → PR → 合并、发版段。刻意保持单篇：它是一条链路读下来的流程文档。
 - `agents/` — 本目录，agent 的按需加载细则。
 - 图放 `docs/assets/`：分层结构用 SVG，流程/时序/状态用 Mermaid；新画或重排的 SVG 必须跑 `skills/tech-design/scripts/audit-svg-topology.mjs`，Mermaid 必须跑 `skills/tech-design/scripts/check-mermaid.mjs` 且零 warn。
 

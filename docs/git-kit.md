@@ -39,7 +39,7 @@ flowchart TD
 | 情形 | 处理 |
 |---|---|
 | `tag` 与 `release` 都含「tag」 | 看是否在**合并之后**、是否要盯发布结果：只要一个标签 → `tag`；要打 tag 并跟踪后效 → `release` |
-| 一个请求同时含多步 | 按链路顺序连续执行（如「改了代码，提交并提个 PR」→ `commit-push` → `pr-create`），不拆成多次询问 |
+| 一个请求同时含多步 | 按链路顺序连续执行（如「改了代码，提交并提个 PR」→ `commit-push` → `pr-create`），不拆成多次询问；顺序的唯一真源是 `SKILL.md` 的「链路」小节 |
 | 信号不足 | **不猜**：停下来问。合并、删除、打 tag 都难回收，宁可多一轮 |
 
 ## 十个分支速查
@@ -99,7 +99,7 @@ flowchart LR
     PM -.->|head 是稳定分支| KEEP[保留 head]
 ```
 
-`commit-push` 结束时给出 PR 提示（分支名、目标分支、可比对的提交），`pr-create` 用它建 PR；`pr-merge` 结束后切回主干并 `pull --ff-only`，让本地立刻处在可继续开发的状态。
+`commit-push` 结束时回显一行交接信息 `BRANCH` / `BASE` / `AHEAD`（分支名、`origin/HEAD` 指向的默认分支、可比对的提交数）；`pr-create` 的目标分支仍自己探测，`BASE` 只作参考。`pr-merge` 结束后切回主干并 `pull --ff-only`，让本地立刻处在可继续开发的状态。
 
 ### commit-push：在稳定分支上自动分叉
 
@@ -119,7 +119,7 @@ flowchart TD
     G --> H[git commit 并 push origin HEAD]
     H --> I{出现 PUSH_OK}
     I -->|否| I1[停并报原始错误]
-    I -->|是| J[回显分支 提交 与 PR 提示]
+    I -->|是| J[回显分支 提交 与交接行]
 ```
 
 三个细节：
