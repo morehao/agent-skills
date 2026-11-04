@@ -42,7 +42,7 @@ Git 工作流的唯一真源。`SKILL.md` 只做意图路由：先判断命中�
 - **先定基线**：`select-baseline.mjs` 按稳定 tag > 稳定分支 > 默认分支程序化选定，写作/校验同一棵树，基线写进产物；
 - **叙述优先、引用按需**：正文写设计判断与权衡；代码引用只给反直觉结论、具体数字、安全边界、用户指定核验这几类关键论断，整篇零引用合法；
 - **凡引用必验**：落盘的 `文件:行号` 经 `verify-references.mjs` 重定位（首末行锚点），`--stats` 可查密度（只报告不阻断），失败标 `[UNVERIFIED]`；
-- **图与表承载过程**：启动流程/请求链路用 Mermaid 或 SVG（走 `svg-maker`），落盘前 `check-mermaid.mjs` 真解析、SVG 跑边拓扑审计；
+- **图与表承载过程**：启动流程/请求链路用 Mermaid 或 SVG（走 `diagram-design`），落盘前 `check-mermaid.mjs` 真解析、SVG 跑边拓扑审计；
 - **类型规格补关注面**：数据模型 / 部署 / 智能体 / 框架等由类型判据触发，子文档按关注面拆分；
 - 增量模式以 `git diff` / release notes 为唯一依据，维护独立 `CHANGELOG.md`；落盘后不做 `git add/commit`。
 
@@ -80,9 +80,15 @@ Git 工作流的唯一真源。`SKILL.md` 只做意图路由：先判断命中�
 
 配图 Mermaid 与 SVG 均为一等公民，**先图后文**（先填视图清单，再写正文）；`check-mermaid.mjs` / `audit-svg-topology.mjs` / `render-svg-preview.mjs` 是 project-insight 引擎的薄壳。
 
-## svg-maker
+## diagram-design（外部）
 
-生成自包含、纯 SVG 的架构图、流程图与概念图，单个 `.svg` 文件内联 CSS，可双击离线打开。两种输出模式：`architecture-svg`（软件/云/基础设施拓扑）与 `clean-svg`（概念、流程、生命周期、简单数据流）。模板在 `references/svg-template.md`。
+图由上游技能 [`diagram-design`](https://github.com/cathrynlavery/diagram-design) 产出：45 种图型（架构 / 时序 / 状态机 / 桑基 / 瀑布 / 箱线 / 沃德利…），先把图画成自包含 HTML + 内联 SVG，再用它自带的 `scripts/export_svg.py` 导出成 `.svg` 落进文档。**本仓不 vendor、不改它**，按上游方式自行安装；本仓只规定「用哪张图、落地到哪、怎么验收」。
+
+选它之前先认三条实测边界（本仓门禁的结论，不是它的缺陷）：
+
+- 导出必须带 `--system-fonts`。默认导出内联 Google Fonts `@import`，会命中 `scan-narrative` 的 `[SVG-EXTERNAL]`；带上之后字体退回系统字族，「编辑感」主要剩版式与连线纪律。
+- 产物没有 `class="node"/"edge"` 钩子，`audit-svg-topology.mjs` 会自动改走**几何推断**（含文本的矩形当节点、带 marker 且贴节点的线当连线，图例示例箭头按装饰忽略），输出标注「推断模式」；解析不到节点会报 `[EDGE-UNPARSED]` 并退出 1，不会空跑判通过。
+- 产物没有 `:root` 变量与 `prefers-color-scheme`（深色是另一份文件），`render-svg-preview.mjs --dark` 对它没有意义——深浅色都在浏览器里看 HTML。
 
 ## disk-cleanup
 
@@ -108,5 +114,5 @@ Git 工作流的唯一真源。`SKILL.md` 只做意图路由：先判断命中�
 | 从开源项目里学架构设计，要判断与可迁移模式 | `project-insight` |
 | 给团队写一份不读源码也能看懂的 Wiki | `project-wiki` |
 | 写技术方案 / 设计文档 | `tech-design` |
-| 只要一张独立图表 | `svg-maker` |
+| 只要一张独立图表（45 种图型） | `diagram-design`（外部） |
 | 磁盘满了 / 要清缓存与旧会话 | `disk-cleanup` |

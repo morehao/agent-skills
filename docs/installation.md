@@ -45,6 +45,10 @@
 | dsh | `~/.dsh/skills`（`DSH_HOME`） | dsh 本身也扫本源；这层链让技能在一处可查、可肉眼核对 |
 | claude 等 | `~/.claude/skills`（`CLAUDE_HOME`） | `--agents claude` 时才建 |
 
+## 外部技能：diagram-design
+
+配图技能 `diagram-design`（上游 [cathrynlavery/diagram-design](https://github.com/cathrynlavery/diagram-design)）**不随本仓发布，也不由 `skills-install.sh` / `skills-fanout.sh` 管理**：按上游的插件方式安装（Claude Code / Codex / Cursor 等市场，或直接把技能目录放进任一 agent 的 skills 目录）。因此两个 `--check` 都不覆盖它；本仓只依赖「它已装好」这一前提，缺了就在图任务开始时先说明，再退回自绘并守住各技能里的图约束。
+
 ## opencode
 
 配置根默认 `~/.config/opencode/`，可用 `OPENCODE_CONFIG` 覆盖。命令清单、参数与「命令 → skill 分支」映射见 [opencode 指令集](../commands-opencode/README.md)。
@@ -74,7 +78,7 @@
 npx -y skills add morehao/agent-skills --skill git-kit --skill handoff --skill disk-cleanup \
   -g -a universal -y
 mkdir -p ~/.config/opencode/skills
-for name in git-kit handoff disk-cleanup project-insight project-wiki svg-maker tech-design; do
+for name in git-kit handoff disk-cleanup project-insight project-wiki tech-design; do
   ln -sfn ~/.agents/skills/"$name" ~/.config/opencode/skills/"$name"
 done
 
@@ -150,7 +154,7 @@ dsh 的斜杠命令由独立插件提供：源码在 [morehao/dsh-commands](http
 
 ```bash
 mkdir -p ~/.dsh/skills
-for name in git-kit handoff disk-cleanup project-insight project-wiki svg-maker tech-design; do
+for name in git-kit handoff disk-cleanup project-insight project-wiki tech-design; do
   ln -sfn ~/.agents/skills/"$name" ~/.dsh/skills/"$name"
 done
 ```

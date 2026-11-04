@@ -1,6 +1,6 @@
 ---
 name: tech-design
-description: 编写并落盘「技术方案 / 技术设计文档」（design doc）：总体架构、API 方案、数据库设计、技术选型与对比、性能与容量、安全方案、系统重构与微服务拆分、数据迁移等。当用户明确要求产出文档（"写个方案""写个技术方案/设计文档""设计XX系统或模块""架构怎么设计""XX怎么实现""技术选型/选个型""数据库/接口怎么设计""给个方案""把这个方案落成文档""评审一下这个方案"），或要为已有系统补方案文档时使用。产出物是结构完整、量化、可执行、可评审的 Markdown 文档，交付前跑机械门禁 `check-design-doc.mjs` 与独立评审 gate；**已有方案文档要评审/挑错时进入评审模式**（只出 VERDICT 与 findings，不重写文档）；若用户只要独立可打开的 SVG 图表文件（架构图/拓扑图交付物），应改用 svg-maker；要解读开源项目源码走 project-insight。
+description: 编写并落盘「技术方案 / 技术设计文档」（design doc）：总体架构、API 方案、数据库设计、技术选型与对比、性能与容量、安全方案、系统重构与微服务拆分、数据迁移等。当用户明确要求产出文档（"写个方案""写个技术方案/设计文档""设计XX系统或模块""架构怎么设计""XX怎么实现""技术选型/选个型""数据库/接口怎么设计""给个方案""把这个方案落成文档""评审一下这个方案"），或要为已有系统补方案文档时使用。产出物是结构完整、量化、可执行、可评审的 Markdown 文档，交付前跑机械门禁 `check-design-doc.mjs` 与独立评审 gate；**已有方案文档要评审/挑错时进入评审模式**（只出 VERDICT 与 findings，不重写文档）；若用户只要独立可打开的 SVG 图表文件（架构图/拓扑图交付物），应改用 diagram-design；要解读开源项目源码走 project-insight。
 ---
 
 # Tech Design（技术方案 / 技术设计文档）
@@ -45,7 +45,7 @@ description: 编写并落盘「技术方案 / 技术设计文档」（design doc
 三条出图纪律：
 
 - **先图后文**：先把上下文、架构、关键流程三张骨架图定下来，正文围着图写；图改了正文跟着改，别让图成为文末插图。
-- **按职责选工具**：结构/映射/对比/回边状态机走 SVG（`svg-maker` 产出，落成文档同目录 `.svg`）；时序/线性小图/ER 走 Mermaid。同一张图只做一种形式（见 `references/quality-bar.md`）。
+- **按职责选工具**：结构/映射/对比/回边状态机走 SVG（`diagram-design` 产出后导出为文档同目录 `.svg`）；时序/线性小图/ER 走 Mermaid。同一张图只做一种形式（见 `references/quality-bar.md`）。
 - **图必须被正文包裹**：图前有导读段（这张图是什么、为什么存在），图后有落着（该看什么、边界或代价是什么）；图里每个节点正文都要有解释。
 
 ## 红牌（出现这些念头就停下）
@@ -65,8 +65,8 @@ description: 编写并落盘「技术方案 / 技术设计文档」（design doc
 
 ## 与其它技能的边界
 
-- 文档内配图 → Mermaid 或 SVG，按图的**职责**选（规范见 `references/quality-bar.md`）；结构类/映射类/对比类/回边状态机走 **SVG**，由 `svg-maker` 产出。
-- 用户只要**独立 SVG 图表文件**（不是文档配图）→ 交付物就是该 `.svg`，同样走 `svg-maker`。
+- 文档内配图 → Mermaid 或 SVG，按图的**职责**选（规范见 `references/quality-bar.md`）；结构类/映射类/对比类/回边状态机走 **SVG**，由 `diagram-design` 产出（导出为 `.svg`）。
+- 用户只要**独立 SVG 图表文件**（不是文档配图）→ 交付物就是该 `.svg`，同样走 `diagram-design`（导出 `.svg` 后交付）。
 - 深度解读开源项目源码 / Git 操作 → 分别走 `project-insight` / `git-kit`。
 
 ## 工作流
@@ -80,7 +80,7 @@ description: 编写并落盘「技术方案 / 技术设计文档」（design doc
 6. **对账** → 有上游文档（PRD / feature spec / API spec / ADR）时，先把上游需求逐条映射成「决策 + 验证手段」，映射不上的标 `[未覆盖]`；需求编号沿用上游既有体系。没有上游就自建编号并在「假设与约束」声明（`templates.md` 追溯表）。
 7. **推理** → 按「叙事链」把 9 问问清楚再成文（`references/templates.md`）；发现阶段允许回溯，推翻前面的分解很正常。
 8. **量化** → 关键论断的数字与口径（`references/quantification.md`），与撰写同步做。
-9. **配图 + 撰写** → **先填视图清单、先出骨架图，再写正文**（图是论证骨架，不是文末插图）：结构类图先调 `svg-maker` 落 `.svg`，时序/线性/ER 写 Mermaid，每张图按「导读段 → 图 → 落着」落位；下限见「配图下限」。全程守 `references/quality-bar.md` 的红线与反模式；较大方案可先只出「问题定义 + 约束 + 目标」请相关人（含宿主/调用方 owner）对齐，再展开方案。
+9. **配图 + 撰写** → **先填视图清单、先出骨架图，再写正文**（图是论证骨架，不是文末插图）：结构类图先调 `diagram-design` 导出 `.svg`，时序/线性/ER 写 Mermaid，每张图按「导读段 → 图 → 落着」落位；下限见「配图下限」。全程守 `references/quality-bar.md` 的红线与反模式；较大方案可先只出「问题定义 + 约束 + 目标」请相关人（含宿主/调用方 owner）对齐，再展开方案。
 10. **落盘 + 自检** → 按「交付与收尾」落盘，再逐条过「交付前自检」，不通过就改。
 11. **门禁 + 评审 gate** → 先跑 `scripts/check-design-doc.mjs` 清机械项，再按 `references/review-gate.md` 跑独立评审（完整档必跑、标准档建议）。
 12. **报告** → 见「交付与收尾」的报告格式。
@@ -207,8 +207,9 @@ description: 编写并落盘「技术方案 / 技术设计文档」（design doc
    ```bash
    # Mermaid：真解析
    node <本skill目录>/scripts/check-mermaid.mjs <生成文件>
-   # SVG：边拓扑审计（结构类图新画或重排后必跑）+ 目视预览
+   # SVG：边拓扑审计（结构类图新画或重排后必跑；diagram-design 产物自动走几何推断）
    node <本skill目录>/scripts/audit-svg-topology.mjs [--expect 期望边清单.txt] <图.svg>...
+   # SVG：目视预览（可选；自绘兜底时才需要，diagram-design 的产物直接看它的 HTML）
    node <本skill目录>/scripts/render-svg-preview.mjs <图.svg>...
    # 常见注册位置：~/.agents/skills/tech-design/（opencode 与 dsh 的统一技能安装位）
    ```
@@ -223,7 +224,7 @@ description: 编写并落盘「技术方案 / 技术设计文档」（design doc
 8. 报告格式：`✅ 技术方案文档已生成: <文件路径>`，并补四样：① 本次落点/场景/档位/专题；② **门禁原始输出末行 + gate 的 `VERDICT`**（贴原文，不写「应该没问题」；没跑 gate 就写清为什么）；③ **图清单**：共 N 张（Mermaid a / SVG b），每张落在哪一节（SVG 给相对路径）；④ 最需要评审拍板的 1-2 个点。
 9. 按场景与档位生成评审检查清单（真源 `references/quality-bar.md`），作为文末小节或口头收口。
 10. **不自动打开文件**（dsh Web 无 `code` 语义）。仅当用户明确要求且本机确有编辑器时才尝试，失败即提示手动打开路径。
-11. 落盘后不做 `git add` / `git commit`。用户接着要独立 SVG 架构图或源码级验证时，分别提示 `svg-maker` / `project-insight`。
+11. 落盘后不做 `git add` / `git commit`。用户接着要独立 SVG 架构图或源码级验证时，分别提示 `diagram-design` / `project-insight`。
 
 ### 交付前自检（逐条过，任一不过就改）
 

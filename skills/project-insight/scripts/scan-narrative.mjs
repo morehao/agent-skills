@@ -255,11 +255,14 @@ function main() {
     hits.push(...struct.hits);
     warns.push(...struct.warns);
 
-    // SVG 资产
-    const dir = repoRoot ? resolve(repoRoot) : dirname(resolve(f));
+    // SVG 资产：先按 md 所在目录解析（常规写法），解析不到再退回 repo-root。
+    // 旧实现带 --repo-root 时一律按仓库根解析，`docs/` 下的 `assets/x.svg` 会被误报缺失。
+    const docDir = dirname(resolve(f));
+    const fallbackDir = repoRoot ? resolve(repoRoot) : null;
     for (const m of text.matchAll(/!\[[^\]]*\]\(([^)]+\.svg)\)/g)) {
       const rel = m[1];
-      const p = resolve(dir, rel);
+      let p = resolve(docDir, rel);
+      if (!existsSync(p) && fallbackDir) p = resolve(fallbackDir, rel);
       const line = text.slice(0, m.index).split('\n').length;
       if (!existsSync(p)) { hits.push({ id: 'SVG-MISSING', level: 'error', file: f, line, text: rel, why: '引用的 SVG 资产不存在' }); continue; }
       hits.push(...scanSvg(p, f, line));

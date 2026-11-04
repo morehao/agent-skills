@@ -35,7 +35,7 @@ node scripts/check-opencode-commands.mjs
 ## 目录
 
 - `commands-opencode/` — opencode 斜杠指令（`git/*.md` + `handoff.md` + `cleanup.md`）
-- `skills/` — 技能：git-kit、handoff、project-insight、project-wiki、tech-design、svg-maker、disk-cleanup
+- `skills/` — 技能：git-kit、handoff、project-insight、project-wiki、tech-design、disk-cleanup
 - `docs/` — 安装、技能、git-kit 工作流
 - `scripts/` — 发布（`skills-install.sh`）+ 分发（`skills-fanout.sh`）+ opencode / dsh 接入 + 命令契约校验
 
@@ -67,8 +67,9 @@ node scripts/check-opencode-commands.mjs
 | [`project-insight`](skills/project-insight/SKILL.md) | 开源项目深度解读：架构解构 + 设计判断，代码引用按需、凡引用必验 |
 | [`project-wiki`](skills/project-wiki/SKILL.md) | 面向不读源码的读者写 Wiki：散文 + 图 + 表，代码密度极低 |
 | [`tech-design`](skills/tech-design/SKILL.md) | 技术方案：档位 × 场景 × 专题三轴，取证先于动笔；含既有文档评审模式 |
-| [`svg-maker`](skills/svg-maker/SKILL.md) | 生成自包含、可离线打开的 SVG 图 |
 | [`disk-cleanup`](skills/disk-cleanup/SKILL.md) | 磁盘空间回收与本地数据瘦身：先查询、用户勾选后只删所选，用户数据只报告 |
+
+> 配图另用**外部技能** [`diagram-design`](https://github.com/cathrynlavery/diagram-design)（45 种图型，HTML + 内联 SVG）：本仓不 vendor、不改它，按上游方式自行安装。
 
 定位、关键规则与相互分工见 [技能说明](docs/skills.md)。
 
@@ -77,7 +78,7 @@ node scripts/check-opencode-commands.mjs
 | 文档 | 内容 |
 |---|---|
 | [安装与维护](docs/installation.md) | opencode / dsh 接入、目录约定、契约校验、新增命令 |
-| [技能说明](docs/skills.md) | 七个技能的定位、关键规则与分工 |
+| [技能说明](docs/skills.md) | 六个技能的定位、关键规则与分工（配图外部技能另记） |
 | [git-kit 工作流](docs/git-kit.md) | 入口与路由、提交 → PR → 合并、发版 |
 | [opencode 指令集](commands-opencode/README.md) | 指令格式、参数、映射与校验 |
 | [AGENTS.md](AGENTS.md) | 给编码 agent 的硬约束与按需加载地图（细则在 [`docs/agents/`](docs/agents/)） |

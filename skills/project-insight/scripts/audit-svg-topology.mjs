@@ -14,25 +14,34 @@
 // 期望清单格式（每行一条，`#` 起头为注释，`->` 两侧为节点标签）：
 //   客户端上传文档 -> 原文落对象存储
 //
-// 退出码：0 = 端点全部贴合且（若给了期望清单）完全一致；1 = 存在悬空端点或期望不符。
+// 退出码：0 = 端点全部贴合且（若给了期望清单）完全一致；1 = 解析不到节点、存在悬空端点，或期望不符。
 //
 // 判定口径：
-//   - 节点：class 含 `node` 的 rect / polygon / polyline / path / ellipse / circle；
-//           其标签取盒内**最靠上**的文本（通常是主标签行），没有文本时记 `?`
-//   - 锚点 = 节点盒 ∪ **独立文字锚点**（如「起点」「终点」「终态」这类标签式箭头端点）；
+//   - 节点（严格模式）：class 含 `node` 的 rect / polygon / polyline / path / ellipse / circle；
+//   - 节点（推断模式）：**无任何 class 钩子的产物**（如 diagram-design 导出的 SVG）按几何推断——
+//          含文本的 rect，且高 ≥28、宽 ≥40、非虚线、填充非 none、填充 alpha ≥0.1 者视为节点盒；
+//          填充极淡或虚线的大框视为分区容器，图例色块因尺寸过小被排除。推断结果逐文件标注。
+//   - 标签取盒内**最靠上**的文本（通常是主标签行），没有文本时记 `?`
+//   - 锚点 = 节点盒 ∪ **独立文字锚点**（如「起点」「终点」这类标签式箭头端点）；
 //     端点贴合任一锚点即算合法，所以标签式画法不会误报
-//   - 连线：class 含 `edge` 的 path；起点 = 路径首个坐标，终点 = 末尾坐标
+//   - 连线（严格模式）：class 含 `edge` 的 path / line；起点 = 路径首个坐标，终点 = 末尾坐标。
+//          直线 `<line class="edge">` 额外要求带 marker 且至少一端贴在节点盒 40px 内，
+//          否则按图例示例箭头忽略（图例里的线段与真连线写法完全一致，这是唯一可靠的区分方式）。
+//   - 连线（推断模式）：带 `marker-end` 的 path / line，且**至少一端贴合某个节点盒（≤8px）**；
+//          两端都不贴节点的视为图例箭头/装饰，不计入连线（数量会在输出里单列）
 //   - 端点与最近锚点距离 > 阈值（默认 6px，可用 --tolerance 调整）视为悬空
 //   - 无标签且与某个有标签形状重叠的形状（如圆柱体顶面椭圆）按装饰忽略
+//   - **解析不到任何节点时一律 return 1**：0 节点 0 连线不再算通过（曾出现「空跑判通过」的假绿）
 //
 // 已知限制：不解析 `transform` 与嵌套坐标系；如存在 transform，节点盒与端点会落在不同
-// 坐标系里，结果不可信（脚本会就此告警）。
+// 坐标系里，结果不可信（脚本会就此告警）。推断模式对「图例用带箭头的真实线段」这类写法
+// 会漏计，需要在图例里改用无 marker 的线段。
 
 import { readFileSync, existsSync } from 'node:fs';
 import { basename } from 'node:path';
 
 const TOL = 6;
-const CMD_RE = /[MLHVAZmlhvaz]|-?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g;
+const CMD_RE = /[MLHVAZQCTSmlhvazqcts]|-?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g;
 
 function attr(attrs, name) {
   const m = new RegExp(`\\b${name}\\s*=\\s*"([^"]*)"`).exec(attrs);
@@ -65,6 +74,25 @@ function walkPath(d) {
       for (let k = 0; k + 6 < nums.length; k += 7) {
         x = rel ? x + nums[k + 5] : nums[k + 5];
         y = rel ? y + nums[k + 6] : nums[k + 6];
+        pts.push([x, y]);
+      }
+    } else if (cmd === 'Q' || cmd === 'S') {
+      // 二次贝塞尔 / 平滑二次：端点取每组最后两个数（圆角折线大量使用 Q）
+      for (let k = 0; k + 3 < nums.length; k += 4) {
+        x = rel ? x + nums[k + 2] : nums[k + 2];
+        y = rel ? y + nums[k + 3] : nums[k + 3];
+        pts.push([x, y]);
+      }
+    } else if (cmd === 'C') {
+      for (let k = 0; k + 5 < nums.length; k += 6) {
+        x = rel ? x + nums[k + 4] : nums[k + 4];
+        y = rel ? y + nums[k + 5] : nums[k + 5];
+        pts.push([x, y]);
+      }
+    } else if (cmd === 'T') {
+      for (let k = 0; k + 1 < nums.length; k += 2) {
+        x = rel ? x + nums[k] : nums[k];
+        y = rel ? y + nums[k + 1] : nums[k + 1];
         pts.push([x, y]);
       }
     } else if (cmd === 'Z') {
@@ -127,13 +155,45 @@ function parseSvg(svg) {
     const box = bboxOf(m[1], m[2]);
     if (box) nodes.push({ box, label: '?' });
   }
+  const fontSizes = parseFontSizes(svg);
   const texts = [];
   const tRe = /<text\b([^>]*)>([\s\S]*?)<\/text>/g;
   while ((m = tRe.exec(svg))) {
     const x = Number(attr(m[1], 'x') ?? NaN), y = Number(attr(m[1], 'y') ?? NaN);
     const content = m[2].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+    const cls = (attr(m[1], 'class') || '').split(/\s+/)[0];
+    const styleFs = /font-size\s*:\s*([\d.]+)px/.exec(attr(m[1], 'style') || '');
+    const fs = Number(attr(m[1], 'font-size'))
+      || Number(styleFs && styleFs[1])
+      || fontSizes.get(cls)
+      || 14;
     if (content && !Number.isNaN(x) && !Number.isNaN(y)) {
-      texts.push({ x, y, text: content, cls: (attr(m[1], 'class') || '').split(/\s+/)[0], attrs: m[1] });
+      texts.push({ x, y, text: content, cls, fs, attrs: m[1] });
+    }
+  }
+  // 无 class 钩子的产物（如 diagram-design 导出的 SVG）按几何推断节点：
+  // 含文本、且足够大的矩形；淡色/虚线大框是分区容器，遮罩与图例色块尺寸不够
+  const inferred = nodes.length === 0;
+  if (inferred) {
+    const seenBox = new Set();
+    const rectRe = /<rect\b([^>]*?)\/?>/g;
+    let rm;
+    while ((rm = rectRe.exec(svg))) {
+      const box = bboxOf('rect', rm[1]);
+      if (!box) continue;
+      const [x, y, w, h] = box;
+      if (w < 40 || h < 28) continue;
+      if (/dasharray\s*=\s*"[^"]*\d/.test(rm[1])) continue;
+      const fill = (attr(rm[1], 'fill') || '').trim().toLowerCase();
+      if (!fill || fill === 'none' || fill === 'transparent') continue;
+      const alpha = Number((/rgba\([^)]*,\s*([\d.]+)\s*\)/.exec(fill) || [])[1]);
+      if (fill.startsWith('rgba') && !(alpha >= 0.1)) continue;
+      const hasLabel = texts.some((t) => t.x >= x - 4 && t.x <= x + w + 4 && t.y > y + 8 && t.y < y + h + 4);
+      if (!hasLabel) continue;
+      const key = `${x},${y},${w},${h}`;
+      if (seenBox.has(key)) continue;
+      seenBox.add(key);
+      nodes.push({ box, label: '?' });
     }
   }
   const usedTexts = new Set();
@@ -141,7 +201,8 @@ function parseSvg(svg) {
     const [x, y, w, h] = n.box;
     const inside = texts.filter((t) => t.x >= x - 4 && t.x <= x + w + 4 && t.y > y + 8 && t.y < y + h + 4);
     if (inside.length) {
-      inside.sort((a, b) => (a.y - b.y) || (b.text.length - a.text.length));
+      // 主标签优先字号最大者（盒内常同时有 7px 类型角标与 12-14px 名称），同字号取最靠上
+      inside.sort((a, b) => (b.fs - a.fs) || (a.y - b.y) || (b.text.length - a.text.length));
       n.label = inside[0].text;
       usedTexts.add(inside[0]);
     }
@@ -163,10 +224,8 @@ function parseSvg(svg) {
     if (cands.length) { n.label = cands[0].t.text; usedTexts.add(cands[0].t); }
   }
   // 独立文字锚点：不在任何节点盒内的文字（标签式箭头端点，如「起点」「终点」）
-  const fontSizes = parseFontSizes(svg);
   const txtBoxes = texts.map((t) => {
-    const styleFs = /font-size\s*:\s*([\d.]+)px/.exec(attr(t.attrs, 'style') || '');
-    const fs = Number(styleFs ? styleFs[1] : NaN) || fontSizes.get(t.cls) || 14;
+    const fs = t.fs;
     const mode = attr(t.attrs, 'text-anchor') || 'start';
     const w = textWidth(t.text, fs), h = fs * 1.25;
     const x0 = mode === 'middle' ? t.x - w / 2 : mode === 'end' ? t.x - w : t.x;
@@ -177,19 +236,70 @@ function parseSvg(svg) {
     ...nodes.map((n) => ({ box: n.box, label: n.label, isNode: true })),
     ...standalone,
   ];
-  const edges = [];
-  const pRe = /<path\b([^>]*?)\/?>/g;
-  while ((m = pRe.exec(svg))) {
-    const cls = attr(m[1], 'class') || '';
-    if (!/(^|\s)edge[\w-]*(\s|$)/.test(cls)) continue;
-    const d = attr(m[1], 'd');
-    if (!d) continue;
-    const pts = walkPath(d);
-    if (pts.length < 2) continue;
-    edges.push({ start: pts[0], end: pts[pts.length - 1], dashed: /dashed/.test(cls) });
+  // 连线候选：严格模式认 class 含 edge 的 path/line；无 class 边缘时按 marker-end + 贴节点推断
+  const cand = [];
+  const eRe = /<(path|line)\b([^>]*?)\/?>/g;
+  let em;
+  while ((em = eRe.exec(svg))) {
+    const tag = em[1];
+    const attrs = em[2];
+    const cls = attr(attrs, 'class') || '';
+    let start = null, end = null;
+    if (tag === 'line') {
+      const v = ['x1', 'y1', 'x2', 'y2'].map((n) => attr(attrs, n));
+      if (v.every((s) => s !== null && s !== '' && !Number.isNaN(Number(s)))) {
+        start = [Number(v[0]), Number(v[1])];
+        end = [Number(v[2]), Number(v[3])];
+      }
+    } else {
+      const d = attr(attrs, 'd');
+      if (d) {
+        const pts = walkPath(d);
+        if (pts.length >= 2) { start = pts[0]; end = pts[pts.length - 1]; }
+      }
+    }
+    if (!start) continue;
+    cand.push({
+      tag,
+      start,
+      end,
+      isClassEdge: /(^|\s)edge[\w-]*(\s|$)/.test(cls),
+      dashed: /dashed/.test(cls) || /dasharray\s*=\s*"[^"]*[1-9]/.test(attrs),
+      // marker 可能写在属性里，也可能来自样式类（如 .edge-arrow { marker-end: url(#arrow) }）
+      hasMarker: attr(attrs, 'marker-end') !== null || attr(attrs, 'marker-start') !== null
+        || /marker-(?:end|start)\s*:/.test(attrs) || /(^|[\s_-])arrow([\s_-]|$)/.test(cls),
+    });
+  }
+  // 直线 <line> 最容易与图例里的示例箭头混淆（两者都 class="edge" + marker）：
+  // 要求带 marker 且至少一端贴着节点盒（40px 内），否则按图例装饰计。
+  const nearNode = (pt) => nodes.some((n) => distToBox(n.box, pt[0], pt[1]) <= 40);
+  let droppedEdges = 0;
+  const classEdges = [];
+  for (const c of cand) {
+    if (!c.isClassEdge) continue;
+    if (c.tag === 'line' && !(c.hasMarker && (nearNode(c.start) || nearNode(c.end)))) {
+      droppedEdges += 1;
+      continue;
+    }
+    classEdges.push(c);
+  }
+  const edges = classEdges.map((c) => ({ start: c.start, end: c.end, dashed: c.dashed }));
+  if (!classEdges.length) {
+    for (const c of cand) {
+      if (!c.hasMarker) continue;
+      // 至少一端贴在节点盒上才算连线：图例里的示例箭头两端都悬空
+      const attached = nodes.some((n) => distToBox(n.box, c.start[0], c.start[1]) <= 8)
+        || nodes.some((n) => distToBox(n.box, c.end[0], c.end[1]) <= 8);
+      if (attached) edges.push({ start: c.start, end: c.end, dashed: c.dashed });
+      else droppedEdges += 1;
+    }
   }
   const vb = /viewBox\s*=\s*"([^"]*)"/.exec(svg);
-  return { nodes, anchors, edges, viewBox: vb ? vb[1] : '?', hasTransform: /transform\s*=/.test(svg) };
+  return {
+    nodes, anchors, edges, droppedEdges, inferred,
+    viewBox: vb ? vb[1] : '?',
+    hasTransform: /transform\s*=/.test(svg),
+  };
 }
 
 // —— 文字盒估算（CJK 按 1 个字宽，拉丁按 0.55，空格按 0.3）——
@@ -276,7 +386,13 @@ function main() {
   for (const f of files) {
     if (!existsSync(f)) { console.error(`[SVG-MISSING] ${f} 不存在`); failed = true; continue; }
     const svg = readFileSync(f, 'utf8');
-    const { nodes, anchors, edges, viewBox, hasTransform } = parseSvg(svg);
+    const { nodes, anchors, edges, viewBox, hasTransform, inferred, droppedEdges } = parseSvg(svg);
+    if (!nodes.length) {
+      console.error(`[EDGE-UNPARSED] ${basename(f)} 解析不到任何节点：既没有 class="node"，几何推断也没有命中`
+        + '（需要「含文本的 rect，宽 ≥40、高 ≥28、非虚线、填充不透明」）。拒绝以 0 节点 0 连线判通过。');
+      failed = true;
+      continue;
+    }
     if (hasTransform) console.error(`[AUDIT-UNSUPPORTED] ${basename(f)} 含 transform：节点盒与端点不在同一坐标系，本文件结果不可信`);
     // 无标签且与某个有标签形状重叠的（如圆柱体的顶面椭圆、纯装饰底纹）不计入节点清单
     const decor = nodes.filter((n) => n.label === '?'
@@ -296,7 +412,7 @@ function main() {
       if (issues.length) dangling.push({ idx: idx + 1, from: nm(s), to: nm(t), issues });
       if (issues.some((i) => i.level === 'error' || strict)) hasIssue = true;
     });
-    const item = { file: f, viewBox, nodes: display, decor: decor.length, edges: pairs, dangling };
+    const item = { file: f, viewBox, nodes: display, decor: decor.length, edges: pairs, dangling, inferred, droppedEdges };
     if (expectFile) {
       const exp = parseExpect(expectFile);
       const key = (p) => `${p[0]} -> ${p[1]}`;
@@ -319,6 +435,12 @@ function main() {
 
   for (const r of report) {
     console.log(`\n=== ${basename(r.file)}  viewBox="${r.viewBox}"  节点 ${r.nodes.length} 个 / 连线 ${r.edges.length} 条${r.decor ? `（另有 ${r.decor} 个无标签装饰形状已忽略）` : ''}`);
+    if (r.inferred) {
+      console.log('（推断模式：无 class 钩子，节点按「含文本的矩形」识别；'
+        + `两端都不贴节点的箭头 ${r.droppedEdges} 个按装饰忽略）`);
+    } else if (r.droppedEdges) {
+      console.log(`（图例里的示例箭头 ${r.droppedEdges} 个按装饰忽略：无 marker 或两端都不贴节点）`);
+    }
     console.log('节点: ' + r.nodes.map((n) => n.label).join(' | '));
     r.edges.forEach((p, i) => console.log(`  ${String(i + 1).padStart(3)}. ${p[0]} -> ${p[1]}${p[2] ? '  [虚线]' : ''}`));
     if (r.dangling.length) {
@@ -341,6 +463,12 @@ function main() {
       + (strict ? '（--strict：提示级间隙也算失败）' : '')
       + '，请先修图再接入文档。');
     process.exit(1);
+  }
+  const totalEdges = report.reduce((n, r) => n + r.edges.length, 0);
+  if (!totalEdges) {
+    console.log('审计结果：未识别到任何连线——若本图确有连线，说明写法未被识别（检查 marker-end / class="edge"）；'
+      + '若本图本就无连线（分层堆叠、纯树状），可忽略此行。');
+    process.exit(0);
   }
   console.log('审计结果：端点全部贴合' + (expectFile ? '，且与期望清单一致' : '') + '。');
   process.exit(0);

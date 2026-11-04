@@ -1,4 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="860" viewBox="0 0 1440 860" role="img" aria-label="git-kit 架构：三条入口、一个意图路由、九个分支与共享资产">
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="860" viewBox="0 0 1440 860" role="img" aria-labelledby="git-kit-title git-kit-desc">
+  <title id="git-kit-title">git-kit 架构：三条入口，一个意图路由</title>
+  <desc id="git-kit-desc">三条入口（opencode 斜杠命令、dsh 斜杠命令、自然语言）都汇聚到同一份 SKILL.md 路由，再由它分发到 commit-push、commit-message、branch、pr-create、pr-merge、tag、release、slim、star-classify 九个分支；共享脚本与 references 不随入口复制。</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#64748b"/>

@@ -21,7 +21,7 @@
 
 **命中任一条即改用 SVG**：节点数 **≥12**；含**分叉 / 汇合 / 回边 / 泳道 / 分区**；一张图要表达「接入—服务—领域—资源」这类**纵向层次**。
 
-**SVG 产出走 `svg-maker` skill**（软件/基础设施拓扑用 `architecture-svg`，概念/流程/生命周期用 `clean-svg`），**不要自绘样式规范**——那会与既有图产生风格漂移。当前环境没有 `svg-maker` 时先说明，再退回自绘并守住下方约束。
+**SVG 产出走 `diagram-design` skill**（上游 cathrynlavery/diagram-design；按图型加载它的 `type-*.md` 参考页，拓扑/分层用架构或高层图型），**不要自绘样式规范**——那会与既有图产生风格漂移。交付物用它的 `scripts/export_svg.py --system-fonts` 导出（默认导出内联 Google Fonts `@import`，会命中下方自包含约束）。当前环境没有该 skill 时先说明，再退回自绘并守住下方约束。
 
 ### Mermaid 类型映射
 
@@ -79,10 +79,10 @@ node <本skill目录>/scripts/check-design-doc.mjs <文档> --tier <light|standa
 # Mermaid：真解析（mermaid.parse）
 node <本skill目录>/scripts/check-mermaid.mjs <生成文件>
 
-# SVG：边拓扑审计——结构类图新画或重排后必跑
+# SVG：边拓扑审计——结构类图新画或重排后必跑（diagram-design 产物自动走几何推断）
 node <本skill目录>/scripts/audit-svg-topology.mjs [--expect 期望边清单.txt] [--strict] <图.svg>...
 
-# SVG：目视预览（先把 var() 展平成字面色再出 PNG，避免误判「图坏了」）
+# SVG：目视预览（可选；自绘兜底时才需要，diagram-design 的产物直接看它的 HTML 更准）
 node <本skill目录>/scripts/render-svg-preview.mjs [--out <dir>] [--width 1200] [--dark] <图.svg>...
 ```
 
@@ -129,7 +129,7 @@ node <本skill目录>/scripts/render-svg-preview.mjs [--out <dir>] [--width 1200
 | 决策无因果 | 只比优劣，不说它满足了哪条目标/约束 | 回指目标或约束，用 Y-statement 收口 |
 | 关切失守 | 安全/合规/运维/调用方关切全篇无人承载 | 按读者 × 关切反查，补章节或视图 |
 | 验证缺位 | 只写验收阈值，不写怎么测、谁测、假设怎么证伪 | 补验证手段 + 最脆弱假设的证伪实验 |
-| 图选型不当 | 分层/拓扑/对比硬用 Mermaid（加个节点全图重排），或同一张图 Mermaid + SVG 双份 | 按本节选型规则改用 SVG（`svg-maker`），同一张图只留一种形式 |
+| 图选型不当 | 分层/拓扑/对比硬用 Mermaid（加个节点全图重排），或同一张图 Mermaid + SVG 双份 | 按本节选型规则改用 SVG（`diagram-design` 导出），同一张图只留一种形式 |
 | 图是插图 | 只放一张图的小节，图前无导读、图后无落着 | 补导读段与落着，或并入正文论证 |
 | 边连错未发现 | SVG 结构图看着对、边错（缺边/多边/挂错节点） | 写期望边清单，跑 `audit-svg-topology.mjs --expect` |
 | 章节空壳 | 章节齐全但每节一句话、"N/A" 占位 | 删掉不适用章节，其余写实 |

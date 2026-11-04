@@ -132,7 +132,7 @@ description: 开源项目深度解读：以技术解构和设计判断为主，�
 - [ ] **关键论断已抽查**：从成稿挑 3–5 条事实型论断（数字 / 边界 / 反直觉结论）回源码核对，确认无编造
 - [ ] **指纹注释仅首末行锚点**：每处引用后至多含区间首行 + 末行两行原文（各 ≤1 行、截断 ≤80 字符），无整段代码注释；锚点逐字复制、含 `--` 用 base64
 - [ ] **已产出 `architecture-design.md`（叙述型架构设计说明，零代码索引、与证据型完全隔离）**：骨架按 [references/narrative-design-template.md](references/narrative-design-template.md) 的七步/13 章，必含清单齐全（含总体架构、模块责任、决策备选与复审触发条件、验收与开放问题）；量化按三档口径（[references/quantification.md](references/quantification.md)）；跑过 `scripts/check-narrative-all.mjs` 通过（含 `[HEADING-SEQ]` / `[XREF-DANGLING]` / `[FIGURE-ONLY]`）（[references/kb-repo-rules.md](references/kb-repo-rules.md)「叙述型文档」）
-- [ ] **SVG 图由 `svg-maker` skill 产出**（环境无此 skill 时才自绘并说明）；所有 Mermaid / SVG 图可渲染、不报错，且无 mermaid + svg 重复；Mermaid 块已跑 `scripts/check-mermaid.mjs` 全 `OK`，`[MERMAID-WARN]`（`<br>` 换行 lint）已收敛为 0；**图表已按复杂度选型**（节点 ≥12 或含分叉/汇合/分区/泳道/回边 → SVG，见 [references/writing-guide.md](references/writing-guide.md)「图表约束」）；**SVG 已跑 `scripts/audit-svg-topology.mjs` 核对边拓扑，并用 `scripts/render-svg-preview.mjs` 出图目视核验**
+- [ ] **SVG 图由 `diagram-design` skill 产出**（上游技能；环境无此 skill 时才自绘并说明）；所有 Mermaid / SVG 图可渲染、不报错，且无 mermaid + svg 重复；Mermaid 块已跑 `scripts/check-mermaid.mjs` 全 `OK`，`[MERMAID-WARN]`（`<br>` 换行 lint）已收敛为 0；**图表已按复杂度选型**（节点 ≥12 或含分叉/汇合/分区/泳道/回边 → SVG，见 [references/writing-guide.md](references/writing-guide.md)「图表约束」）；**SVG 边拓扑已核对**（`scripts/audit-svg-topology.mjs`：有 `class="node"/"edge"` 走严格模式，`diagram-design` 产物自动走几何推断并标注「推断模式」；解析不到节点会报 `[EDGE-UNPARSED]` 并退出 1，不静默通过）
 - [ ] 源码输入为本地绝对路径，`source_repo` 已用 `realpath` 规范化并作验证根（= **选定基线的工作树**，不是随手一个 HEAD）
 - [ ] 落盘后已列出变更文件清单供用户决定是否提交，未擅自执行 git commit
 
