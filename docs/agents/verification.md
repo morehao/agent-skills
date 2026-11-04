@@ -71,12 +71,11 @@ node scripts/check-disk-cleanup-codes.mjs
 本源内容与各 agent 软链都依赖本机 `$HOME`，CI 跑不了。改动接入相关代码后本地自查：
 
 ```bash
-./scripts/skills-install.sh --check       # 本源 ~/.agents/skills 是否与本仓一致（缺失/落后）
 ./scripts/skills-fanout.sh --check        # 各 agent 目录的软链是否都指向本源
-./scripts/opencode-install.sh --check     # 上面两项的 opencode 侧 + 命令软链
+./scripts/opencode-install.sh --check     # 上面一项的 opencode 侧 + 命令软链
 ```
 
-三者都是只读，问题数 >0 退出 1。`skills-install.sh --check` 报「本源与本仓不一致」通常意味着「本仓改了但还没发布到本源」。要试“写”的动作，必须用临时目录（见 installation.md「改脚本注意」），别对着真实 `~/.agents` 跑。
+两者都是只读，问题数 >0 退出 1。本源与本仓是否一致需要自行比对（`skills` CLI 不提供 `--check`）：先 `git push` 再用 `skills` CLI 发布一次即可保持同步。要试“写”的动作，必须用临时目录（见 installation.md「改脚本注意」），别对着真实 `~/.agents` 跑。
 
 ## project-insight 引擎
 

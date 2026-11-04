@@ -3,7 +3,7 @@
 #   1) 技能：把本源 ~/.agents/skills/<name> 软链到 $DSH_HOME/skills/<name>（= skills-fanout.sh）
 #   2) 把 dsh 命令插件（npm 包 @morehao/dsh-commands，源码在另一仓 morehao/dsh-commands）注册进 dsh profile
 #
-# 模型：**本源是 ~/.agents/skills**（真实内容，由 skills-install.sh 用 skills CLI 从本仓发布）。
+# 模型：**本源是 ~/.agents/skills**（真实内容，由 skills CLI 从本仓发布）。
 # dsh 会直接扫本源，这里的 $DSH_HOME/skills 软链是"再加一条可见路径"，两者指向同一份内容。
 #
 # 用法：./scripts/dsh-install.sh [--profile <name>] [--skills-only] [--plugin-link <path>]
@@ -55,7 +55,7 @@ usage() {
   AGENTS_SKILLS_DIR  技能本源目录，默认 ~/.agents/skills
 
 说明:
-  技能本源是 ~/.agents/skills（由 ./scripts/skills-install.sh 从本仓发布）；
+  技能本源是 ~/.agents/skills（由 skills CLI 从本仓发布，见 docs/installation.md）；
   本脚本只在 $DSH_HOME/skills 建指向本源的软链。
 EOF
 }
@@ -169,7 +169,7 @@ SKILLS_TARGET="$DSH_HOME_DIR/skills"
 echo "==> 技能软链目录: $SKILLS_TARGET"
 if [ ! -d "${AGENTS_SKILLS_DIR:-$HOME/.agents/skills}" ]; then
   echo "错误：技能本源目录不存在：${AGENTS_SKILLS_DIR:-$HOME/.agents/skills}" >&2
-  echo "  先发布技能：./scripts/skills-install.sh（skills CLI 从本仓安装到本源）" >&2
+  echo "  先发布技能：npx -y skills add morehao/agent-skills --skill <name> ... -g -a universal -y" >&2
   exit 2
 fi
 
@@ -186,7 +186,7 @@ if [ "$SKILLS_ONLY" -eq 1 ]; then
 完成（--skills-only）。技能软链已就位：
   $SKILLS_TARGET  ->  ${AGENTS_SKILLS_DIR:-$HOME/.agents/skills}
 技能是热加载的，无需重启即可在会话与技能面板中看到。
-内容发布（改本仓后要生效）用：./scripts/skills-install.sh
+内容发布（改本仓后要生效）用：npx -y skills add morehao/agent-skills --skill <name> ... -g -a universal -y（见 docs/installation.md）
 插件注册已按要求跳过；需要时去掉 --skills-only 重跑本脚本。
 DONE
   exit 0

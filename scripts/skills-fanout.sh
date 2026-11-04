@@ -6,7 +6,7 @@
 #        └─软链─> ~/.config/opencode/skills/<name>
 #        └─软链─> ~/.dsh/skills/<name>
 #        └─软链─> ~/.claude/skills/<name>
-#   本源内容由 ./scripts/skills-install.sh 从本仓发布；本脚本只负责「让各 agent 看见」。
+#   本源内容由 skills CLI 从本仓发布（见 docs/installation.md「发布」）；本脚本只负责「让各 agent 看见」。
 #
 # 幂等：已指向本源的软链跳过；指向别处（如旧布局指向本仓）的软链改指向本源；
 # 指向本源但技能已不存在的悬空软链清理；目标位置已有同名真实目录时跳过、不覆盖。
@@ -54,7 +54,7 @@ usage() {
   CLAUDE_HOME        claude 配置根，默认 $HOME/.claude
 
 说明:
-  本源是真源，各 agent 目录只放指向它的软链。内容发布用 ./scripts/skills-install.sh。
+  本源是真源，各 agent 目录只放指向它的软链。内容发布用 skills CLI（见 docs/installation.md）。
 EOF
 }
 
@@ -118,7 +118,7 @@ EOF
 
 if [ ! -d "$HUB" ]; then
   echo "错误：技能本源目录不存在：${HUB}" >&2
-  echo "  先发布技能：./scripts/skills-install.sh" >&2
+  echo "  先发布技能：npx -y skills add morehao/agent-skills --skill <name> ... -g -a universal -y" >&2
   exit 2
 fi
 
