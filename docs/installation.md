@@ -1,32 +1,35 @@
 # 安装与维护
 
-本仓是技能与 opencode 指令的**编辑源**（版本化、可 review）；**运行时真源在技能本源目录** `~/.agents/skills`——本仓内容用 `skills` CLI 发布到那里，再有软链分发给各 agent。dsh 的斜杠命令插件在独立仓 [morehao/dsh-commands](https://github.com/morehao/dsh-commands)，本仓只提供它依赖的技能。
+本仓是技能与 opencode 指令的**编辑源**（版本化、可 review）；**运行时真源在技能本源目录** `~/.agents/skills`——本仓内容用 `skills` CLI 发布到那里，再有软链分发给各 agent。**技能发布/本地维护都用 `skills` CLI**（`npx -y skills --help` 查全部子命令），本仓不再提供 `skills-install.sh` 之类的发布脚本。
 
 ## 技能模型：本源 + 分发软链
 
 ```
 本仓 skills/<name>
-   │ ./scripts/skills-install.sh（skills CLI 安装）
+   │ skills CLI 安装（npx -y skills add ...）
    ▼
 ~/.agents/skills/<name>            ← 本源：真实内容（第三方技能也装在这）
    ├─软链─> ~/.config/opencode/skills/<name>
    └─软链─> ~/.dsh/skills/<name>          ./scripts/skills-fanout.sh 负责
 ```
 
-- **改本仓不会自动生效**：先 push 到 `morehao/agent-skills`，再把 `skills/<name>/` 发布到本源 `~/.agents/skills/<name>/`（`./scripts/skills-install.sh` 是现成方式）。
+- **改本仓不会自动生效**：先 push 到 `morehao/agent-skills`，再用 `skills` CLI 把 `skills/<name>/` 发布到本源 `~/.agents/skills/<name>/`（命令见下）。
 - 本源里同时存在第三方技能（`skills` CLI 装的，如 `officecli`、`weather-query`），与本仓技能互不干扰。
 - 各 agent 目录**只放指向本源的软链**，内容不复制。好处：其它 agent 永远看到已发布的稳定内容，不会被某个工作区的半成品影响。
 
 ### 发布（本仓 → 本源）
 
+用 `skills` CLI 直接发布，按需给 `--skill`（不传则装全部）：
+
 ```bash
-./scripts/skills-install.sh              # 用 skills CLI 把 skills/* 全部安装到 ~/.agents/skills
-./scripts/skills-install.sh --check      # 只读：比对本源与本仓，缺失/落后 → 退出 1
-./scripts/skills-install.sh --dry-run    # 只打印将执行的 skills 命令
-./scripts/skills-install.sh --source <owner/repo|url>   # 换来源，默认 morehao/agent-skills
+npx -y skills add morehao/agent-skills \
+  --skill git-kit --skill handoff --skill disk-cleanup \
+  --skill project-insight --skill project-wiki --skill tech-design \
+  -g -a universal -y
+npx -y skills --help                       # 查看全部子命令（add / update / list 等）
 ```
 
-安装命令与 dsh-commands 的 `/skill-init` 一致：`npx -y skills add <来源> --skill <名> … -g -a universal -y`（`-a universal` 只写本源，不往各 agent 目录撒链）。脚本发布前会提示「工作区脏 / 本地领先 `origin/main`」——**CLI 装的是远端内容**，没 push 的内容不会被发布。
+`-a universal` 只写本源 `~/.agents/skills`，不往各 agent 目录撒链（撒链由 `skills-fanout.sh` 负责）。**CLI 装的是远端内容**：没 push 的本地改动不会被发布，发布前先 `git push`。
 
 ### 分发（本源 → 各 agent）
 
@@ -47,7 +50,7 @@
 
 ## 外部技能：diagram-design
 
-配图技能 `diagram-design`（上游 [cathrynlavery/diagram-design](https://github.com/cathrynlavery/diagram-design)）**不随本仓发布，也不由 `skills-install.sh` / `skills-fanout.sh` 管理**：按上游的插件方式安装（Claude Code / Codex / Cursor 等市场，或直接把技能目录放进任一 agent 的 skills 目录）。因此两个 `--check` 都不覆盖它；本仓只依赖「它已装好」这一前提，缺了就在图任务开始时先说明，再退回自绘并守住各技能里的图约束。
+配图技能 `diagram-design`（上游 [cathrynlavery/diagram-design](https://github.com/cathrynlavery/diagram-design)）**不随本仓发布，也不由 `skills` CLI / `skills-fanout.sh` 管理**：按上游的插件方式安装（Claude Code / Codex / Cursor 等市场，或直接把技能目录放进任一 agent 的 skills 目录）。因此两个 `--check` 都不覆盖它；本仓只依赖「它已装好」这一前提，缺了就在图任务开始时先说明，再退回自绘并守住各技能里的图约束。
 
 ## opencode
 
@@ -56,7 +59,7 @@
 ### 一键接入
 
 ```bash
-./scripts/skills-install.sh                     # ① 发布技能到本源（首次、以及本仓有更新时）
+./scripts/skills-fanout.sh                      # ① 本源 -> opencode 技能目录（技能先由 skills CLI 发布）
 ./scripts/opencode-install.sh                   # ② 技能软链 + 命令软链
 ./scripts/opencode-install.sh --skills-only     # 只做技能软链（= skills-fanout.sh --agents opencode）
 ./scripts/opencode-install.sh --commands-only   # 只软链命令
@@ -69,7 +72,7 @@
 - **技能**：调用 `scripts/skills-fanout.sh --agents opencode`，建 `<config>/skills/<name>` → 本源的软链；
 - **命令**：软链 `commands-opencode/git` → `<config>/command/git`，`handoff.md`、`cleanup.md` 同理；
 - 清理悬空软链；目标已有同名真实目录/文件时跳过，不覆盖；
-- `--check` 只报告问题，问题数 >0 退出 1；本源缺失会直接报错并提示先跑 `skills-install.sh`。
+- `--check` 只报告问题，问题数 >0 退出 1；本源缺失会直接报错并提示先用 `skills` CLI 发布（`npx -y skills add ...`）。
 
 ### 手工等价
 
@@ -132,7 +135,7 @@ dsh 的斜杠命令由独立插件提供：源码在 [morehao/dsh-commands](http
 ### 一键接入
 
 ```bash
-./scripts/skills-install.sh              # ① 先发布技能到本源
+./scripts/skills-fanout.sh --agents dsh          # ① 本源 -> dsh 技能目录（技能先由 skills CLI 发布）
 ./scripts/dsh-install.sh --skills-only   # ② 只挂技能：零副作用、不需要 dsh CLI
 ./scripts/dsh-install.sh                 # 全量：技能软链 + 安装 npm 插件（profile 自动解析）
 ./scripts/dsh-install.sh --profile desktop
@@ -205,7 +208,7 @@ CI（[`.github/workflows/commands.yml`](../.github/workflows/commands.yml)）在
 3. 更新 `commands-opencode/README.md` 的两张表（指令清单 + 联动表）和根 `README.md` 的命令表。
 4. 跑 `node scripts/check-opencode-commands.mjs`。
 5. 同步 dsh 入口：到 dsh-commands 仓的 `COMMANDS` 表加一行，并跑它的 `check-skill-contract.mjs`。
-6. 改了技能内容要**发布**才生效：`git push` → 发布到 `~/.agents/skills/`（本机各 agent 随即读到新内容）。
+6. 改了技能内容要**发布**才生效：`git push` → 用 `skills` CLI 发布到 `~/.agents/skills/`（本机各 agent 随即读到新内容）。
 
 ## 改脚本注意
 
@@ -221,10 +224,6 @@ AGENTS_SKILLS_DIR="$T/hub" OPENCODE_CONFIG="$T/oc" ./scripts/opencode-install.sh
 AGENTS_SKILLS_DIR="$T/hub" DSH_HOME="$T/dsh" ./scripts/dsh-install.sh --skills-only
 ```
 
-`skills-install.sh` 需要 `skills` CLI（默认 `npx -y skills`），测试时可用 `SKILLS_CLI` 指向桩：
+`--check` 是只读的，可以直接对着真实 `~/.agents/skills` 跑；其余模式务必带临时 `AGENTS_SKILLS_DIR`。
 
-```bash
-AGENTS_SKILLS_DIR="$T/hub" SKILLS_CLI=/path/to/stub ./scripts/skills-install.sh --dry-run
-```
-
-> `--check` 是只读的，可以直接对着真实 `~/.agents/skills` 跑；其余模式务必带临时 `AGENTS_SKILLS_DIR`。
+技能发布用 `skills` CLI（默认 `npx -y skills`），测试时可用 `SKILLS_CLI` 指桩的做法已随 `skills-install.sh` 移除；如需脚本化发布，直接调 `npx -y skills add ...` 即可。

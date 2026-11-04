@@ -5,11 +5,11 @@
 ## 两层：编辑源 vs 运行时真源
 
 ```
-本仓（编辑源，git 版本化）--skills-install.sh（skills CLI）--> ~/.agents/skills（本源，真实内容）
+本仓（编辑源，git 版本化）--skills CLI（npx -y skills add ...）--> ~/.agents/skills（本源，真实内容）
                                                                   --软链--> 各 agent 技能目录（skills-fanout.sh）
 ```
 
-- **本仓不是运行时真源**：改 `skills/` 后**不会**自动生效，需 `git push` 后把 `skills/<name>/` 发布到 `~/.agents/skills/<name>/`（`skills-install.sh` 是现成方式）。
+- **本仓不是运行时真源**：改 `skills/` 后**不会**自动生效，需 `git push` 后用 `skills` CLI 把 `skills/<name>/` 发布到 `~/.agents/skills/<name>/`（命令见 [安装与维护](../installation.md)「发布」）。维护本地技能统一走 `skills` CLI，本仓不提供发布脚本。
 - **本源是 `~/.agents/skills`**（`AGENTS_SKILLS_DIR` 可覆盖）：真实内容都在这，第三方技能（`officecli`、`weather-query` 等）也装在同一处。
 - **各 agent 目录只有软链**：`scripts/skills-fanout.sh` 建 `~/.config/opencode/skills/<name>`、`~/.dsh/skills/<name>`（可选 `~/.claude/skills/<name>`）指向本源。所以其它 agent 看到的永远是**已发布**内容，不会被某个工作区的半成品影响。
 - **命令没法搬到本源**：opencode 只认配置目录下的 `command/`，那部分仍由 `opencode-install.sh` 从本仓软链（命令是委托壳，改本仓即时生效——这点和技能不同）。
@@ -20,11 +20,11 @@
 
 | 动作 | 脚本 | 方向 | 何时跑 |
 |---|---|---|---|
-| 发布内容 | 发布到本源（`skills-install.sh` 或等价同步） | 本仓 → 本源 | 本仓技能有更新且已 push 之后 |
+| 发布内容 | `skills` CLI（`npx -y skills add ...`） | 本仓 → 本源 | 本仓技能有更新且已 push 之后 |
 | 分发软链 | `skills-fanout.sh` | 本源 → 各 agent 目录 | 首次；本源新增/删除技能之后 |
-| 只读自查 | 两者 `--check` | — | 怀疑「命令能点但 skill 加载失败」时 |
+| 只读自查 | `skills-fanout.sh --check` / `opencode-install.sh --check` | — | 怀疑「命令能点但 skill 加载失败」时 |
 
-`skills-install.sh` 装的是**远端**内容：脚本会提示「工作区脏 / 本地领先 `origin/main`」，此时装到的是旧版本。`skills update` 不要用（它内部 spawn 的 `add` 不带 `-a universal`，会往上百个 agent 目录撒链）。
+`skills` CLI 装的是**远端**内容：没 `git push` 的本地改动不会被发布。`skills update` 不要用（它内部 spawn 的 `add` 不带 `-a universal`，会往上百个 agent 目录撒链）。
 
 ## profile 由脚本解析，不要写死
 
@@ -41,11 +41,11 @@
 
 ## `skills/` 目录约定
 
-`skills/` 下只允许放技能目录（如 `git-kit/`），禁止放置任何松散说明文件。因为 `ln -sfn skills/*` 会展开全部条目，新增的非目录文件会被一并软链过去（`skills-install.sh` 只遍历目录，已规避该问题，但约定仍然成立）。
+`skills/` 下只允许放技能目录（如 `git-kit/`），禁止放置任何松散说明文件。因为 `ln -sfn skills/*` 会展开全部条目，新增的非目录文件会被一并软链过去（`skills-fanout.sh` 只遍历目录，已规避该问题，但约定仍然成立）。
 
 ## 没有 `/skill-init` 这类 opencode 命令
 
-dsh 侧需要 `/skill-init`，是因为「插件走 npm、技能另装、dsh 又不扫 `node_modules`」。本仓的发布链路已经由 `skills-install.sh`（skills CLI）+ `skills-fanout.sh` 覆盖，两者幂等且都有 `--check`，可本地可 CI。**不要在 opencode 侧为它造一条斜杠命令**：命令是提示词模板，没有确定性执行、没有确认卡，`!` 注入在展开阶段就跑，且拿不到自身仓库路径。
+dsh 侧需要 `/skill-init`，是因为「插件走 npm、技能另装、dsh 又不扫 `node_modules`」。本仓的发布链路已经由 `skills` CLI（发布）+ `skills-fanout.sh`（分发）覆盖，后者幂等且带 `--check`，可本地可 CI。**不要在 opencode 侧为它造一条斜杠命令**：命令是提示词模板，没有确定性执行、没有确认卡，`!` 注入在展开阶段就跑，且拿不到自身仓库路径。
 
 ## 发布工具链在另一仓
 

@@ -6,14 +6,14 @@
 
 ## 快速开始
 
-**技能本源是 `~/.agents/skills`**：本仓是编辑源，用 `skills` CLI 发布到本源，再由软链分发给各 agent。
+**技能本源是 `~/.agents/skills`**：本仓是编辑源，用 `skills` CLI 发布到本源，再由软链分发给各 agent。维护本地技能用 `skills` CLI（`npx -y skills --help` 查全部子命令），本仓不再提供 `skills-install.sh`。
 
 ```bash
 git clone git@github.com:morehao/agent-skills.git && cd agent-skills
 
 # ① 发布技能到本源（改完本仓、push 之后都要跑）
-./scripts/skills-install.sh
-./scripts/skills-install.sh --check        # 只读：本源与本仓是否一致
+npx -y skills add morehao/agent-skills --skill git-kit --skill handoff --skill disk-cleanup \
+  --skill project-insight --skill project-wiki --skill tech-design -g -a universal -y
 
 # ② 分发软链：本源 -> opencode / dsh 的技能目录
 ./scripts/skills-fanout.sh
@@ -37,7 +37,7 @@ node scripts/check-opencode-commands.mjs
 - `commands-opencode/` — opencode 斜杠指令（`git/*.md` + `handoff.md` + `cleanup.md`）
 - `skills/` — 技能：git-kit、handoff、project-insight、project-wiki、tech-design、disk-cleanup
 - `docs/` — 安装、技能、git-kit 工作流
-- `scripts/` — 发布（`skills-install.sh`）+ 分发（`skills-fanout.sh`）+ opencode / dsh 接入 + 命令契约校验
+- `scripts/` — 分发（`skills-fanout.sh`）+ opencode / dsh 接入 + 命令契约校验（技能发布用 `skills` CLI，见下）
 
 ## 命令
 

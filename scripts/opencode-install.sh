@@ -3,7 +3,7 @@
 #   1) 技能：把本源 ~/.agents/skills/<name> 软链到 <config>/skills/<name>（= skills-fanout.sh）
 #   2) 命令：把 commands-opencode/git、handoff.md 与 cleanup.md 软链到 <config>/command
 #
-# 模型：**本源是 ~/.agents/skills**（真实内容，由 skills-install.sh 用 skills CLI 从本仓发布）；
+# 模型：**本源是 ~/.agents/skills**（真实内容，由 skills CLI 从本仓发布）；
 # 各 agent 目录只放指向本源的软链。本脚本不碰本源内容，只生成 opencode 这一侧的软链。
 # 命令没法搬（opencode 只认配置目录下的 command/），所以这一半由本脚本软链。
 #
@@ -59,7 +59,7 @@ usage() {
   AGENTS_SKILLS_DIR   技能本源目录，默认 ~/.agents/skills
 
 说明:
-  技能本源是 ~/.agents/skills（由 ./scripts/skills-install.sh 从本仓发布），
+  技能本源是 ~/.agents/skills（由 skills CLI 从本仓发布，见 docs/installation.md），
   opencode 侧只放指向本源的软链，因此**不需要**再在 opencode.json 里配 skills。
   命令必须落在配置目录下的 command/（opencode v2.x 源码里 scan("{command,commands}/**/*.md")），
   本仓沿用 command/。
@@ -223,7 +223,7 @@ fi
 
 if [ "$MODE" != "commands" ] && [ ! -d "$HUB" ]; then
   echo "错误：技能本源目录不存在：$HUB" >&2
-  echo "  先发布技能：./scripts/skills-install.sh（它用 skills CLI 从本仓安装到本源）" >&2
+  echo "  先发布技能：npx -y skills add morehao/agent-skills --skill <name> ... -g -a universal -y" >&2
   exit 2
 fi
 if [ "$MODE" != "skills" ] && [ ! -d "$COMMANDS_SRC/git" ]; then
@@ -260,7 +260,7 @@ if [ "$CHECK" -eq 1 ]; then
   echo "==> 检查完成：${issues} 项问题（命令侧已一致 ${unchanged} 项，悬空 ${removed} 项；技能侧结论见上）"
   if [ "$issues" -gt 0 ]; then
     echo "    修复：技能侧去掉 --check 重跑 scripts/skills-fanout.sh --agents opencode；"
-    echo "          本源内容缺失/落后先跑 scripts/skills-install.sh；命令侧先移走「已存在且不是软链」的真实目录。"
+    echo "          本源内容缺失/落后先用 skills CLI 发布（见 docs/installation.md）；命令侧先移走「已存在且不是软链」的真实目录。"
     exit 1
   fi
   echo "    全部就绪。"

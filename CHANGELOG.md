@@ -8,6 +8,7 @@
 
 ### Changed
 
+- **scripts/docs**: 移除 `scripts/skills-install.sh`，技能发布不再由本仓脚本代跑；文档与安装脚本提示统一改为直接给 `skills` CLI 命令（`npx -y skills add ...`），agent 只告知用户可用 `skills` CLI 自行维护本地技能
 - **docs**: 移除「技能改动必须由维护者手动同步、agent 不得发布」的约定；保留「编辑源 → 本源 → 软链」的两层链路与 `skills-install.sh`，发布动作不再由仓库约定限制
 - **tech-design**: 配图从「有就好」升级为**配图下限**——轻量档有结构类章节即须有图、标准 ≥2、完整 ≥3；工作流改为「先填视图清单、先出骨架图再写正文」，交付报告带图清单
 - **tech-design**: 门禁 `TD-NO-DIAGRAM` 改为**按章节**检查（一张图不再放行全篇），新增 `TD-DIAGRAM-MIN`（档位最小图集）；轻量档不再跳过；`图豁免：<理由>` 可显式收口
