@@ -36,7 +36,8 @@ description: 磁盘空间回收与本地数据瘦身。当用户说「磁盘满�
 - macOS：`bash scripts/mac_cleanup.sh`（默认只查询，不删任何东西）；需要核对编码时 `--list`
 - 用户问的是「什么最占地方」时，加 `--top 10`（只读扫描 $HOME，列出最大目录与 >100 MB 文件）。
 - 用户问「哪个 App 卸载了还留着东西」时，看 `orphans` 段（`--orphans-list` 看全部）：每条给路径、大小、多少天未改动、是否需要 sudo。
-- 需要结构化结果（自己算表、做勾选项）时加 `--json`：stdout 只输出 JSON（进度信息与外部命令输出走 stderr），`disk.freed_kb`（查询/预览为 0）、`disk.estimated_freed_kb`、`disk.df_delta_kb`、`exit_code` / `failed_count` 与 `items[].status` 都在里面。
+- 查询输出末尾还会带一段「只报告：系统级大户」（`/cores`、Apple Intelligence、`/private/var/vm`、`diagnostics`+`uuidtext`、`/Library/Updates`、`/Applications` 等）：**只读、不代删**，读不到就写「读不到」；`--json` 里在 `reports[]`。
+- 需要结构化结果（自己算表、做勾选项）时加 `--json`：stdout 只输出 JSON（进度信息与外部命令输出走 stderr），`disk.freed_kb`（查询/预览为 0）、`disk.estimated_freed_kb`、`disk.df_delta_kb`、`exit_code` / `failed_count`、按编码聚合的 `codes[]`（同一编码多条时用它汇总）、只报告段的 `reports[]` 与 `items[].status` 都在里面。
 - 非 macOS：`df -h` / `du -sh *` 只读排查，并说明本技能只有 macOS 清理脚本
 
 **2. 报告与分类**
@@ -47,6 +48,7 @@ description: 磁盘空间回收与本地数据瘦身。当用户说「磁盘满�
 - **需应用内处理**：只给大小与路径，不代删（iOS 备份、聊天记录、虚拟机镜像等）。
 - **卸载残留（只报告，不进自动清理）**：把 `orphans` 命中项按「路径 + 大小 + 上次改动 + 是否需要 sudo」列表，注明这是反推结果、可能误报；让用户挑具体路径，**不要**给「全部残留一次删掉」这种选项。
 - **需 sudo（三类）**：`/tmp`、Time Machine 快照、`/Library` 下的残留（LaunchDaemons、PrivilegedHelperTools），标明要由用户在自己的终端跑。
+- **系统级只报告**：`/cores`（崩溃转储，root 属主，确认后把 `sudo rm -f /cores/core.*` 交用户终端）、Apple Intelligence（系统托管资产，只能看不能删，入口「系统设置 → 通用 → 储存空间」）。
 - **受保护目录**：`caches`/`logs` 两项会单独报「N 个受保护子目录未计入」（TCC），如实转述，不要当成 0。
 
 报告完问一句要不要按清单勾选清理；用户说「先这样」就到此为止，不进入第 3 步。

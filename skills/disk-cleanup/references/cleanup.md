@@ -68,6 +68,8 @@ bash skills/disk-cleanup/scripts/mac_cleanup.sh --clean --dry-run --only dshtmp,
 | `--orphans-delete <p>` | 要删除的残留路径（可重复传）；校验规则见下 |
 | `--help` / `-h` | 打印用法 |
 
+五个 `*-age-days` 参数都支持 `--flag=value` 等号形式：`--cache-age-days=N`、`--log-age-days=N`、`--projects-age-days=N`、`--dshtmp-age-days=N`、`--projectcache-age-days=N`；值必须是非负整数，否则 `exit 1`。
+
 `--orphans-delete` 的路径校验（任一不满足即 `exit 1`，错误信息会说明原因）：
 
 1. 必须是绝对路径，且**不接受尾斜杠**；
@@ -93,6 +95,12 @@ stdout 是**单个** JSON 对象（`--clean` 下外部命令输出一律走 stde
   },
   "exit_code": 0,
   "failed_count": 0,
+  "codes": [
+    {"id": "bigbuild", "status": "done", "total_kb": 0, "deletable_kb": 0, "items": 7}
+  ],
+  "reports": [
+    {"id": "cores", "label": "崩溃转储", "kb": 0, "note": "…"}
+  ],
   "items": [
     {"id": "caches", "label": "…", "status": "queried", "total_kb": 0,
      "deletable_kb": 0, "path": "…", "note": "…"}
@@ -100,11 +108,14 @@ stdout 是**单个** JSON 对象（`--clean` 下外部命令输出一律走 stde
 }
 ```
 
+- `codes[]`：按编码聚合的视图（`items[]` 里同一编码可能因分步执行有多条，如 `bigbuild`、`toolcache`）：`total_kb`/`deletable_kb` 求和、`items` 是出现次数；`status` 取最严重（`failed` > `partial` > `done` > `dry-run` > `reported` > `queried` > `skipped-sudo` > `skipped-unselected`），顺序按编码首次出现；
+- `reports[]`：只报告段的机器可读视图（`/cores`、`/Applications` 等系统级大户），每项 `{id,label,kb,note}`；**`kb=-1` 表示读不到**（不是 0）；不进 `items[]`、不计入可删量、不影响退出码；
+
 - `freed_kb`：只有 `--clean` 且非 `--dry-run` 时等于 `estimated_freed_kb`；**查询/预览恒为 0**；
 - `estimated_freed_kb`：本次状态为 `done` 的项，其 `deletable_kb` 之和；`partial`/`failed` 不计入（实际删除量无法确认）；
 - `df_delta_kb`：前后 `df` 差值，**始终**给出，作为旁证（含系统自身回收、其它进程写入等噪声，不能当成清理成果）；
 - `exit_code`：与进程退出码一致（JSON 只在通过手刹校验后输出，所以这里是 `0` 或 `1`；`2` 的情况见上，此时没有 JSON）；`failed_count`：状态为 `partial`/`failed` 的项数，`exit_code=1` 时至少为 1；
-- `items[].status` ∈ `queried` / `dry-run` / `skipped-unselected` / `skipped-sudo` / `done` / `partial` / `failed`（`orphans` 另有 `reported`）；同一编码可能因分步执行出现多条（如 `bigbuild`、`toolcache`），按 `id` 汇总时注意；
+- `items[].status` ∈ `queried` / `dry-run` / `skipped-unselected` / `skipped-sudo` / `done` / `partial` / `failed`（`orphans` 另有 `reported`）；同一编码可能因分步执行出现多条（如 `bigbuild`、`toolcache`），要按编码汇总用 `codes[]`（见上）；
 - `items[].total_kb` / `deletable_kb` 是 KB 整数。
 
 ### 两个口径：目录总量 ≠ 本次可删量
@@ -134,14 +145,14 @@ stdout 是**单个** JSON 对象（`--clean` 下外部命令输出一律走 stde
 | `tmp` | `/private/tmp` | 只删 1 天前的陈旧内容 | **是** | 运行中程序的临时文件会重建 |
 | `varfolders` | 当前用户 `/var/folders` 容器 | `T`/`C` 清 7 天以上；`X` 清 `*code_sign_clone*` 与 7 天前的顶层条目；`T/go-build*` 清 1 天前的顶层目录 | 否 | 无 |
 | `snapshots` | Time Machine 本地快照 | 存在快照时 `tmutil thinlocalsnapshots / 999999999999 4` | **是** | 回滚粒度变粗，系统会重建 |
-| `trash` | `~/.Trash` | 清空 | 否 | **不可恢复** |
+| `trash` | `~/.Trash` | 清空（含隐藏项，`-print0` 遍历） | 否 | **不可恢复** |
 | `xcode` | Xcode `DerivedData` | 整个删掉 | 否 | 下次构建全量重编 |
 | `toolcache` | 语言工具链/包管理器白名单 + `pnpm store prune` | 删目录（只读缓存先 `chmod -R u+w`）；pnpm 只回收未引用包 | 否 | 重新下载/编译 |
 | `bigbuild` | ipsw、Homebrew、CocoaPods、Gradle、iOS DeviceSupport、CoreSimulator/Caches、不可用模拟器 | 删目录；`brew cleanup --prune=all` + `autoremove`；`xcrun simctl delete unavailable` | 否 | 重新下载/构建；Homebrew 旧版本不能回滚 |
 | `docker` | 未使用镜像、停止的容器、构建缓存、未用网络 | `docker system prune -a --force` | 否 | 镜像要重新 pull；**Docker.raw 不缩小** |
 | `appcache` | `~/Library/Application Support/*/{Cache,GPUCache,Code Cache,CachedData,CachedExtensionVSIXs,Service Worker/CacheStorage,…}` | 整目录删，<10 MB 不入清单 | 否 | app 首次启动重建缓存；不动配置/登录态 |
-| `updaters` | `crx_cache`、`auto-updater`、`app-recovery-cache`、`UpdateCache` | 整目录删 | 否 | 重新下载更新包 |
-| `projects` | `--projects-roots`（默认 `~/Documents`）下的 `node_modules`、`dist`、`build`、`.next`、`.turbo`、`.venv`、`target`、`Pods` 等 | 只处理 ≥ `--projects-age-days`（默认 30 天）未改动的目录，<50 MB 不入清单 | 否 | 需重新 install/build |
+| `updaters` | `crx_cache`、`auto-updater`、`app-recovery-cache`、`UpdateCache` | 整目录删，<10 MB 不入清单 | 否 | 重新下载更新包 |
+| `projects` | `--projects-roots`（默认 `~/Documents`）下的 `node_modules`、`dist`、`build`、`.next`、`.turbo`、`.venv`、`target`、`Pods` 等 | 只处理 ≥ `--projects-age-days`（默认 30 天）未改动的目录，<50 MB 不入清单；mtime 读不到则跳过（不当成 0 天可删） | 否 | 需重新 install/build |
 | `dshtmp` | 项目内 `**/.dsh/tmp` 过程产物（只在 `--projects-roots` 下扫） | 只清空内容、**保留 `.dsh/tmp` 目录本身**；`--dshtmp-age-days`（默认 0 天 = 全部可删）；<10 MB 不入清单；`docs/` 不动 | 否 | 过程产物消失，需要时重新生成 |
 | `projectcache` | 项目内编译缓存：`.gocache`、`.tmp-gocache`、`.dsh/gocache`、`.pnpm-store`、`.corepack` | 整目录删；`--projectcache-age-days`（默认 3 天）；<50 MB 不入清单 | 否 | 下次构建/install 重跑 |
 | `orphans` | 已卸载 App 留在 `~/Library`、`/Library` 的目录（Application Support / Preferences / Containers / Group Containers / HTTPStorages / LaunchAgents 等） | **只报告**：反推已装 App 名单后列出疑似项；删除只认 `--orphans-delete` 点名、且在本次候选里的路径 | 部分（`/Library` 下） | 删的是该 App 的配置/缓存/许可数据，不可恢复 |
@@ -456,6 +467,17 @@ sqlite3 ~/opencode-backup/opencode.db "PRAGMA integrity_check;"   # 应返回 ok
 | 文档类应用 | `~/Library/Application Support/Notion/Partitions` 等 | 退出应用后删缓存分区，或应用内清理 |
 | 邮件 / 信息附件 | `~/Library/Mail`、`~/Library/Messages/Attachments` | 应用内删除 |
 | 动态壁纸素材 | `~/Library/Application Support/com.apple.wallpaper/aerials` | 系统设置里换壁纸后由系统回收 |
+| 崩溃转储 | `/cores` | root 属主；确认后交用户终端：`sudo rm -f /cores/core.*` |
+| Apple Intelligence | `/System/Library/AssetsV2/com_apple_MobileAsset_UAF_FM_*`、`/private/var/db/AppleIntelligencePlatform`、`~/Library/Caches/com.apple.intelligence` | 系统托管，**只能看不能删**；入口「系统设置 → 通用 → 储存空间」 |
+| 交换/睡眠镜像 | `/private/var/vm` | **不要手删**，系统自行回收 |
+| 系统统一日志 | `/private/var/db/diagnostics`、`/private/var/db/uuidtext` | **不要手删**，系统自行轮转 |
+| 系统更新暂存 | `/Library/Updates` | **不要动** |
+| 应用体积 | `/Applications` | 只报告；卸载不需要的 App 由用户决定 |
+| iCloud 本地副本 | `~/Library/Mobile Documents` | 应用内「移除下载」 |
+
+其中 `/cores`、Apple Intelligence、`/private/var/vm`、`/private/var/db/diagnostics`+`uuidtext`、`/Library/Updates`、`/Applications`、iCloud 本地副本
+**均由脚本在查询输出里自动报告**（只读段「只报告：系统级大户」；`--json` 里是 `reports[]`，读不到时 `kb=-1` 且 `note` 写「读不到（…）」，
+只读、不改变退出码、不计入可删量）；删除/清理入口仍按上表方式由用户操作。
 
 只读探测（先量后说）：
 

@@ -438,6 +438,19 @@ while [[ $# -gt 0 ]]; do
         --projectcache-age-days) PROJECTCACHE_AGE_DAYS="$2" ;;
       esac
       shift 2 ;;
+    --cache-age-days=*|--log-age-days=*|--projects-age-days=*|--dshtmp-age-days=*|--projectcache-age-days=*)
+      # 等号形式：--cache-age-days=3（值仍必须是非负整数）
+      _age_val="${1#*=}"
+      _age_flag="${1%%=*}"
+      if ! is_pos_int "$_age_val"; then echo "${_age_flag} 需要一个非负整数天数" >&2; exit 1; fi
+      case "$_age_flag" in
+        --cache-age-days) CACHE_AGE_DAYS="$_age_val" ;;
+        --log-age-days) LOG_AGE_DAYS="$_age_val" ;;
+        --projects-age-days) PROJECTS_AGE_DAYS="$_age_val" ;;
+        --dshtmp-age-days) DSHTMP_AGE_DAYS="$_age_val" ;;
+        --projectcache-age-days) PROJECTCACHE_AGE_DAYS="$_age_val" ;;
+      esac
+      shift ;;
     --projects-roots)
       if [[ $# -lt 2 ]]; then echo "$1 需要一个路径" >&2; exit 1; fi
       PROJECT_ROOTS="$2"; shift 2 ;;
@@ -552,6 +565,60 @@ PLAN_CMD=""
 REPORT_STEPS=()
 SKIPPED_STEPS=()
 JSON_ITEMS=()
+JSON_CODE_IDS=()           # codes[] 聚合：与 items[] 并行的明细（同编码可能多条）
+JSON_CODE_STATUSES=()
+JSON_CODE_TOTALS=()
+JSON_CODE_DELS=()
+REPORT_JSON=""             # 「只报告：系统级大户」的 reports[] 片段
+REPORT_SEP=""
+
+# status_rank <status>：codes[] 聚合时取最严重的状态（数字越大越严重）
+status_rank() {
+  case "${1:-}" in
+    failed) echo 7 ;;
+    partial) echo 6 ;;
+    done) echo 5 ;;
+    dry-run) echo 4 ;;
+    reported) echo 3 ;;
+    queried) echo 2 ;;
+    skipped-sudo) echo 1 ;;
+    *) echo 0 ;;   # skipped-unselected / 未知
+  esac
+}
+
+# build_codes_json：把 items[] 的并行明细按 id 聚合为 codes[]（首次出现顺序）
+build_codes_json() {
+  local i j id total del count rank best best_rank out="" sep="" found
+  for ((i = 0; i < ${#JSON_CODE_IDS[@]}; i++)); do
+    id="${JSON_CODE_IDS[$i]}"
+    found=0
+    for ((j = 0; j < i; j++)); do
+      [[ "${JSON_CODE_IDS[$j]}" == "$id" ]] && { found=1; break; }
+    done
+    [[ "$found" -eq 1 ]] && continue
+    total=0; del=0; count=0; best=""; best_rank=0
+    for ((j = i; j < ${#JSON_CODE_IDS[@]}; j++)); do
+      [[ "${JSON_CODE_IDS[$j]}" == "$id" ]] || continue
+      count=$((count + 1))
+      total=$((total + ${JSON_CODE_TOTALS[$j]:-0}))
+      del=$((del + ${JSON_CODE_DELS[$j]:-0}))
+      rank=$(status_rank "${JSON_CODE_STATUSES[$j]}")
+      if [[ "$rank" -gt "$best_rank" ]]; then
+        best_rank="$rank"
+        best="${JSON_CODE_STATUSES[$j]}"
+      fi
+    done
+    out="${out}${sep}{\"id\":\"$(json_esc "$id")\",\"status\":\"${best}\",\"total_kb\":${total},\"deletable_kb\":${del},\"items\":${count}}"
+    sep=","
+  done
+  printf '%s' "$out"
+}
+
+# report_add <json 片段>：追加到 reports[]（A6 只报告段用）
+report_add_json() {
+  REPORT_JSON="${REPORT_JSON}${REPORT_SEP}${1}"
+  REPORT_SEP=","
+}
 
 json_add() {
   local id="$1" desc="$2" status="$3" obj
@@ -564,6 +631,10 @@ json_add() {
     obj="${obj},\"note\":\"$(json_esc "$STEP_NOTE")\""
   fi
   JSON_ITEMS+=("${obj}}")
+  JSON_CODE_IDS+=("$id")
+  JSON_CODE_STATUSES+=("$status")
+  JSON_CODE_TOTALS+=("${STEP_TOTAL_KB:-0}")
+  JSON_CODE_DELS+=("${STEP_DEL_KB:-0}")
   # estimated_freed_kb：只统计确定成功（done）的项；partial 表示有失败条目，
   # 实际删了多少无法确认，用 deletable_kb 估算会把「rm 全失败」也报成已释放
   case "$status" in
@@ -963,12 +1034,18 @@ say ""
 # ---------- 6. 废纸篓 [trash] ----------
 say "----- 6. 清空废纸篓 [trash] -----"
 clean_trash() {
-  local fails=0 p
-  for p in "$HOME"/.Trash/*; do
-    [[ -e "$p" ]] || continue
-    rm -rf "$p" 2>/dev/null || fails=$((fails + 1))
-  done
-  say "      清空完成；未能删除 ${fails} 项（可能被占用）"
+  local fails=0 n=0 left=0 p
+  # 用 NUL 分隔遍历，覆盖 .Trash 里的隐藏项（glob * 不会匹配 dotfile）
+  while IFS= read -r -d '' p; do
+    n=$((n + 1))
+    rm -rf -- "$p" 2>/dev/null || fails=$((fails + 1))
+  done < <(find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
+  # 回读：仍有条目（隐藏/删不掉/并发写入）计入失败
+  while IFS= read -r -d '' p; do
+    left=$((left + 1))
+  done < <(find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
+  [[ "$left" -gt "$fails" ]] && fails="$left"
+  say "      清空完成（含隐藏项，共 ${n} 项）；未能删除 ${fails} 项（可能被占用）"
   STEP_NOTE="未能删除 ${fails} 项"
   [[ "$fails" -eq 0 ]]
 }
@@ -978,7 +1055,7 @@ if [[ -d "$HOME/.Trash" ]]; then
   STEP_TOTAL_KB="$TRASH_TOTAL_KB"
   STEP_DEL_KB="$TRASH_TOTAL_KB"
   STEP_PATH="$HOME/.Trash"
-  PLAN_CMD="rm -rf ${HOME}/.Trash/*"
+  PLAN_CMD="find ${HOME}/.Trash -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +"
   run trash "清空废纸篓" clean_trash
 else
   say "  未找到废纸篓，跳过"
@@ -1279,18 +1356,19 @@ if [[ -d "$APPSUPPORT" ]]; then
   while IFS= read -r d; do
     [[ -n "$d" ]] || continue
     sz=$(du_kb "$d")
+    [[ "$sz" -lt 10240 ]] && continue     # < 10MB 不入清单、不计可删量（与 appcache 一致）
     UPD_TOTAL_KB=$((UPD_TOTAL_KB + sz))
     UPD_LIST="${UPD_LIST}${d}"$'\n'
     UPD_TOP="${UPD_TOP}${sz}	${d#"$APPSUPPORT"/}"$'\n'
   done < <(printf '%s\n' "$UPD_FOUND")
-  say "  本次可删合计: $(human "$UPD_TOTAL_KB")（浏览器扩展更新缓存、app 自动更新包）"
+  say "  本次可删合计: $(human "$UPD_TOTAL_KB")（>10 MB 的更新残留目录）"
   printf '%s' "$UPD_TOP" | sort -rn | head -8 | while IFS=$'\t' read -r kb nm; do
     [[ -n "${nm:-}" ]] && say "    - $(human "$kb")  ${nm}"
   done
   STEP_TOTAL_KB="$UPD_TOTAL_KB"
   STEP_DEL_KB="$UPD_TOTAL_KB"
   STEP_PATH="$APPSUPPORT"
-  PLAN_CMD="rm -rf <上列 crx_cache / auto-updater / app-recovery-cache 目录>"
+  PLAN_CMD="rm -rf <上列 >10 MB 的 crx_cache / auto-updater / app-recovery-cache 目录>"
   run updaters "清理应用自动更新下载残留" clean_updaters
 else
   say "  未找到 ~/Library/Application Support，跳过"
@@ -1336,7 +1414,12 @@ for root in $PROJECT_ROOTS; do
     if [[ "$sz" -lt 51200 ]]; then continue; fi      # < 50MB 不列为候选
     PROJ_N=$((PROJ_N + 1))
     PROJ_TOTAL_KB=$((PROJ_TOTAL_KB + sz))
-    mtime=$(stat -f '%m' "$d" 2>/dev/null || echo 0)
+    mtime=$(stat -f '%m' "$d" 2>/dev/null || true)
+    if [[ -z "$mtime" ]]; then
+      # mtime 读不到就不判新旧：绝不进可删清单（宁可漏清，不可误删活跃项目）
+      PROJ_TOP="${PROJ_TOP}${sz}	$(human "$sz")  ${d#"$HOME"/}  （mtime 读取失败，跳过）"$'\n'
+      continue
+    fi
     age_days=$(( ( $(date +%s) - mtime ) / 86400 ))
     if keep_matches "$d"; then
       PROJ_TOP="${PROJ_TOP}${sz}	$(human "$sz")  ${d#"$HOME"/}  （保留：--projects-keep）"$'\n'
@@ -1769,6 +1852,10 @@ json_orphans() {
     sep=","
   done < <(printf '%s\n' "$ORPHAN_ROWS")
   JSON_ITEMS+=("${obj},\"candidates\":[${cands}]}")
+  JSON_CODE_IDS+=("orphans")
+  JSON_CODE_STATUSES+=("$status")
+  JSON_CODE_TOTALS+=("$ORPHAN_TOTAL_KB")
+  JSON_CODE_DELS+=(0)
 }
 
 clean_orphans() {
@@ -1851,9 +1938,92 @@ run_orphans() {
 run_orphans
 say ""
 
-# ---------- 16. 最占空间 Top N（只读） ----------
+# ---------- 16. 只报告：系统级大户（只读，不代删） ----------
+say "----- 16. 只报告：系统级大户（只读，不代删） -----"
+say "  本节只报告、不代删，也不改变退出码；读不到的项如实写「读不到」，不当 0。"
+
+# report_line <id> <label> <kb> <note>：文本一行 + reports[] 一条（kb<0 表示读不到）
+report_line() {
+  local id="$1" label="$2" kb="$3" note="$4" json_note="$4"
+  if [[ "$kb" -lt 0 ]]; then
+    say "  ${label}: 读不到${note:+（${note}）}"
+    # JSON 侧也要让 note 自解释：kb=-1 时统一带「读不到」前缀（已含则不重复）
+    case "$json_note" in
+      *读不到*) ;;
+      "") json_note="读不到" ;;
+      *) json_note="读不到（${json_note}）" ;;
+    esac
+  else
+    say "  ${label}: $(human "$kb")${note:+（${note}）}"
+  fi
+  report_add_json "{\"id\":\"$(json_esc "$id")\",\"label\":\"$(json_esc "$label")\",\"kb\":${kb},\"note\":\"$(json_esc "$json_note")\"}"
+}
+
+# report_path <id> <label> <path> <ok_note> <unreadable_note>
+report_path() {
+  local id="$1" label="$2" path="$3" oknote="$4" badnote="$5" kb
+  if [[ ! -e "$path" ]]; then
+    report_line "$id" "$label" 0 "未找到"
+    return 0
+  fi
+  kb=$(du -sk "$path" 2>/dev/null | awk '{print $1}')
+  if [[ -z "$kb" ]]; then
+    report_line "$id" "$label" -1 "$badnote"
+  else
+    report_line "$id" "$label" "$kb" "$oknote"
+  fi
+}
+
+# /cores：崩溃转储（root 属主；确认后可删，但本节不代删）
+CORES_KB=$(du -sk /cores 2>/dev/null | awk '{print $1}')
+CORES_N=$(find /cores -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')
+if [[ ! -d /cores ]]; then
+  report_line cores "崩溃转储 /cores" 0 "未找到"
+elif [[ -z "$CORES_KB" ]]; then
+  report_line cores "崩溃转储 /cores" -1 "root 属主，读不到；确认后可删 sudo rm -f /cores/core.*（交用户终端）"
+else
+  report_line cores "崩溃转储 /cores" "$CORES_KB" "${CORES_N} 个 core 文件；确认后可删 sudo rm -f /cores/core.*（交用户终端）"
+fi
+
+# Apple Intelligence：三个位置，读不到按 SIP/TCC 处理
+AI_TOTAL=0
+AI_SEEN=0
+AI_UNREADABLE=0
+_ai_measure() {
+  local p="$1" kb
+  [[ -e "$p" ]] || return 0
+  AI_SEEN=1
+  kb=$(du -sk "$p" 2>/dev/null | awk '{print $1}')
+  if [[ -z "$kb" ]]; then
+    AI_UNREADABLE=1
+  else
+    AI_TOTAL=$((AI_TOTAL + kb))
+  fi
+}
+for _ai_hit in /System/Library/AssetsV2/com_apple_MobileAsset_UAF_FM_*; do
+  _ai_measure "$_ai_hit"   # 无匹配时是字面量，_ai_measure 里 -e 为假直接跳过
+done
+_ai_measure "/private/var/db/AppleIntelligencePlatform"
+_ai_measure "$HOME/Library/Caches/com.apple.intelligence"
+if [[ "$AI_SEEN" -eq 0 ]]; then
+  report_line apple_intelligence "Apple Intelligence" 0 "未找到"
+elif [[ "$AI_UNREADABLE" -eq 1 ]]; then
+  report_line apple_intelligence "Apple Intelligence" -1 "SIP/TCC"
+else
+  report_line apple_intelligence "Apple Intelligence" "$AI_TOTAL" "系统托管，只能看不能删；入口「系统设置 → 通用 → 储存空间」"
+fi
+
+report_path vm "交换/睡眠镜像 /private/var/vm" "/private/var/vm" "不要手删，系统自行回收" "SIP/权限拒绝"
+report_path diagnostics "系统统一日志 /private/var/db/diagnostics" "/private/var/db/diagnostics" "不要手删，系统自行轮转" "SIP/权限拒绝"
+report_path uuidtext "系统统一日志 /private/var/db/uuidtext" "/private/var/db/uuidtext" "不要手删，系统自行轮转" "SIP/权限拒绝"
+report_path updates "系统更新暂存 /Library/Updates" "/Library/Updates" "不要动" "权限拒绝"
+report_path applications "应用体积 /Applications" "/Applications" "只报告；卸载不需要的 App 由用户决定" "权限拒绝"
+report_path icloud "iCloud 本地副本 ~/Library/Mobile Documents" "$HOME/Library/Mobile Documents" "只报告；应用内「移除下载」" "权限拒绝"
+say ""
+
+# ---------- 17. 最占空间 Top N（只读） ----------
 if [[ "$TOP_N" -gt 0 ]]; then
-  say "----- 16. \$HOME 下最占空间的 ${TOP_N} 项（只读）-----"
+  say "----- 17. \$HOME 下最占空间的 ${TOP_N} 项（只读）-----"
   say "  正在扫描（-xdev 全量遍历，100G+ 的 HOME 可能要几分钟；这一步只在 --top 时跑）..."
   say ""
   say "  目录 Top ${TOP_N}:"
@@ -1950,9 +2120,10 @@ if [[ "$JSON" == "1" ]]; then
   MODE="query"
   [[ "$CLEAN" == "1" ]] && MODE="clean"
   [[ "$DRY_RUN" == "1" ]] && MODE="dry-run"
-  printf '{"schema":1,"mode":"%s","exit_code":%s,"failed_count":%s,"disk":{"free_before_kb":%s,"free_after_kb":%s,"freed_kb":%s,"estimated_freed_kb":%s,"df_delta_kb":%s},"items":[' \
+  CODES_JSON=$(build_codes_json)
+  printf '{"schema":1,"mode":"%s","exit_code":%s,"failed_count":%s,"disk":{"free_before_kb":%s,"free_after_kb":%s,"freed_kb":%s,"estimated_freed_kb":%s,"df_delta_kb":%s},"codes":[%s],"reports":[%s],"items":[' \
     "$MODE" "$FINAL_EXIT" "$FAILED_COUNT" "$DISK_FREE_BEFORE_KB" "$DISK_FREE_AFTER_KB" \
-    "$FREED_KB" "$ESTIMATED_FREED_KB" "$DF_DELTA_KB"
+    "$FREED_KB" "$ESTIMATED_FREED_KB" "$DF_DELTA_KB" "$CODES_JSON" "$REPORT_JSON"
   sep=""
   if [[ ${#JSON_ITEMS[@]} -gt 0 ]]; then
     for it in "${JSON_ITEMS[@]}"; do
