@@ -43,17 +43,25 @@ SKIP_RAW=""
 CACHE_AGE_DAYS=1
 LOG_AGE_DAYS=7
 PROJECTS_AGE_DAYS=30
+DSHTMP_AGE_DAYS=0           # 0 = 全部可删（.dsh/tmp 是过程产物）
+PROJECTCACHE_AGE_DAYS=3
 PROJECT_ROOTS="${PROJECT_ROOTS:-$HOME/Documents}"
-PROJECTS_KEEP=""
+PROJECTS_KEEP_LIST=()      # 已归一化的 --projects-keep 绝对路径（bash 3.2 数组）
 ORPHANS_AGE_DAYS=0          # 0 = 不限年龄（残留本身就是「App 不在了」的证据，不看新旧）
 ORPHANS_DELETE_LIST=""     # 换行分隔的绝对路径；只有列在这里的才会被删
 ORPHANS_NEED_SUDO=0
 ORPHANS_LIST_ALL=0
 ORPHANS_MAX=15             # 默认只显示最大的 N 项，--orphans-list 显示全部
+ORPHAN_CANDIDATE_PATHS=()  # 本次扫描命中的残留候选（归一化绝对路径；--orphans-delete 只认这批）
+ESTIMATED_FREED_KB=0       # 状态为 done/partial 的项 deletable_kb 之和（估算）
+HAD_FAILURE=0              # 任一 item 为 partial/failed → 最终 exit 1
+FAILED_COUNT=0
+RM_FAILS=0                 # rm_nul_stdin/rm_tree_stdin 的失败计数（全局，避免子 shell）
+SANDBOX_SUSPECT=0          # 预检发现 $HOME 下不可写（疑似 workspace-write 沙箱）→ EPERM 不再当 TCC 跳过
 
 # 清理项编码：勾选单位。新增清理项时必须同时更新这里、references/cleanup.md 与 SKILL.md 的清单；
 # scripts/check-disk-cleanup-codes.mjs 会校验三处是否一致（CI 会跑）。
-KNOWN_IDS="caches logs tmp varfolders snapshots trash xcode toolcache bigbuild docker appcache updaters projects orphans"
+KNOWN_IDS="caches logs tmp varfolders snapshots trash xcode toolcache bigbuild docker appcache updaters projects dshtmp projectcache orphans"
 
 # 卸载残留的扫描根（只看顶层条目，不递归）：残留按「App 会往哪几处写东西」枚举，
 # 不做全盘扫描。新增位置要同时改这里和 references/cleanup.md 的 orphans 小节。
@@ -93,6 +101,8 @@ item_label() {
     appcache)   echo "应用内缓存（Electron/Chromium 型 app）" ;;
     updaters)   echo "应用自动更新残留" ;;
     projects)   echo "项目构建产物（node_modules 等）" ;;
+    dshtmp)     echo "项目内 .dsh/tmp 过程产物" ;;
+    projectcache) echo "项目内编译缓存（Go/pnpm 等）" ;;
     orphans)    echo "已卸载应用的残留文件（只报告，按路径删）" ;;
     *)          echo "未知" ;;
   esac
@@ -101,7 +111,7 @@ item_label() {
 item_desc() {
   case "$1" in
     caches)     echo "纯缓存目录整删；其余只删 ${CACHE_AGE_DAYS} 天前未改动内容" ;;
-    logs)       echo "只删 ${LOG_AGE_DAYS} 天前的旧日志文件，保留目录结构" ;;
+    logs)       echo "只删 ${LOG_AGE_DAYS} 天前的旧日志文件与因此变空的旧目录；保留 ~/Library/Logs 本身" ;;
     tmp)        echo "只删 ${CACHE_AGE_DAYS} 天前的陈旧内容" ;;
     varfolders) echo "T/C 清 7 天以上；X 清代码签名残留与 7 天前目录；go-build 清 1 天以上" ;;
     snapshots)  echo "tmutil thinlocalsnapshots（回滚粒度变粗，系统会重建）" ;;
@@ -113,6 +123,8 @@ item_desc() {
     appcache)   echo "各 app 目录下的 Cache/GPUCache/Code Cache 等，app 会重建" ;;
     updaters)   echo "crx_cache / auto-updater 等更新下载残留" ;;
     projects)   echo "只处理 ${PROJECTS_AGE_DAYS} 天前未改动的构建产物目录（需重新 build）" ;;
+    dshtmp)     echo "只清空 */.dsh/tmp 的内容、保留目录；--dshtmp-age-days 默认 0（全部可删）" ;;
+    projectcache) echo "整目录删 .gocache/.tmp-gocache/.dsh/gocache/.pnpm-store/.corepack；只处理 ${PROJECTCACHE_AGE_DAYS} 天前未改动的目录（需重新 build/install）" ;;
     orphans)    echo "反推已装 App 名单后列出疑似残留；删除需 --orphans-delete 逐条指定路径" ;;
     *)          echo "" ;;
   esac
@@ -134,6 +146,152 @@ is_sudo_path() {
   esac
 }
 
+# resolve_path <p>：去掉尾斜杠、解析父目录真实路径后拼回 basename（末段符号链接保留不解析）。
+# 用于 --projects-keep 归一化、--orphans-delete 校验与候选比对；不做删除。
+resolve_path() {
+  local p="${1:-}" dir base
+  [[ -n "$p" ]] || { printf '%s' ""; return 0; }
+  while [[ "$p" == */ && ${#p} -gt 1 ]]; do p="${p%/}"; done
+  dir=$(cd -- "$(dirname -- "$p")" 2>/dev/null && pwd -P) || { printf '%s' "$p"; return 0; }
+  base=$(basename -- "$p")
+  printf '%s/%s' "$dir" "$base"
+}
+
+# keep_matches <path>：该路径是否命中 --projects-keep（两侧都已归一化）
+keep_matches() {
+  local r p
+  [[ ${#PROJECTS_KEEP_LIST[@]} -gt 0 ]] || return 1
+  r=$(resolve_path "${1:-}")
+  for p in "${PROJECTS_KEEP_LIST[@]}"; do
+    [[ "$r" == "$p" ]] && return 0
+  done
+  return 1
+}
+
+# rm_tree <path>：先 chmod -R u+w 再删，专治 Go/pnpm 等只读缓存目录；返回 rm 退出码
+rm_tree() {
+  local p="${1:-}"
+  [[ -n "$p" ]] || return 1
+  chmod -R u+w -- "$p" 2>/dev/null || true
+  rm -rf -- "$p" 2>/dev/null
+}
+
+# rm_nul_stdin：从 stdin 读 NUL 分隔路径逐个 rm -rf --，失败数写全局 RM_FAILS
+# （必须在当前 shell 调用：`rm_nul_stdin < <(find ... -print0)`，不能走管道）
+rm_nul_stdin() {
+  local p
+  RM_FAILS=0
+  while IFS= read -r -d '' p; do
+    [[ -n "$p" ]] || continue
+    rm -rf -- "$p" 2>/dev/null || RM_FAILS=$((RM_FAILS + 1))
+  done
+}
+
+# rm_tree_stdin：同 rm_nul_stdin，但每个条目走 rm_tree
+rm_tree_stdin() {
+  local p
+  RM_FAILS=0
+  while IFS= read -r -d '' p; do
+    [[ -n "$p" ]] || continue
+    rm_tree "$p" || RM_FAILS=$((RM_FAILS + 1))
+  done
+}
+
+# count_real_fails <err_text>：统计错误行时排除 TCC 的 "Operation not permitted"
+# （正常终端里这类是已知跳过，不应让整项变 partial；其它错误仍算失败）。
+# 但若预检已判定在 workspace-write 沙箱里（$HOME 下不可写），同一句 EPERM 更可能是
+# 沙箱拒绝删除 —— 这时不能当跳过，否则「一个字节没删却报 done」，所以全量计数。
+count_real_fails() {
+  if [[ "${SANDBOX_SUSPECT:-0}" == "1" ]]; then
+    printf '%s\n' "${1:-}" | grep -c . || true
+  else
+    printf '%s\n' "${1:-}" | grep -v 'Operation not permitted' | grep -c . || true
+  fi
+}
+
+# sum_top_kb <dir> [find 条件...]：对 dir 下顶层、匹配条件的条目逐个 du -sk 求和（KB）
+sum_top_kb() {
+  local dir="$1"; shift
+  find "$dir" -mindepth 1 -maxdepth 1 "$@" -exec du -sk {} + 2>/dev/null \
+    | awk '{s+=$1} END{printf "%d", s+0}'
+}
+
+# project_roots_list：把 --projects-roots（冒号分隔）展开为每行一个
+project_roots_list() {
+  local r old_ifs="$IFS"
+  IFS=':'
+  for r in $PROJECT_ROOTS; do printf '%s\n' "$r"; done
+  IFS="$old_ifs"
+}
+
+# prevalidate_orphan_delete_paths：--orphans-delete 的结构校验（不依赖扫描结果）
+# 绝对路径 / 拒绝尾斜杠 / 拒绝 .. 与 . 组件 / 必须存在 / 必须是某个扫描根的直接子项；
+# 通过后把 ORPHANS_DELETE_LIST 换成归一化路径，并按 resolved 判断是否需 sudo。
+prevalidate_orphan_delete_paths() {
+  local p pdir base resolved root_real _ok _root out=""
+  while IFS= read -r p; do
+    p="${p%$'\r'}"
+    [[ -z "$p" ]] && continue
+    case "$p" in
+      /*) ;;
+      *) echo "--orphans-delete 需要绝对路径: ${p}" >&2; exit 1 ;;
+    esac
+    if [[ "$p" == */ ]]; then
+      echo "--orphans-delete 不接受以 / 结尾的路径（会被当成整目录）: ${p}" >&2
+      exit 1
+    fi
+    case "/${p}/" in
+      *"/../"*|*"/./"*)
+        echo "--orphans-delete 路径不能包含 '..' 或 '.' 组件: ${p}" >&2
+        exit 1 ;;
+    esac
+    if [[ ! -e "$p" ]]; then
+      echo "--orphans-delete 路径不存在: ${p}" >&2
+      exit 1
+    fi
+    base=$(basename -- "$p")
+    pdir=$(cd -- "$(dirname -- "$p")" 2>/dev/null && pwd -P) || {
+      echo "--orphans-delete 父目录不可访问: ${p}" >&2
+      exit 1
+    }
+    resolved="${pdir}/${base}"
+    _ok=0
+    for _root in "${ORPHAN_ROOTS[@]}"; do
+      root_real=$(cd -- "$_root" 2>/dev/null && pwd -P) || continue
+      if [[ "$resolved" == "$root_real" ]]; then
+        echo "--orphans-delete 不能指向扫描根本身: ${p}" >&2
+        exit 1
+      fi
+      [[ "$pdir" == "$root_real" ]] && _ok=1
+    done
+    if [[ "$_ok" != "1" ]]; then
+      echo "--orphans-delete 只接受扫描根的直接子项: ${p}" >&2
+      exit 1
+    fi
+    is_sudo_path "$resolved" && ORPHANS_NEED_SUDO=1
+    out="${out}${resolved}"$'\n'
+  done < <(printf '%s\n' "$ORPHANS_DELETE_LIST")
+  ORPHANS_DELETE_LIST="$out"
+}
+
+# validate_orphan_delete_candidates：--orphans-delete 的路径必须出现在本次扫描候选里（扫描后调用）
+validate_orphan_delete_candidates() {
+  local p c found
+  while IFS= read -r p; do
+    [[ -z "$p" ]] && continue
+    found=0
+    if [[ ${#ORPHAN_CANDIDATE_PATHS[@]} -gt 0 ]]; then
+      for c in "${ORPHAN_CANDIDATE_PATHS[@]}"; do
+        [[ "$c" == "$p" ]] && { found=1; break; }
+      done
+    fi
+    if [[ "$found" != "1" ]]; then
+      echo "--orphans-delete 路径不在本次残留候选里（可能已安装、已被过滤或名字写错）: ${p}" >&2
+      exit 1
+    fi
+  done < <(printf '%s\n' "$ORPHANS_DELETE_LIST")
+}
+
 usage() {
   # 用 printf 而不是 here-doc：here-doc 需要临时文件，只读沙箱/无 TMPDIR 时会直接失败
   # （实测 `cannot create temp file for here document`，连 --help 都跑不出来）。
@@ -152,14 +310,17 @@ usage() {
     "  --cache-age-days N     caches/tmp 的 mtime 阈值（默认 1）" \
     "  --log-age-days N       logs 的 mtime 阈值（默认 7）" \
     "  --projects-age-days N  projects 只处理该天数前未改动的构建产物（默认 30）" \
-    "  --projects-roots <p>   projects 的扫描根（默认 \$HOME/Documents，可用冒号分隔多个）" \
-    "  --projects-keep <p>    projects 里排除的具体路径（可重复传）" \
+    "  --dshtmp-age-days N    dshtmp 只清空该天数前未改动的 .dsh/tmp（默认 0 = 全部可删）" \
+    "  --projectcache-age-days N  projectcache 只处理该天数前未改动的目录（默认 3）" \
+    "  --projects-roots <p>   projects/dshtmp/projectcache 的扫描根（默认 \$HOME/Documents，可用冒号分隔多个）" \
+    "  --projects-keep <p>    projects/dshtmp/projectcache 里排除的具体路径（可重复传）" \
     "  --orphans-list         卸载残留：显示全部疑似条目（默认只显示最大的 15 项）" \
     "  --orphans-age-days N   卸载残留：只列出该天数前未改动的条目（默认 0 = 不限）" \
-    "  --orphans-delete <p>   卸载残留：要删除的绝对路径（可重复传；必须落在扫描根下）" \
+    "  --orphans-delete <p>   卸载残留：要删除的绝对路径（可重复传；必须是扫描根直接子项且在本次候选里）" \
     "" \
     "可用编码: $KNOWN_IDS" \
-    "需 sudo 的项: tmp snapshots（agent 环境会被跳过，命令交给用户自己的终端执行）" \
+    "需 sudo 的项: tmp snapshots；--orphans-delete 指向 /Library 下路径时也需 sudo" \
+    "  （agent 环境会被跳过，命令交给用户自己的终端执行）" \
     "orphans 例外：只报告；删除只认 --orphans-delete 点名的路径，不参与 --all"
 }
 
@@ -167,11 +328,11 @@ list_items() {
   local id
   for id in $KNOWN_IDS; do
     if is_sudo_id "$id"; then
-      printf '  %-11s %s\n' "$id" "$(item_label "$id")    [需 sudo]"
+      printf '  %-12s %s\n' "$id" "$(item_label "$id")    [需 sudo]"
     else
-      printf '  %-11s %s\n' "$id" "$(item_label "$id")"
+      printf '  %-12s %s\n' "$id" "$(item_label "$id")"
     fi
-    printf '  %-11s   %s\n' "" "$(item_desc "$id")"
+    printf '  %-12s   %s\n' "" "$(item_desc "$id")"
   done
   printf '%s\n' \
     "" \
@@ -267,12 +428,14 @@ while [[ $# -gt 0 ]]; do
       if [[ -n "$SKIP_RAW" ]]; then SKIP_RAW="${SKIP_RAW},${2}"; else SKIP_RAW="$2"; fi
       shift 2 ;;
     --skip=*) SKIP_RAW="${SKIP_RAW:+${SKIP_RAW},}${1#--skip=}"; shift ;;
-    --cache-age-days|--log-age-days|--projects-age-days)
+    --cache-age-days|--log-age-days|--projects-age-days|--dshtmp-age-days|--projectcache-age-days)
       if [[ $# -lt 2 ]] || ! is_pos_int "$2"; then echo "$1 需要一个非负整数天数" >&2; exit 1; fi
       case "$1" in
         --cache-age-days) CACHE_AGE_DAYS="$2" ;;
         --log-age-days) LOG_AGE_DAYS="$2" ;;
         --projects-age-days) PROJECTS_AGE_DAYS="$2" ;;
+        --dshtmp-age-days) DSHTMP_AGE_DAYS="$2" ;;
+        --projectcache-age-days) PROJECTCACHE_AGE_DAYS="$2" ;;
       esac
       shift 2 ;;
     --projects-roots)
@@ -280,7 +443,7 @@ while [[ $# -gt 0 ]]; do
       PROJECT_ROOTS="$2"; shift 2 ;;
     --projects-keep)
       if [[ $# -lt 2 ]]; then echo "$1 需要一个路径" >&2; exit 1; fi
-      PROJECTS_KEEP="${PROJECTS_KEEP}${2}"$'\n'; shift 2 ;;
+      PROJECTS_KEEP_LIST+=("$(resolve_path "$2")"); shift 2 ;;
     --top)
       TOP_N=10
       if [[ $# -ge 2 ]] && is_pos_int "$2"; then TOP_N="$2"; shift; fi
@@ -313,32 +476,10 @@ fi
 validate_ids "$ONLY_RAW" "--only"
 validate_ids "$SKIP_RAW" "--skip"
 
-# --orphans-delete 的路径校验：只接受扫描根下的绝对路径，且路径要真实存在。
-# 目的不是「信任用户输入」，而是防止手滑删掉 $HOME、/、或别的应用的活数据——
-# 这条命令的执行者常常是 agent，路径错了没人拦得住。
+# --orphans-delete 的结构校验（不依赖扫描）：绝对路径 / 拒绝尾斜杠 / 拒绝 .. 与 . 组件 /
+# 必须存在 / 必须是某个扫描根的直接子项。候选归属在扫描完成后另行校验。
 if [[ -n "$ORPHANS_DELETE_LIST" ]]; then
-  while IFS= read -r p; do
-    p="${p%$'\r'}"
-    [[ -z "$p" ]] && continue
-    case "$p" in
-      /*) ;;
-      *) echo "--orphans-delete 需要绝对路径: ${p}" >&2; exit 1 ;;
-    esac
-    _ok=0
-    for _root in "${ORPHAN_ROOTS[@]}"; do
-      [[ "$p" == "$_root"/* ]] && _ok=1
-    done
-    if [[ "$_ok" != "1" ]]; then
-      echo "--orphans-delete 只接受扫描根下的路径: ${p}" >&2
-      echo "  扫描根: ${ORPHAN_ROOTS[*]}" >&2
-      exit 1
-    fi
-    if [[ ! -e "$p" ]]; then
-      echo "--orphans-delete 路径不存在: ${p}" >&2
-      exit 1
-    fi
-    is_sudo_path "$p" && ORPHANS_NEED_SUDO=1
-  done < <(printf '%s\n' "$ORPHANS_DELETE_LIST")
+  prevalidate_orphan_delete_paths
 fi
 
 ONLY_NORM=$(normalize_ids "$ONLY_RAW")
@@ -423,13 +564,19 @@ json_add() {
     obj="${obj},\"note\":\"$(json_esc "$STEP_NOTE")\""
   fi
   JSON_ITEMS+=("${obj}}")
+  # estimated_freed_kb：只统计确定成功（done）的项；partial 表示有失败条目，
+  # 实际删了多少无法确认，用 deletable_kb 估算会把「rm 全失败」也报成已释放
+  case "$status" in
+    done) ESTIMATED_FREED_KB=$((ESTIMATED_FREED_KB + ${STEP_DEL_KB:-0})) ;;
+  esac
 }
 
 # run <编码> <描述> <内部函数或命令...>
 # 未勾选 → 跳过；需 sudo 但无权限 → 跳过并打印可交接的命令；
 # 仅当 --clean 时执行；再配 --dry-run 则只打印 PLAN_CMD（调用方负责设置）。
+# 执行时函数/命令的 stdout 统一 >&2（保证 --json 模式下 stdout 只有 JSON）。
 run() {
-  local id="$1" desc="$2"; shift 2
+  local id="$1" desc="$2" rc=0 status; shift 2
   STEP_NOTE=""
   if [[ "$CLEAN" == "1" ]] && ! want "$id"; then
     LAST_RUN_SELECTED=0
@@ -458,12 +605,23 @@ run() {
     return 0
   fi
   say "   [执行] ${desc}"
-  if "$@"; then
+  # 只有 --json 需要把外部命令/函数输出赶到 stderr；文本模式保持原样（便于管道消费）
+  if [[ "$JSON" == "1" ]]; then
+    "$@" >&2 || rc=$?
+  else
+    "$@" || rc=$?
+  fi
+  if [[ "$rc" -eq 0 ]]; then
     REPORT_STEPS+=("${desc}${STEP_NOTE:+（${STEP_NOTE}）}")
     json_add "$id" "$desc" "done"
   else
-    SKIPPED_STEPS+=("${desc}（命令返回非 0，可能部分未删）")
-    json_add "$id" "$desc" "failed"
+    HAD_FAILURE=1
+    FAILED_COUNT=$((FAILED_COUNT + 1))
+    status="partial"
+    # 命令直接不存在（127）记为 failed；其余（有失败条目）为 partial
+    [[ "$rc" -eq 127 ]] && status="failed"
+    SKIPPED_STEPS+=("${desc}（${STEP_NOTE:-命令返回 ${rc}，可能部分未删}）")
+    json_add "$id" "$desc" "$status"
   fi
 }
 
@@ -506,29 +664,32 @@ denied_count() {
   printf '%s' "${n:-0}"
 }
 
-# delete_aged <path> <days>：删除 mtime 超过 days 天的条目，失败数写进 STEP_NOTE
+# delete_aged <path> <days>：删除 mtime 超过 days 天的条目，失败数写进 STEP_NOTE；
+# 有失败条目返回 1（供 run 记 partial）。
 delete_aged() {
-  local p="$1" d="$2" fails
+  local p="$1" d="$2" fails err
   [[ -e "$p" ]] || { say "      （路径不存在，跳过）"; STEP_NOTE="路径不存在"; return 0; }
-  fails=$(find "$p" -mindepth 1 -mtime +"$d" -delete 2>&1 >/dev/null | grep -c . || true)
+  err=$(find "$p" -mindepth 1 -mtime +"$d" -delete 2>&1 >/dev/null || true)
+  fails=$(count_real_fails "$err")
   fails="${fails:-0}"
   say "      删除完成；失败 ${fails} 条（受保护/正在使用的条目会留在原处）"
   STEP_NOTE="失败 ${fails} 条"
-  return 0
+  [[ "$fails" -eq 0 ]]
 }
 
 # delete_aged_sudo：sudo 项的 mtime 清理（仅当 SUDO_OK=1 时会被调用）
 delete_aged_sudo() {
-  local p="$1" d="$2" fails
+  local p="$1" d="$2" fails err
   [[ -e "$p" ]] || { say "      （路径不存在，跳过）"; STEP_NOTE="路径不存在"; return 0; }
-  fails=$(sudo find "$p" -mindepth 1 -mtime +"$d" -delete 2>&1 >/dev/null | grep -c . || true)
+  err=$(sudo find "$p" -mindepth 1 -mtime +"$d" -delete 2>&1 >/dev/null || true)
+  fails=$(count_real_fails "$err")
   fails="${fails:-0}"
   say "      删除完成；失败 ${fails} 条（系统占用的条目属正常）"
   STEP_NOTE="失败 ${fails} 条"
-  return 0
+  [[ "$fails" -eq 0 ]]
 }
 
-# delete_whole <path>：整目录删除
+# delete_whole <path>：整目录删除；失败返回 1
 delete_whole() {
   local p="$1"
   if [[ ! -e "$p" ]]; then
@@ -536,14 +697,14 @@ delete_whole() {
     STEP_NOTE="路径不存在"
     return 0
   fi
-  if rm -rf "$p" 2>/dev/null; then
+  if rm -rf -- "$p" 2>/dev/null; then
     say "      已删除 $p"
     STEP_NOTE="已删除"
-  else
-    say "      ⚠️ 未能完全删除 ${p}（可能受保护）"
-    STEP_NOTE="删除失败（可能受保护）"
+    return 0
   fi
-  return 0
+  say "      ⚠️ 未能完全删除 ${p}（可能受保护）"
+  STEP_NOTE="删除失败（可能受保护）"
+  return 1
 }
 
 # lower <str>：bash 3.2 没有 ${var,,}，统一走 tr
@@ -551,16 +712,33 @@ lower() { printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]'; }
 
 # is_purge_cache <条目名>：已知纯缓存/更新器目录 → 整目录清理，不套 mtime 阈值。
 # 判据：内容是仍可从服务端重新下载的副本（浏览器缓存、更新包）。
+# 注意：这里只判「名字属于纯缓存」；Chrome 的真实缓存位于 Google/Chrome 子目录，
+# 具体删哪一层由 cache_purge_targets 决定（orphans 跳过判断仍用本函数）。
 is_purge_cache() {
   local n
   n=$(lower "$1")
   case "$n" in
-    "microsoft edge"|"google/chrome"|"chromium"|"bravesoftware"|"vivaldi"|"opera"|"firefox") return 0 ;;
+    "microsoft edge"|"google"|"google/chrome"|"chromium"|"bravesoftware"|"vivaldi"|"opera"|"firefox") return 0 ;;
     *updater*|*-updater) return 0 ;;
     "com.apple.softwareupdate"|"com.apple.appstore"|"com.apple.appstoreagent") return 0 ;;
     "com.apple.safari"|"safari") return 0 ;;
   esac
   return 1
+}
+
+# cache_purge_targets <entry>：输出该顶层条目下要整删的路径（每行一个；不存在由调用方跳过）。
+# Chrome 只删 $entry/Chrome，不删整个 Google（Google 下还有别的 App 数据）。
+cache_purge_targets() {
+  local entry="${1:-}" n
+  [[ -n "$entry" ]] || return 0
+  n=$(lower "$(basename -- "$entry")")
+  case "$n" in
+    "google") printf '%s\n' "${entry}/Chrome" ;;
+    "microsoft edge"|"chromium"|"bravesoftware"|"vivaldi"|"opera"|"firefox") printf '%s\n' "$entry" ;;
+    *updater*|*-updater) printf '%s\n' "$entry" ;;
+    "com.apple.softwareupdate"|"com.apple.appstore"|"com.apple.appstoreagent") printf '%s\n' "$entry" ;;
+    "com.apple.safari"|"safari") printf '%s\n' "$entry" ;;
+  esac
 }
 
 say "======================================"
@@ -574,6 +752,17 @@ fi
 say "======================================"
 say ""
 
+# 沙箱预检（查询/清理都跑一次）：workspace-write 一类沙箱里 $HOME 下部分路径不可写，
+# 删除会被拒绝。只提示、不改变退出码，但会置 SANDBOX_SUSPECT=1：
+# 此时 "Operation not permitted" 不再当作 TCC 已知跳过（否则会假报 done）。
+SANDBOX_SUSPECT=0
+if [[ ! -w "$HOME/Library" || ! -w "$HOME/.Trash" ]]; then
+  SANDBOX_SUSPECT=1
+  say "⚠️ 当前进程对 \$HOME 下部分路径不可写（常见于 workspace-write 沙箱）。"
+  say "   工作区外的删除会被拒绝；请改用可写沙箱执行，或把命令交给用户终端。"
+  say ""
+fi
+
 say "【磁盘当前可用空间】："
 DF_LINE=$(df -h / 2>/dev/null | awk 'NR==2{print "可用: " $4 " / 总量: " $2}')
 say "${DF_LINE:-可用: 未知}"
@@ -585,19 +774,28 @@ say ""
 say "----- 1. 用户缓存 (~/Library/Caches) [caches] -----"
 CACHE_DIR="$HOME/Library/Caches"
 clean_caches() {
-  local p fails=0 n=0
+  local p fails=0 n=0 err real skipped=0
   while IFS= read -r p; do
     [[ -n "$p" ]] || continue
     n=$((n + 1))
-    rm -rf "$p" 2>/dev/null || fails=$((fails + 1))
+    if ! err=$(rm -rf -- "$p" 2>&1 >/dev/null); then
+      real=$(count_real_fails "$err")
+      if [[ "${real:-0}" -eq 0 ]]; then
+        skipped=$((skipped + 1))   # TCC/沙箱 EPERM：已知跳过，不算失败
+      else
+        fails=$((fails + 1))
+      fi
+    fi
   done < <(printf '%s\n' "$CACHE_PURGE_LIST")
   while IFS= read -r p; do
     [[ -n "$p" ]] || continue
-    find "$p" -mindepth 1 -mtime +"$CACHE_AGE_DAYS" -delete 2>/dev/null || true
+    err=$(find "$p" -mindepth 1 -mtime +"$CACHE_AGE_DAYS" -delete 2>&1 >/dev/null || true)
+    real=$(count_real_fails "$err")
+    fails=$((fails + ${real:-0}))
   done < <(printf '%s\n' "$CACHE_AGED_LIST")
-  say "      纯缓存整删 ${n} 个目录（失败 ${fails} 个）；其余按 ${CACHE_AGE_DAYS} 天阈值清理"
-  STEP_NOTE="整删 ${n} 个目录（失败 ${fails} 个）"
-  return 0
+  say "      纯缓存整删 ${n} 个目录（失败 ${fails} 个；TCC/权限跳过 ${skipped} 个）；其余按 ${CACHE_AGE_DAYS} 天阈值清理"
+  STEP_NOTE="整删 ${n} 个目录（失败 ${fails} 个，跳过 ${skipped} 个）"
+  [[ "$fails" -eq 0 ]]
 }
 if [[ -d "$CACHE_DIR" ]]; then
   CACHE_TOTAL_KB=$(du_kb "$CACHE_DIR")
@@ -610,13 +808,21 @@ if [[ -d "$CACHE_DIR" ]]; then
   for entry in "$CACHE_DIR"/*; do
     [[ -e "$entry" ]] || continue
     name=$(basename "$entry")
-    if is_purge_cache "$name"; then
-      sz=$(du_kb "$entry")
-      CACHE_DEL_KB=$((CACHE_DEL_KB + sz))
-      CACHE_PURGE_LIST="${CACHE_PURGE_LIST}${entry}"$'\n'
-      CACHE_PURGE_N=$((CACHE_PURGE_N + 1))
-      CACHE_TOP="${CACHE_TOP}${sz}	${name}（纯缓存，整删）"$'\n'
-    else
+    purge_used=0
+    purge_targets=$(cache_purge_targets "$entry")
+    if [[ -n "$purge_targets" ]]; then
+      while IFS= read -r tgt; do
+        [[ -n "$tgt" ]] || continue
+        [[ -e "$tgt" ]] || continue
+        purge_used=1
+        sz=$(du_kb "$tgt")
+        CACHE_DEL_KB=$((CACHE_DEL_KB + sz))
+        CACHE_PURGE_LIST="${CACHE_PURGE_LIST}${tgt}"$'\n'
+        CACHE_PURGE_N=$((CACHE_PURGE_N + 1))
+        CACHE_TOP="${CACHE_TOP}${sz}	${tgt#"$CACHE_DIR"/}（纯缓存，整删）"$'\n'
+      done < <(printf '%s\n' "$purge_targets")
+    fi
+    if [[ "$purge_used" == "0" ]]; then
       sz=$(subset_kb "$entry" "$CACHE_AGE_DAYS")
       CACHE_DEL_KB=$((CACHE_DEL_KB + sz))
       [[ "$sz" -gt 0 ]] && CACHE_AGED_LIST="${CACHE_AGED_LIST}${entry}"$'\n'
@@ -705,17 +911,22 @@ done
 
 clean_varfolders() {
   local fails=0 out
-  out=$(find "$FOLDERS_USER_DIR/T" -mindepth 1 -mtime +7 -delete 2>&1 >/dev/null | grep -c . || true)
-  fails=$((fails + ${out:-0}))
-  out=$(find "$FOLDERS_USER_DIR/C" -mindepth 1 -mtime +7 -delete 2>&1 >/dev/null | grep -c . || true)
-  fails=$((fails + ${out:-0}))
-  out=$(find "$FOLDERS_USER_DIR/X" -mindepth 1 -maxdepth 1 \( -name "*code_sign_clone*" -o -mtime +7 \) -delete 2>&1 >/dev/null | grep -c . || true)
-  fails=$((fails + ${out:-0}))
-  out=$(find "$FOLDERS_USER_DIR/T" -maxdepth 1 -type d -name "go-build*" -mtime +1 -delete 2>&1 >/dev/null | grep -c . || true)
-  fails=$((fails + ${out:-0}))
-  say "      T/C/X 与 go-build 清理完成；失败 ${fails} 条（多为受保护条目，属正常）"
+  out=$(find "$FOLDERS_USER_DIR/T" -mindepth 1 -mtime +7 -delete 2>&1 >/dev/null || true)
+  fails=$((fails + $(count_real_fails "$out")))
+  out=$(find "$FOLDERS_USER_DIR/C" -mindepth 1 -mtime +7 -delete 2>&1 >/dev/null || true)
+  fails=$((fails + $(count_real_fails "$out")))
+  # X：只删顶层条目（code_sign_clone 整个目录 + 7 天前条目）。-maxdepth 1 -delete 对
+  # 非空目录会静默空转，所以必须列出来逐个 rm -rf。
+  rm_nul_stdin < <(find "$FOLDERS_USER_DIR/X" -mindepth 1 -maxdepth 1 \
+      \( -name '*code_sign_clone*' -o -mtime +7 \) -print0 2>/dev/null)
+  fails=$((fails + RM_FAILS))
+  # T/go-build*：同样是顶层目录，整棵删
+  rm_nul_stdin < <(find "$FOLDERS_USER_DIR/T" -mindepth 1 -maxdepth 1 \
+      -type d -name 'go-build*' -mtime +1 -print0 2>/dev/null)
+  fails=$((fails + RM_FAILS))
+  say "      T/C/X 与 go-build 清理完成；失败 ${fails} 条（受保护/正在使用的条目会留在原处）"
   STEP_NOTE="失败 ${fails} 条"
-  return 0
+  [[ "$fails" -eq 0 ]]
 }
 
 if [[ -z "$FOLDERS_USER_DIR" ]]; then
@@ -723,12 +934,13 @@ if [[ -z "$FOLDERS_USER_DIR" ]]; then
 else
   say "  当前用户容器目录：$FOLDERS_USER_DIR"
   VF_TOTAL_KB=$(du_kb "$FOLDERS_USER_DIR")
-  VF_DEL_KB=$(( $(subset_kb "$FOLDERS_USER_DIR/T" 7) + $(subset_kb "$FOLDERS_USER_DIR/C" 7) + $(subset_kb "$FOLDERS_USER_DIR/X" 7) ))
-  say "  目录总量: $(human "$VF_TOTAL_KB") / 本次可删（T/C/X 7 天前）: $(human "$VF_DEL_KB")"
+  # 测量与删除谓词一致：T/C 用 mtime 文件求和；X 与 go-build 用「会被删的顶层条目」du 求和
+  VF_DEL_KB=$(( $(subset_kb "$FOLDERS_USER_DIR/T" 7) + $(subset_kb "$FOLDERS_USER_DIR/C" 7) + $(sum_top_kb "$FOLDERS_USER_DIR/X" \( -name '*code_sign_clone*' -o -mtime +7 \)) + $(sum_top_kb "$FOLDERS_USER_DIR/T" -type d -name 'go-build*' -mtime +1) ))
+  say "  目录总量: $(human "$VF_TOTAL_KB") / 本次可删（T/C/X 7 天前，顶层条目实测）: $(human "$VF_DEL_KB")"
   STEP_TOTAL_KB="$VF_TOTAL_KB"
   STEP_DEL_KB="$VF_DEL_KB"
   STEP_PATH="$FOLDERS_USER_DIR"
-  PLAN_CMD="find ${FOLDERS_USER_DIR}/{T,C,X} -mindepth 1 -mtime +7 -delete; find ${FOLDERS_USER_DIR}/T -maxdepth 1 -name 'go-build*' -mtime +1 -delete"
+  PLAN_CMD="find ${FOLDERS_USER_DIR}/T -mindepth 1 -mtime +7 -delete; find ${FOLDERS_USER_DIR}/C -mindepth 1 -mtime +7 -delete; find ${FOLDERS_USER_DIR}/X -mindepth 1 -maxdepth 1 \\( -name '*code_sign_clone*' -o -mtime +7 \\) -print0 | xargs -0 rm -rf --; find ${FOLDERS_USER_DIR}/T -mindepth 1 -maxdepth 1 -type d -name 'go-build*' -mtime +1 -print0 | xargs -0 rm -rf --"
   run varfolders "清理当前用户 /var/folders 的过期残留" clean_varfolders
 fi
 say ""
@@ -758,7 +970,7 @@ clean_trash() {
   done
   say "      清空完成；未能删除 ${fails} 项（可能被占用）"
   STEP_NOTE="未能删除 ${fails} 项"
-  return 0
+  [[ "$fails" -eq 0 ]]
 }
 if [[ -d "$HOME/.Trash" ]]; then
   TRASH_TOTAL_KB=$(du_kb "$HOME/.Trash")
@@ -793,12 +1005,18 @@ say ""
 say "----- 8. 大体积项目检测与清理 [bigbuild] [docker] -----"
 
 brew_cleanup() {
-  echo "  正在运行 brew cleanup --prune=all ..."
-  brew cleanup --prune=all 2>&1 | tail -3
-  brew autoremove 2>&1 | tail -3
-  say "      Homebrew 缓存与旧版本已清理"
-  STEP_NOTE="brew cleanup --prune=all + autoremove"
-  return 0
+  local rc1=0 rc2=0
+  say "  正在运行 brew cleanup --prune=all ..."
+  brew cleanup --prune=all >&2 || rc1=$?
+  brew autoremove >&2 || rc2=$?
+  if [[ "$rc1" -eq 0 && "$rc2" -eq 0 ]]; then
+    say "      Homebrew 缓存与旧版本已清理"
+    STEP_NOTE="brew cleanup --prune=all + autoremove"
+    return 0
+  fi
+  say "      ⚠️ brew cleanup/autoremove 返回非 0（可能权限或网络问题）"
+  STEP_NOTE="brew cleanup/autoremove 失败"
+  return 1
 }
 
 # 8.1 iOS 设备备份 —— 用户数据，只报告
@@ -956,16 +1174,26 @@ clean_toolcache() {
   local fails=0 p
   for p in "${SAFE_CACHE_DIRS[@]}"; do
     [[ -d "$p" ]] || continue
-    rm -rf "$p" 2>/dev/null || fails=$((fails + 1))
+    rm_tree "$p" || fails=$((fails + 1))
   done
   if [[ -d "$PNPM_PMS" ]]; then
-    rm -rf "$PNPM_PMS" 2>/dev/null || fails=$((fails + 1))
+    rm_tree "$PNPM_PMS" || fails=$((fails + 1))
   fi
   say "      白名单缓存清理完成；失败 ${fails} 个"
   STEP_NOTE="失败 ${fails} 个"
-  return 0
+  [[ "$fails" -eq 0 ]]
 }
 run toolcache "清理语言工具链/包管理器缓存" clean_toolcache
+
+# corepack 在 Node 25+ 已不再随发行版分发：缺失时回落直接调用 pnpm。
+prune_pnpm_store() {
+  if command -v corepack >/dev/null 2>&1; then
+    COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack pnpm store prune
+    return $?
+  fi
+  printf '%s\n' "  （未找到 corepack，改用 pnpm store prune）" >&2
+  pnpm store prune
+}
 
 if command -v pnpm &> /dev/null; then
   PNPM_STORE_KB=$(du_kb "$HOME/Library/pnpm/store")
@@ -974,8 +1202,8 @@ if command -v pnpm &> /dev/null; then
   STEP_DEL_KB=0
   STEP_PATH="$HOME/Library/pnpm/store"
   STEP_NOTE="仅回收未引用包"
-  PLAN_CMD="corepack pnpm store prune"
-  run toolcache "回收 pnpm store 中未引用的包" corepack pnpm store prune
+  PLAN_CMD="corepack pnpm store prune（无 corepack 时回落 pnpm store prune）"
+  run toolcache "回收 pnpm store 中未引用的包" prune_pnpm_store
 else
   say "  pnpm store: 未安装 pnpm，跳过"
 fi
@@ -993,7 +1221,7 @@ clean_appcache() {
   done < <(printf '%s\n' "$APPCACHE_LIST")
   say "      删除 ${n} 个目录，失败 ${fails} 个（app 正在写入的多半会失败，可退出 app 后重试）"
   STEP_NOTE="删除 ${n} 个目录，失败 ${fails} 个"
-  return 0
+  [[ "$fails" -eq 0 ]]
 }
 if [[ -d "$APPSUPPORT" ]]; then
   APPCACHE_TOTAL_KB=0
@@ -1039,7 +1267,7 @@ clean_updaters() {
   done < <(printf '%s\n' "$UPD_LIST")
   say "      删除 ${n} 个目录，失败 ${fails} 个"
   STEP_NOTE="删除 ${n} 个目录，失败 ${fails} 个"
-  return 0
+  [[ "$fails" -eq 0 ]]
 }
 if [[ -d "$APPSUPPORT" ]]; then
   UPD_TOTAL_KB=0
@@ -1081,7 +1309,7 @@ clean_projects() {
   done < <(printf '%s\n' "$PROJ_DEL_LIST")
   say "      删除 ${n} 个构建产物目录，失败 ${fails} 个"
   STEP_NOTE="删除 ${n} 个目录，失败 ${fails} 个"
-  return 0
+  [[ "$fails" -eq 0 ]]
 }
 PROJ_TOTAL_KB=0
 PROJ_DEL_KB=0
@@ -1110,7 +1338,7 @@ for root in $PROJECT_ROOTS; do
     PROJ_TOTAL_KB=$((PROJ_TOTAL_KB + sz))
     mtime=$(stat -f '%m' "$d" 2>/dev/null || echo 0)
     age_days=$(( ( $(date +%s) - mtime ) / 86400 ))
-    if [[ -n "$PROJECTS_KEEP" ]] && printf '%s' "$PROJECTS_KEEP" | grep -Fxq "$d"; then
+    if keep_matches "$d"; then
       PROJ_TOP="${PROJ_TOP}${sz}	$(human "$sz")  ${d#"$HOME"/}  （保留：--projects-keep）"$'\n'
       continue
     fi
@@ -1140,8 +1368,153 @@ PLAN_CMD="rm -rf <上列 ≥${PROJECTS_AGE_DAYS} 天未改动的构建产物目�
 run projects "清理项目构建产物（构建产物可再生）" clean_projects
 say ""
 
-# ---------- 13. 已卸载应用的残留 [orphans] ----------
-say "----- 13. 已卸载应用的残留文件 [orphans] -----"
+# ---------- 13. 项目内 .dsh/tmp 过程产物 [dshtmp] ----------
+say "----- 13. 项目内 .dsh/tmp 过程产物 [dshtmp] -----"
+say "  扫描根: ${PROJECT_ROOTS}（--projects-roots 可改；只清空内容、保留 .dsh/tmp 目录）"
+clean_dshtmp() {
+  local fails=0 n=0 d
+  while IFS= read -r d; do
+    [[ -n "$d" ]] || continue
+    n=$((n + 1))
+    # rm_tree_stdin 内每个子项都会 chmod -R u+w，这里不再做外层整树 chmod（避免双份递归）
+    rm_tree_stdin < <(find "$d" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
+    fails=$((fails + RM_FAILS))
+    # 回读：目录仍在且为空才算成功
+    if [[ -d "$d" ]] && [[ -z "$(find "$d" -mindepth 1 -maxdepth 1 -print 2>/dev/null | head -1)" ]]; then
+      :
+    else
+      fails=$((fails + 1))
+    fi
+  done < <(printf '%s\n' "$DSHTMP_DEL_LIST")
+  say "      清空 ${n} 个 .dsh/tmp 的内容（保留目录）；失败 ${fails} 个"
+  STEP_NOTE="清空 ${n} 个目录，失败 ${fails} 个"
+  [[ "$fails" -eq 0 ]]
+}
+DSHTMP_TOTAL_KB=0
+DSHTMP_DEL_KB=0
+DSHTMP_DEL_LIST=""
+DSHTMP_TOP=""
+DSHTMP_N=0
+DSHTMP_DEL_N=0
+while IFS= read -r root; do
+  if [[ ! -d "$root" ]]; then
+    say "  ⚠️ 扫描根不存在: $root"
+    continue
+  fi
+  DSHTMP_FOUND=$(find "$root" -maxdepth 7 -type d -path '*/.dsh/tmp' -prune -print 2>/dev/null || true)
+  while IFS= read -r d; do
+    [[ -n "$d" ]] || continue
+    sz=$(du_kb "$d")
+    [[ "$sz" -lt 10240 ]] && continue     # < 10MB 不进清单，减少噪音（与 appcache 一致）
+    DSHTMP_N=$((DSHTMP_N + 1))
+    DSHTMP_TOTAL_KB=$((DSHTMP_TOTAL_KB + sz))
+    mtime=$(stat -f '%m' "$d" 2>/dev/null || true)
+    if [[ -z "$mtime" ]]; then
+      DSHTMP_TOP="${DSHTMP_TOP}${sz}	$(human "$sz")  ${d#"$HOME"/}  （mtime 读取失败，跳过）"$'\n'
+      continue
+    fi
+    age_days=$(( ( $(date +%s) - mtime ) / 86400 ))
+    [[ "$age_days" -lt 0 ]] && age_days=0
+    if keep_matches "$d"; then
+      DSHTMP_TOP="${DSHTMP_TOP}${sz}	$(human "$sz")  ${d#"$HOME"/}  （保留：--projects-keep）"$'\n'
+      continue
+    fi
+    if [[ "$age_days" -ge "$DSHTMP_AGE_DAYS" ]]; then
+      DSHTMP_DEL_KB=$((DSHTMP_DEL_KB + sz))
+      DSHTMP_DEL_LIST="${DSHTMP_DEL_LIST}${d}"$'\n'
+      DSHTMP_DEL_N=$((DSHTMP_DEL_N + 1))
+      DSHTMP_TOP="${DSHTMP_TOP}${sz}	$(human "$sz")  ${d#"$HOME"/}  （${age_days} 天未改动，可删）"$'\n'
+    else
+      DSHTMP_TOP="${DSHTMP_TOP}${sz}	$(human "$sz")  ${d#"$HOME"/}  （${age_days} 天内有改动，跳过）"$'\n'
+    fi
+  done < <(printf '%s\n' "$DSHTMP_FOUND")
+done < <(project_roots_list)
+say "  命中 ${DSHTMP_N} 个 .dsh/tmp（≥10 MB），合计 $(human "$DSHTMP_TOTAL_KB")；其中可删（≥${DSHTMP_AGE_DAYS} 天，0=全部）$(human "$DSHTMP_DEL_KB")"
+printf '%s' "$DSHTMP_TOP" | sort -rn | head -12 | while IFS=$'\t' read -r kb nm; do
+  [[ -n "${nm:-}" ]] && say "    - ${nm}"
+done
+if [[ "$DSHTMP_N" -gt 12 ]]; then
+  say "    …（仅显示最大的 12 项；完整清单用 --json）"
+fi
+say "  注：只清空 */.dsh/tmp 的内容并保留目录本身；不触碰同级 .dsh/docs。"
+STEP_TOTAL_KB="$DSHTMP_TOTAL_KB"
+STEP_DEL_KB="$DSHTMP_DEL_KB"
+STEP_PATH=""
+PLAN_CMD="清空 ${DSHTMP_DEL_N} 个 .dsh/tmp 的内容（保留目录；$(human "$DSHTMP_DEL_KB")）"
+run dshtmp "清空项目内 .dsh/tmp 过程产物（保留目录）" clean_dshtmp
+say ""
+
+# ---------- 14. 项目内编译缓存 [projectcache] ----------
+say "----- 14. 项目内编译缓存（Go/pnpm 等）[projectcache] -----"
+say "  扫描根: ${PROJECT_ROOTS}（--projects-roots 可改；整目录删，只处理 ${PROJECTCACHE_AGE_DAYS} 天前未改动的目录）"
+clean_projectcache() {
+  local fails=0 n=0 p
+  while IFS= read -r p; do
+    [[ -n "$p" ]] || continue
+    n=$((n + 1))
+    rm_tree "$p" || fails=$((fails + 1))
+  done < <(printf '%s\n' "$PROJCACHE_DEL_LIST")
+  say "      删除 ${n} 个项目编译缓存目录，失败 ${fails} 个"
+  STEP_NOTE="删除 ${n} 个目录，失败 ${fails} 个"
+  [[ "$fails" -eq 0 ]]
+}
+PROJCACHE_TOTAL_KB=0
+PROJCACHE_DEL_KB=0
+PROJCACHE_DEL_LIST=""
+PROJCACHE_TOP=""
+PROJCACHE_N=0
+while IFS= read -r root; do
+  if [[ ! -d "$root" ]]; then
+    say "  ⚠️ 扫描根不存在: $root"
+    continue
+  fi
+  PROJCACHE_FOUND=$(find "$root" -maxdepth 7 -type d \
+      \( -name .gocache -o -name .tmp-gocache -o -name .pnpm-store -o -name .corepack \
+         -o -path '*/.dsh/gocache' \) \
+      -prune -print 2>/dev/null || true)
+  while IFS= read -r d; do
+    [[ -n "$d" ]] || continue
+    sz=$(du_kb "$d")
+    [[ "$sz" -lt 51200 ]] && continue      # < 50MB 不列为候选（与 projects 一致）
+    PROJCACHE_N=$((PROJCACHE_N + 1))
+    PROJCACHE_TOTAL_KB=$((PROJCACHE_TOTAL_KB + sz))
+    mtime=$(stat -f '%m' "$d" 2>/dev/null || true)
+    if [[ -z "$mtime" ]]; then
+      PROJCACHE_TOP="${PROJCACHE_TOP}${sz}	$(human "$sz")  ${d#"$HOME"/}  （mtime 读取失败，跳过）"$'\n'
+      continue
+    fi
+    age_days=$(( ( $(date +%s) - mtime ) / 86400 ))
+    [[ "$age_days" -lt 0 ]] && age_days=0
+    if keep_matches "$d"; then
+      PROJCACHE_TOP="${PROJCACHE_TOP}${sz}	$(human "$sz")  ${d#"$HOME"/}  （保留：--projects-keep）"$'\n'
+      continue
+    fi
+    if [[ "$age_days" -ge "$PROJECTCACHE_AGE_DAYS" ]]; then
+      PROJCACHE_DEL_KB=$((PROJCACHE_DEL_KB + sz))
+      PROJCACHE_DEL_LIST="${PROJCACHE_DEL_LIST}${d}"$'\n'
+      PROJCACHE_TOP="${PROJCACHE_TOP}${sz}	$(human "$sz")  ${d#"$HOME"/}  （${age_days} 天未改动，可删）"$'\n'
+    else
+      PROJCACHE_TOP="${PROJCACHE_TOP}${sz}	$(human "$sz")  ${d#"$HOME"/}  （${age_days} 天内有改动，跳过）"$'\n'
+    fi
+  done < <(printf '%s\n' "$PROJCACHE_FOUND")
+done < <(project_roots_list)
+say "  命中 ${PROJCACHE_N} 个编译缓存目录（≥50 MB），合计 $(human "$PROJCACHE_TOTAL_KB")；其中可删（≥${PROJECTCACHE_AGE_DAYS} 天未改动）$(human "$PROJCACHE_DEL_KB")"
+printf '%s' "$PROJCACHE_TOP" | sort -rn | head -12 | while IFS=$'\t' read -r kb nm; do
+  [[ -n "${nm:-}" ]] && say "    - ${nm}"
+done
+if [[ "$PROJCACHE_N" -gt 12 ]]; then
+  say "    …（仅显示最大的 12 项；完整清单用 --json）"
+fi
+say "  注：删除后下次构建/install 需要重跑；.gocache 等是只读目录，删除前会先 chmod u+w。"
+STEP_TOTAL_KB="$PROJCACHE_TOTAL_KB"
+STEP_DEL_KB="$PROJCACHE_DEL_KB"
+STEP_PATH=""
+PLAN_CMD="rm -rf <上列项目编译缓存目录>"
+run projectcache "清理项目内编译缓存（可再生成）" clean_projectcache
+say ""
+
+# ---------- 15. 已卸载应用的残留 [orphans] ----------
+say "----- 15. 已卸载应用的残留文件 [orphans] -----"
 # 判定方式：macOS 没有「谁装过什么」的台账，只能反推——
 #   已装名单 = /Applications、/System/Applications、~/Applications、Input Methods 下所有 .app 的
 #              bundle id + 名称（plutil 读 Info.plist，不依赖 Spotlight，索引关了也能用）
@@ -1304,6 +1677,7 @@ ORPHAN_UNKNOWN=0
 ORPHAN_ROWS=""
 for root in "${ORPHAN_ROOTS[@]}"; do
   [[ -d "$root" ]] || continue
+  root_real=$(cd -- "$root" 2>/dev/null && pwd -P) || root_real="$root"
   ORPHAN_PATHS=()
   ORPHAN_NAMES=()
   for entry in "$root"/*; do
@@ -1331,26 +1705,34 @@ for root in "${ORPHAN_ROOTS[@]}"; do
       *[!a-z0-9_-]*) ;;
       *) command -v "$lc" >/dev/null 2>&1 && continue ;;
     esac
-    if [[ -f "$entry" ]]; then
-      kb=$(( ($(stat -f '%z' "$entry" 2>/dev/null || printf '0') + 1023) / 1024 ))
+    # 归一化候选路径：父目录取真实路径 + 原 basename（末段符号链接不解析）
+    resolved="${root_real}/${base}"
+    if [[ -f "$resolved" ]]; then
+      kb=$(( ($(stat -f '%z' "$resolved" 2>/dev/null || printf '0') + 1023) / 1024 ))
     else
-      kb=$(du -sk "$entry" 2>/dev/null | awk '{print $1}')
+      kb=$(du -sk "$resolved" 2>/dev/null | awk '{print $1}')
       # 读不到大小就记「未知」，不能当 0：Group Containers 常见 Operation not permitted
       [[ -z "$kb" ]] && ORPHAN_UNKNOWN=$((ORPHAN_UNKNOWN + 1))
     fi
-    mtime=$(stat -f '%m' "$entry" 2>/dev/null || printf '0')
+    mtime=$(stat -f '%m' "$resolved" 2>/dev/null || printf '0')
     mtime="${mtime:-0}"
     age=$(( ( ORPHAN_NOW - mtime ) / 86400 ))
     [[ "$age" -lt 0 ]] && age=0
     [[ "$ORPHANS_AGE_DAYS" -gt 0 && "$age" -lt "$ORPHANS_AGE_DAYS" ]] && continue
     flags=""
-    is_sudo_path "$entry" && flags="需 sudo"
+    is_sudo_path "$resolved" && flags="需 sudo"
     [[ -z "$kb" ]] && flags="${flags:+${flags}，}大小未知"
     ORPHAN_N=$((ORPHAN_N + 1))
     [[ -n "$kb" ]] && ORPHAN_TOTAL_KB=$((ORPHAN_TOTAL_KB + kb))
-    ORPHAN_ROWS="${ORPHAN_ROWS}${kb:-0}	${entry}	${age}	${flags}"$'\n'
+    ORPHAN_CANDIDATE_PATHS+=("$resolved")
+    ORPHAN_ROWS="${ORPHAN_ROWS}${kb:-0}	${resolved}	${age}	${flags}"$'\n'
   done < <(printf '%s\n' "$ORPHAN_LOWER")
 done
+
+# --orphans-delete 的候选归属校验：必须在本次扫描命中的候选里（JSON candidates 同一套）
+if [[ -n "$ORPHANS_DELETE_LIST" ]]; then
+  validate_orphan_delete_candidates
+fi
 
 say "  扫描根 ${#ORPHAN_ROOTS[@]} 个，命中 ${ORPHAN_N} 项疑似残留，合计 $(human "$ORPHAN_TOTAL_KB")"
 if [[ "$ORPHAN_UNKNOWN" -gt 0 ]]; then
@@ -1399,9 +1781,9 @@ clean_orphans() {
       continue
     fi
     if is_sudo_path "$p"; then
-      sudo rm -rf "$p" 2>/dev/null && n=$((n + 1)) || fails=$((fails + 1))
+      sudo rm -rf -- "$p" 2>/dev/null && n=$((n + 1)) || fails=$((fails + 1))
     else
-      rm -rf "$p" 2>/dev/null && n=$((n + 1)) || fails=$((fails + 1))
+      rm -rf -- "$p" 2>/dev/null && n=$((n + 1)) || fails=$((fails + 1))
     fi
   done < <(printf '%s\n' "$ORPHANS_DELETE_LIST")
   STEP_NOTE="删除 ${n} 项，失败 ${fails} 项"
@@ -1414,7 +1796,7 @@ clean_orphans() {
       is_sudo_path "$p" && say "        sudo rm -rf ${p}"
     done < <(printf '%s\n' "$ORPHANS_DELETE_LIST")
   fi
-  return 0
+  [[ "$fails" -eq 0 ]]
 }
 
 run_orphans() {
@@ -1447,7 +1829,7 @@ run_orphans() {
     [[ -n "$p" ]] && ORPHAN_DEL_N=$((ORPHAN_DEL_N + 1))
   done < <(printf '%s\n' "$ORPHANS_DELETE_LIST")
   if [[ "$DRY_RUN" == "1" ]]; then
-    say "   [预览] 将删除 ${ORPHAN_DEL_N} 项（路径已校验在扫描根下）："
+    say "   [预览] 将删除 ${ORPHAN_DEL_N} 项（已校验：扫描根直接子项 + 本次候选）："
     while IFS= read -r p; do
       [[ -n "$p" ]] || continue
       if is_sudo_path "$p"; then say "      sudo rm -rf ${p}"; else say "      rm -rf ${p}"; fi
@@ -1456,16 +1838,22 @@ run_orphans() {
     return 0
   fi
   say "   [执行] 删除 --orphans-delete 指定的 ${ORPHAN_DEL_N} 项残留"
-  clean_orphans
-  REPORT_STEPS+=("删除 ${ORPHAN_DEL_N} 项卸载残留（${STEP_NOTE}）")
-  json_orphans "done"
+  if clean_orphans; then
+    REPORT_STEPS+=("删除 ${ORPHAN_DEL_N} 项卸载残留（${STEP_NOTE}）")
+    json_orphans "done"
+  else
+    HAD_FAILURE=1
+    FAILED_COUNT=$((FAILED_COUNT + 1))
+    SKIPPED_STEPS+=("删除 ${ORPHAN_DEL_N} 项卸载残留（${STEP_NOTE}）")
+    json_orphans "partial"
+  fi
 }
 run_orphans
 say ""
 
-# ---------- 14. 最占空间 Top N（只读） ----------
+# ---------- 16. 最占空间 Top N（只读） ----------
 if [[ "$TOP_N" -gt 0 ]]; then
-  say "----- 14. \$HOME 下最占空间的 ${TOP_N} 项（只读）-----"
+  say "----- 16. \$HOME 下最占空间的 ${TOP_N} 项（只读）-----"
   say "  正在扫描（-xdev 全量遍历，100G+ 的 HOME 可能要几分钟；这一步只在 --top 时跑）..."
   say ""
   say "  目录 Top ${TOP_N}:"
@@ -1486,37 +1874,51 @@ fi
 # ---------- 清理报告 ----------
 DISK_FREE_AFTER_KB=$(df -k / 2>/dev/null | awk 'NR==2{print $4}')
 DISK_FREE_AFTER_KB="${DISK_FREE_AFTER_KB:-0}"
+DF_DELTA_KB=$((DISK_FREE_AFTER_KB - DISK_FREE_BEFORE_KB))
+FINAL_EXIT=0
+[[ "$HAD_FAILURE" == "1" ]] && FINAL_EXIT=1
+# freed_kb：只有真实执行（--clean 且非 dry-run）才等于估算值；查询/预览恒为 0
+FREED_KB=0
+if [[ "$CLEAN" == "1" && "$DRY_RUN" != "1" ]]; then
+  FREED_KB="$ESTIMATED_FREED_KB"
+fi
 
-if [[ "$DRY_RUN" == "1" ]]; then
-  say "======================================"
-  say "           清理报告（预览）"
-  say "======================================"
-  say "  预览模式，未实际清理。确认上列计划命令与勾选一致后，去掉 --dry-run 执行。"
-  say "======================================"
-elif [[ "$CLEAN" != "1" ]]; then
+if [[ "$CLEAN" != "1" ]]; then
   say "======================================"
   say "           清理报告"
   say "======================================"
   say "  （查询模式，仅统计占用，未执行任何清理）"
+  if [[ "$DRY_RUN" == "1" ]]; then
+    say ""
+    say "  ⚠️ --dry-run 需配合 --clean 才有效；本次按只读查询执行，以上没有计划命令。"
+  fi
   say ""
   say "  下一步：把上面的清理项按编码交给用户勾选，再执行"
   say "    bash $0 --clean --only <勾选的编码>"
   say "  预览所选：加 --dry-run；排除某项：用 --skip <编码>"
   say "======================================"
+elif [[ "$DRY_RUN" == "1" ]]; then
+  say "======================================"
+  say "           清理报告（预览）"
+  say "======================================"
+  say "  预览模式，未实际清理；JSON 里 freed_kb / estimated_freed_kb 均为 0。"
+  say "  确认上列计划命令与勾选一致后，去掉 --dry-run 执行。"
+  say "======================================"
 else
   say "======================================"
   say "           清理报告"
   say "======================================"
-  FREED_KB=$((DISK_FREE_AFTER_KB - DISK_FREE_BEFORE_KB))
   say "  磁盘可用空间：$(human "$DISK_FREE_BEFORE_KB") → $(human "$DISK_FREE_AFTER_KB")"
-  if [[ "$FREED_KB" -gt 0 ]]; then
-    say "  本次实际释放：约 $(human "$FREED_KB")"
-  elif [[ "$FREED_KB" -eq 0 && ${#REPORT_STEPS[@]} -eq 0 ]]; then
-    say "  本次没有实际执行的清理项，空间未变化。"
-  elif [[ "$FREED_KB" -lt 0 ]]; then
-    say "  可用空间反而减少 $(human "$((-FREED_KB))")（清理期间可能有新写入，属正常）"
+  say "  各清理项实测可删合计（估算）：约 $(human "$ESTIMATED_FREED_KB")"
+  if [[ "$DF_DELTA_KB" -gt 0 ]]; then
+    say "  df 差值（含系统自身回收/其它进程写入等噪声）：+$(human "$DF_DELTA_KB")"
+  elif [[ "$DF_DELTA_KB" -lt 0 ]]; then
+    say "  df 差值（含系统自身回收/其它进程写入等噪声）：-$(human "$((-DF_DELTA_KB))")"
   else
-    say "  本次实际释放量小于 1 MB（df 精度限制），已执行项见下方。"
+    say "  df 差值（含系统自身回收/其它进程写入等噪声）：0"
+  fi
+  if [[ "$HAD_FAILURE" == "1" ]]; then
+    say "  有 ${FAILED_COUNT} 个清理项未完全成功（partial/failed，见下方「已勾选但未完成」）。"
   fi
   say ""
   if [[ ${#REPORT_STEPS[@]} -gt 0 ]]; then
@@ -1538,6 +1940,9 @@ else
   say ""
   say "建议：重启一次 Mac，让系统重建必要的缓存文件，"
   say "并再次前往 \"关于本机 → 储存空间\" 查看统计（该统计有延迟，需等待或重启后再看）。"
+  if [[ "$HAD_FAILURE" == "1" ]]; then
+    say "退出码：1（存在 partial/failed 项）"
+  fi
 fi
 say ""
 
@@ -1545,12 +1950,17 @@ if [[ "$JSON" == "1" ]]; then
   MODE="query"
   [[ "$CLEAN" == "1" ]] && MODE="clean"
   [[ "$DRY_RUN" == "1" ]] && MODE="dry-run"
-  printf '{"schema":1,"mode":"%s","disk":{"free_before_kb":%s,"free_after_kb":%s,"freed_kb":%s},"items":[' \
-    "$MODE" "$DISK_FREE_BEFORE_KB" "$DISK_FREE_AFTER_KB" "$((DISK_FREE_AFTER_KB - DISK_FREE_BEFORE_KB))"
+  printf '{"schema":1,"mode":"%s","exit_code":%s,"failed_count":%s,"disk":{"free_before_kb":%s,"free_after_kb":%s,"freed_kb":%s,"estimated_freed_kb":%s,"df_delta_kb":%s},"items":[' \
+    "$MODE" "$FINAL_EXIT" "$FAILED_COUNT" "$DISK_FREE_BEFORE_KB" "$DISK_FREE_AFTER_KB" \
+    "$FREED_KB" "$ESTIMATED_FREED_KB" "$DF_DELTA_KB"
   sep=""
-  for it in "${JSON_ITEMS[@]}"; do
-    printf '%s%s' "$sep" "$it"
-    sep=","
-  done
+  if [[ ${#JSON_ITEMS[@]} -gt 0 ]]; then
+    for it in "${JSON_ITEMS[@]}"; do
+      printf '%s%s' "$sep" "$it"
+      sep=","
+    done
+  fi
   printf ']}\n'
 fi
+
+exit "$FINAL_EXIT"

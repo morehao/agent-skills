@@ -13,10 +13,10 @@ description: 磁盘空间回收与本地数据瘦身。当用户说「磁盘满�
 
 1. **先查询后删除，最终清理哪几项由用户勾选**。任何 `--clean` 之前先跑只读模式；清单里每项都要带编码与实测大小；即便用户说了「清理吧」，也要把清单变成多选项让他勾——不许自动全选、不许替他决定、不许只报一句「总共能清 20G」就开删。agent 侧永远用 `--only <勾选项>`，**不用 `--all`**（脚本会拒绝「`--clean` 不带 `--only/--skip`」的写法）。
 2. **不代删用户数据**。聊天记录、浏览器配置、虚拟机磁盘镜像、iOS 设备备份、邮件与信息附件：只报告大小与路径，给出应用内清理入口，由用户自己动手。
-3. **sudo 交给用户的终端**。agent 执行环境没有 TTY，`sudo -v` 必然失败；涉及 `/tmp` 与 Time Machine 快照的 `--clean`，把完整命令交给用户在自己的终端执行，不要反复重试，更不要拼 `echo 密码 | sudo`。
+3. **sudo 与沙箱外删除都交给用户的终端**。agent 执行环境没有 TTY，`sudo -v` 必然失败；涉及 `/tmp`、Time Machine 快照、`/Library` 下卸载残留的 `--clean`，把完整命令交给用户在自己的终端执行，不要反复重试，更不要拼 `echo 密码 | sudo`。跑在 `workspace-write` 沙箱里时，工作区之外的删除会被拒（`$HOME` 下不少路径、`/Library`、`/private/tmp`），报错通常是 `Operation not permitted`——这不是「已清理」，应改用可写沙箱或同样把命令交用户终端。
 4. **平台门**。`mac_cleanup.sh` 仅 macOS；数据库脚本只处理本机的 opencode 库，不做通用 SQL 清理。
 5. **不可逆前先备份**。`cleanup-opencode.sh` 默认会先 `.backup` 到 `~/opencode-backup/` 并跑 `integrity_check`，失败即中止；只有用户明确要求且空间不足时才用 `--no-backup`。12G 级大库不要用 `cp`/`tar` 全量复制。
-6. **卸载残留是启发式判定**。`orphans` 靠「已装 App 名单 vs `~/Library`、`/Library` 目录名」反推，误报（App 装在 `/Applications` 之外、同厂商兄弟组件）与漏报都会有；因此它**只报告**，不参与自动清理，删除必须用 `--orphans-delete <路径>` 按用户点名的路径执行。别按目录名猜着删。
+6. **卸载残留是启发式判定**。`orphans` 靠「已装 App 名单 vs `~/Library`、`/Library` 目录名」反推，误报（App 装在 `/Applications` 之外、同厂商兄弟组件）与漏报都会有；因此它**只报告**，不参与自动清理，删除必须用 `--orphans-delete <路径>` 按用户点名的路径执行。路径还必须**存在 + 是扫描根直接子项 + 在本次候选里**，否则脚本直接 exit 1——不要自己拼路径或按目录名猜着删。
 7. **不虚构数字，且区分口径**。占用、释放量一律来自命令输出；取不到就写「未知」。报告必须把**目录总量**与**本次可删量**分开写——只删 mtime 阈值的项（`caches` 的未知应用缓存、`logs`、`varfolders`）两者可能差一个数量级，只报目录总量等于帮用户虚报收益。
 
 ## 流程（一条线，不分叉）
@@ -34,9 +34,9 @@ description: 磁盘空间回收与本地数据瘦身。当用户说「磁盘满�
 **1. 测量（只读）**
 
 - macOS：`bash scripts/mac_cleanup.sh`（默认只查询，不删任何东西）；需要核对编码时 `--list`
-- 用户问的是「什么最占地方」时，加 `--top 10`（只读扫描 $HOME，列出最大目录与 >100MB 文件）。
+- 用户问的是「什么最占地方」时，加 `--top 10`（只读扫描 $HOME，列出最大目录与 >100 MB 文件）。
 - 用户问「哪个 App 卸载了还留着东西」时，看 `orphans` 段（`--orphans-list` 看全部）：每条给路径、大小、多少天未改动、是否需要 sudo。
-- 需要结构化结果（自己算表、做勾选项）时加 `--json`：stdout 只输出 JSON，进度信息走 stderr。
+- 需要结构化结果（自己算表、做勾选项）时加 `--json`：stdout 只输出 JSON（进度信息与外部命令输出走 stderr），`disk.freed_kb`（查询/预览为 0）、`disk.estimated_freed_kb`、`disk.df_delta_kb`、`exit_code` / `failed_count` 与 `items[].status` 都在里面。
 - 非 macOS：`df -h` / `du -sh *` 只读排查，并说明本技能只有 macOS 清理脚本
 
 **2. 报告与分类**
@@ -46,8 +46,8 @@ description: 磁盘空间回收与本地数据瘦身。当用户说「磁盘满�
 - **可勾选清理项**：表格五列——勾选项 / 编码（`--only`）/ 目录总量 / 本次可删量 / 删除后要付什么代价（应用首次打开变慢、镜像重新 pull、构建重跑等）。数据只取第 1 步输出；未安装/未找到的项直接不列。脚本里写成「目录总量 / 本次可删（按阈值实测）」的两段都要抄，别只抄大的那个。
 - **需应用内处理**：只给大小与路径，不代删（iOS 备份、聊天记录、虚拟机镜像等）。
 - **卸载残留（只报告，不进自动清理）**：把 `orphans` 命中项按「路径 + 大小 + 上次改动 + 是否需要 sudo」列表，注明这是反推结果、可能误报；让用户挑具体路径，**不要**给「全部残留一次删掉」这种选项。
-- **需 sudo**：`/tmp`、Time Machine 快照、`/Library` 下的残留（LaunchDaemons、PrivilegedHelperTools），标明要由用户在自己的终端跑。
-- **受保护目录**：脚本会单独报「N 个受保护子目录未计入」（TCC），如实转述，不要当成 0。
+- **需 sudo（三类）**：`/tmp`、Time Machine 快照、`/Library` 下的残留（LaunchDaemons、PrivilegedHelperTools），标明要由用户在自己的终端跑。
+- **受保护目录**：`caches`/`logs` 两项会单独报「N 个受保护子目录未计入」（TCC），如实转述，不要当成 0。
 
 报告完问一句要不要按清单勾选清理；用户说「先这样」就到此为止，不进入第 3 步。
 
@@ -57,8 +57,8 @@ description: 磁盘空间回收与本地数据瘦身。当用户说「磁盘满�
 
 | 勾选项 | 传给 `--only` 的编码 | 说明 |
 |---|---|---|
-| 用户缓存与日志 | `caches,logs` | 浏览器/更新器纯缓存整删，其余只删 1 天前未改动；日志只删 7 天前 |
-| 临时文件 | `tmp,varfolders` | `/tmp` 需 sudo（走 `/private/tmp`），只能交用户终端 |
+| 用户缓存与日志 | `caches,logs` | 浏览器/更新器纯缓存整删（Chrome 只删 `Google/Chrome` 子目录、不删整个 `Google`）；其余只删 1 天前未改动；日志只删 7 天前的文件与因此变空的旧目录 |
+| 临时文件 | `tmp,varfolders` | `/tmp` 需 sudo（走 `/private/tmp`），只能交用户终端；`varfolders` 由脚本自判当前用户容器 |
 | Time Machine 本地快照 | `snapshots` | 需 sudo，交用户终端 |
 | 废纸篓 | `trash` | 清空后不可恢复 |
 | 开发缓存 | `xcode,toolcache` | Xcode DerivedData、npm/pnpm/go/uv/playwright 等；下次构建/安装重下 |
@@ -66,12 +66,14 @@ description: 磁盘空间回收与本地数据瘦身。当用户说「磁盘满�
 | Docker 无用资源 | `docker` | 删未使用镜像与停止的容器，镜像要重新 pull；**不会**缩小 Docker.raw，宿主可用空间可能不变 |
 | 应用内缓存 | `appcache` | VS Code / 浏览器壳应用的 Cache、GPUCache、Code Cache 等；app 会重建，不动配置与登录态 |
 | 应用更新残留 | `updaters` | `crx_cache`、`auto-updater`、`app-recovery-cache` 等已下载的更新包；会重新下载 |
-| 项目构建产物 | `projects` | 只处理 `--projects-age-days`（默认 30）天前未改动的 `node_modules`/`dist`/`.next` 等；删了要重新 install/build |
-| 卸载残留（只报告） | `orphans`（删除另给 `--orphans-delete <路径>`） | 只报告不自动删；用户点名哪几条才删哪几条，`/Library` 下的走 sudo；反推结果可能误报 |
-| opencode 数据库 | 不传（走 `cleanup-opencode.sh`） | 需先关闭 opencode、默认自动备份；库存在才列出，<500MB 标「收益有限」 |
+| 项目构建产物 | `projects` | 只处理 `--projects-age-days`（默认 30 天）前未改动的 `node_modules`/`dist`/`.next` 等；删了要重新 install/build |
+| 项目内过程产物 | `dshtmp` | 清空 `**/.dsh/tmp` 的内容、**保留目录本身**（`docs/` 不动）；`--dshtmp-age-days` 默认 0 天；需要时重新生成 |
+| 项目内编译缓存 | `projectcache` | `.gocache`/`.tmp-gocache`/`.dsh/gocache`/`.pnpm-store`/`.corepack` 整目录删；`--projectcache-age-days` 默认 3 天；下次构建/install 重跑 |
+| 卸载残留（只报告） | `orphans`（删除另给 `--orphans-delete <路径>`） | 只报告不自动删；删除的路径须**存在 + 是扫描根直接子项 + 在本次候选里**（否则 exit 1）；`/Library` 下的走 sudo；反推结果可能误报 |
+| opencode 数据库 | 不传（走 `cleanup-opencode.sh`） | 编码名 `opencode-db`，只在对话里用、不传给 `mac_cleanup.sh`；需先关闭 opencode、默认自动备份；库存在才列出，<500 MB 标「收益有限」 |
 
 - 每个选项的说明里带上**本次实测大小**（可删量优先）；低风险项标「（推荐）」，风险项写清代价，不要把选择包装成「一键优化」。
-- `projects` 属项目层数据：报告里要给出**具体路径 + 大小 + 多少天未改动**，并说明「活跃项目（近期有改动）默认跳过」；用户想保住某个具体项目时用 `--projects-keep <路径>`，想放宽/收紧用 `--projects-age-days N`。
+- `projects`/`dshtmp`/`projectcache` 属项目层数据：报告里要给**具体路径 + 大小 + 多少天未改动**，并说明「活跃项目（近期有改动）默认跳过」；用户想保住某个具体项目时用 `--projects-keep <路径>`，想放宽/收紧分别用 `--projects-age-days N`（默认 30 天）、`--dshtmp-age-days N`（默认 0 天）、`--projectcache-age-days N`（默认 3 天）；三者共用 `--projects-roots`。
 - 用户开头已点名范围（如「清一下缓存」）时，把对应项标成建议并说明，但仍要把完整清单给他确认，不能只清他提到的那一项、也不能顺手加别的。
 - 至少保留一个「暂不清理」选项；用户只选它 = 本次不清理，直接结束，不要再追问。
 - **没勾的项一律不动**。用户回「随便」「你看着办」时重问一次，仍不明确就按「只看清单」处理，不要脑补。
@@ -80,19 +82,20 @@ description: 磁盘空间回收与本地数据瘦身。当用户说「磁盘满�
 **4. 执行（只跑勾选项）**
 
 - 勾选结果映射成 `--only <编码>`，先自查：`--clean --dry-run --only <编码>`，确认预览与勾选一致（防脚本漂移），再 `--clean --only <编码>`。dry-run 会打印每项的计划命令与预计可删量，逐条对一遍。
+- 退出码：`0` 成功（含未勾选任何项）/ `1` 有 `partial`/`failed` 项，或参数、`--orphans-delete` 路径校验失败 / `2` `--clean` 缺 `--only/--skip/--all`。`1` 不要吞掉，把失败项与原因写进回执。
 - 不要用 `--all`：本技能里「全清」只能由用户在自己的终端决定。
 - 勾选里含 `tmp`、`snapshots` → 拆出来，把 `--clean --only tmp,snapshots` 的完整命令交给用户终端；agent 侧只跑非 sudo 部分。
-- 勾了卸载残留 → 不要跑 `--only orphans` 就完事：那条命令只报告。把用户勾中的路径逐条拼成 `--orphans-delete`，先 `--dry-run` 核对命令，再执行；`/Library` 下的条目单独交给用户终端。
+- 勾了卸载残留 → 不要跑 `--only orphans` 就完事：那条命令只报告。把用户勾中的路径逐条拼成 `--orphans-delete`（路径须存在、是扫描根直接子项、在本次候选里，否则脚本 exit 1），先 `--dry-run` 核对命令，再执行；`/Library` 下的条目单独交给用户终端。
 - 勾了 opencode 数据库 → **放在磁盘清理之后**（要闭库，可能顺带结束当前会话）：先备份、再跑 `cleanup-opencode.sh`，与磁盘清理分开汇报。
 - 某步失败或被跳过不要吞掉，写进回执。
 
 **5. 复核**
 
-`df -h /` 前后对比 + 实际执行清单 + 未勾选/跳过项及原因。脚本末尾已按「实际执行 / 未勾选 / 已勾选但未完成」三类汇总，照着回执即可；`--json` 模式下同信息在 `items[].status` 里。
+`df -h /` 前后对比 + 实际执行清单 + 未勾选/跳过项及原因。释放量分两行写：**各清理项实测可删合计（估算）** 与 **`df` 差值（旁证，≤0 时如实说明，不归因「系统延迟」）**。脚本末尾已按「实际执行 / 未勾选 / 已勾选但未完成」三类汇总，照着回执即可；`--json` 下同信息在 `items[].status`，两行释放量在 `disk.estimated_freed_kb` / `disk.df_delta_kb`，退出码与 `exit_code` 一致。
 
 ## 按需加载
 
-执行前 `read references/cleanup.md`：清理项编码与阈值、勾选命令示例、sudo 交接方式、数据库瘦身的安全边界、需人工处理的手动清单。
+执行前 `read references/cleanup.md`：清理项编码与阈值、参数与默认值、勾选命令示例、sudo 与沙箱交接方式、数据库瘦身的安全边界、需人工处理的手动清单。
 
 本技能只有一个分支（`cleanup`）——一次完整的空间回收流程；`/cleanup` 命令直接落到它。
 
@@ -102,7 +105,7 @@ description: 磁盘空间回收与本地数据瘦身。当用户说「磁盘满�
 
 一次清理任务结束，回执至少包含四块：
 
-- **空间**：清理前后 `df -h /` 的可用值，以及实际释放量（没有提升就如实说明，别归因给「系统延迟」除非确实如此；`docker` 项要额外说明「回收在虚拟磁盘内部，宿主 df 可能不变」）。
+- **空间**：清理前后 `df -h /` 的可用值；释放量分两行——各清理项实测可删合计（估算）与 `df` 差值（旁证）。差值 ≤0 就如实说明，别归因给「系统延迟」；`docker` 项要额外说明「回收在虚拟磁盘内部，宿主 df 可能不变」。
 - **你勾了什么**：用户勾选的项与对应编码。
 - **做了什么**：逐条列出实际执行的清理项；同样列出**跳过了什么、为什么**（未勾选、权限不足、未安装、用户数据不代删）。卸载残留要列出**实际删掉的具体路径**，以及因 sudo 被跳过的路径。
 - **要用户接手的事**：应用内清理入口、需要在用户终端跑的 sudo 命令、数据库备份命令、重启再看的建议。
