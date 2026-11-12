@@ -23,7 +23,8 @@ description: 回收本机磁盘空间：先测量、按编码清可再生产物�
 
 **0. 无说明先给选项。** 用户没带具体说明（空消息、只 `@` 技能、`/cleanup` 无参数）→ 不跑脚本，先给编号选项等他选：1) 只看占用 2) 选勾清理 3) 卸载残留 4) 取消。不要替他选默认项，也不要「顺手先查一下」。
 
-**1. 测量（只读）。** `bash scripts/mac_cleanup.sh` 默认查询；要编码用 `--list`；问「什么最占地方」用 `--top 10`；问「哪个 App 卸了还留着东西」看 orphans（`--orphans-list` 列全部）；要结构化结果加 `--json`。非 macOS：只用 `df -h` / `du -sh *` 排查，并说明本技能只有 macOS 清理脚本。
+**1. 测量（只读）。** `bash scripts/mac_cleanup.sh` 默认查询；要编码用 `--list`；问「什么最占地方」用 `--top 10`；问「哪个 App 卸了还留着东西」看 orphans（`--orphans-list` 列全部）；要结构化结果加 `--json`。
+用户只关心一个场景时**直接把范围交下去**，不要先全量扫描再筛：`--only docker`、`--group ios`、`--group containers`（组名见 `--groups`）；范围在查询/预览/执行三侧都生效。非 macOS：只用 `df -h` / `du -sh *` 排查，并说明本技能只有 macOS 清理脚本。
 
 **2. 报告四块。**
 - **可勾选**：表格给「勾选项 / `--only` 编码 / 目录总量 / 本次可删量 / 代价」。可删量取脚本的「本次可删」列，不要拿目录总量顶替。
@@ -66,7 +67,7 @@ description: 回收本机磁盘空间：先测量、按编码清可再生产物�
 
 | 要看什么 | 去哪 |
 |---|---|
-| 29 个编码、模式语义、`--json` 契约、哪条命令在无终端环境能跑 | `references/cleanup.md` |
+| 29 个编码、场景组、模式语义、`--json` 契约、哪条命令在无终端环境能跑 | `references/cleanup.md` |
 | 删除漏斗、protect 规则、`reason` 枚举与应对、`--history` | `references/safety.md` |
 | 系统级对象（缓存/日志/系统日志/临时/快照/废纸篓/应用缓存/更新残留） | `references/macos-system.md` |
 | 项目内构建产物、过程产物、编译缓存 | `references/project-artifacts.md` |

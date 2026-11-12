@@ -231,7 +231,7 @@ EOF
 
 # dc_json_emit：schema 2 输出（stdout 只有这一段）
 dc_json_emit() {
-    local mode="query" sep="" it codes
+    local mode="query" sep="" it codes scope_json
     [[ "$CLEAN" == "1" ]] && mode="clean"
     [[ "$CLEAN" == "1" && "$DRY_RUN" == "1" ]] && mode="dry-run"
     codes=$(build_codes_json)
@@ -239,8 +239,11 @@ dc_json_emit() {
         "$mode" "$FINAL_EXIT" "$FAILED_COUNT"
     printf '"disk":{"free_before_kb":%s,"free_after_kb":%s,"freed_kb":%s,"estimated_freed_kb":%s,"df_delta_kb":%s},' \
         "$DISK_FREE_BEFORE_KB" "$DISK_FREE_AFTER_KB" "$FREED_KB" "$ESTIMATED_FREED_KB" "$DF_DELTA_KB"
-    printf '"codes":[%s],"reports":[%s],"protected":[%s],"items":[' \
-        "$codes" "$REPORT_JSON" "$(dc_protected_json)"
+    scope_json=$(printf '{"active":%s,"only":"%s","skip":"%s"}' \
+        "$( [[ "${SCOPE_ACTIVE:-0}" == "1" ]] && printf true || printf false )" \
+        "$(json_esc "${ONLY_NORM:-}")" "$(json_esc "${SKIP_NORM:-}")")
+    printf '"scope":%s,"codes":[%s],"reports":[%s],"protected":[%s],"items":[' \
+        "$scope_json" "$codes" "$REPORT_JSON" "$(dc_protected_json)"
     if [[ ${#JSON_ITEMS[@]} -gt 0 ]]; then
         for it in "${JSON_ITEMS[@]}"; do printf '%s%s' "$sep" "$it"; sep=","; done
     fi

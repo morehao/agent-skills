@@ -7,7 +7,8 @@
 | 模式 | 行为 | 什么时候用 |
 |---|---|---|
 | 无参数 | **只查询**：统计并打印各编码占用，不删任何东西 | 第 1 步测量 |
-| `--list` | 打印编码、一句话说明、是否需 sudo | 核对勾选与编码 |
+| `--list` | 打印编码、一句话说明、是否需 sudo，末尾附场景组 | 核对勾选与编码 |
+| `--groups` | 只列场景组（组名 → 编码） | 用户说「只清 iOS / 只清 docker」时先看成映射 |
 | `--list --json` | 同上，机器可读：`{"schema":2,"codes":[{"id","label","desc","sudo"}]}` | 生成勾选项、核对编码是否存在 |
 | `--top [N]` | 只读：`$HOME` 下最大的 N 个目录 + >100 MB 文件（默认 10，`-xdev` 全量遍历，慢） | 用户问「什么最占地方」 |
 | `--history [--limit N]` | 回放台账，默认最近 50 条；字段见 [safety.md](safety.md) | 用户问「上次删了什么」 |
@@ -18,12 +19,17 @@
 | `--orphans-list` | 只读：列出全部疑似卸载残留（A/B 两档各默认只展示最大的 15 项） | 用户问卸载残留 |
 | `--clean --only orphans --orphans-delete <路径>` | 只删点名路径（可重复传），须过路径校验与候选校验 | 用户挑完具体残留 |
 
-**`--dry-run` 必须配 `--clean`**：单独 `--dry-run` 是用法错误，直接 `exit 2`（v1 会静默降级成查询，容易让人误以为「已经预览过」）。`--only/--skip` 不带 `--clean` 也不生效，仍是只读查询。
+**`--dry-run` 必须配 `--clean`**：单独 `--dry-run` 是用法错误，直接 `exit 2`（v1 会静默降级成查询，容易让人误以为「已经预览过」）。
+
+**`--only/--skip/--group` 在查询、预览、执行三种模式下都生效**：加了范围就只测、只报、只动范围内的编码（范围外的编码在查询模式不出现，在执行模式记 `skipped-unselected`）。这是「只聚焦 docker」的正确用法——不带 `--clean` 也能用，且会更快。
 
 ```bash
 bash skills/disk-cleanup/scripts/mac_cleanup.sh                        # 查询
 bash skills/disk-cleanup/scripts/mac_cleanup.sh --top 10               # 谁最占地方
 bash skills/disk-cleanup/scripts/mac_cleanup.sh --list --json          # 编码
+bash skills/disk-cleanup/scripts/mac_cleanup.sh --groups               # 场景组
+bash skills/disk-cleanup/scripts/mac_cleanup.sh --only docker          # 只测 docker
+bash skills/disk-cleanup/scripts/mac_cleanup.sh --group ios            # 只测 iOS 那组
 bash skills/disk-cleanup/scripts/mac_cleanup.sh --json                 # 结构化查询
 bash skills/disk-cleanup/scripts/mac_cleanup.sh --clean --dry-run --only caches,logs
 bash skills/disk-cleanup/scripts/mac_cleanup.sh --clean --only caches,logs
@@ -100,6 +106,23 @@ bash skills/disk-cleanup/scripts/mac_cleanup.sh --history --limit 20
 - `--only a,b,c`：只跑列出的项。重复传会合并；编码写错时脚本 `exit 2` 并列出可用编码。
 - `--skip a,b`：排除；与 `--only` 同给时先取 `--only` 再减 `--skip`。
 - 两个都不给 → 必须 `--all`，否则 `exit 2`。agent 代跑时必须显式 `--only`，这就是「最终清理项由用户决定」的落地方式。
+- `--group <名>`：场景组，等价于把组内编码一起交给 `--only`；组名不得与编码重名（编码优先）。`--only` 里也可以直接写组名。
+- **聚焦一个场景**（用户说「我只想清 docker / 只清 iOS」）：直接把范围交下去，不要先全量扫描再筛——`--only docker` 就只测 docker。
+
+### 场景组（`--groups` / `--group`）
+
+| 组名 | 展开为 | 什么时候用 |
+|---|---|---|
+| `system` | `caches,logs,tmp,varfolders,snapshots,trash,systemlogs` | 「清系统缓存/日志/废纸篓」 |
+| `devcaches` | `xcode,node,go,python,rust,jvm,homebrew,cocoapods,xcode-ios,jetbrains,agentversions,docker` | 「开发工具缓存都清一下」（不含项目内产物） |
+| `ios` | `xcode,xcode-ios,cocoapods` | 「只清 iOS/macOS 开发的东西」 |
+| `nodejs` | `node,projectcache` | 「Node 生态的缓存」 |
+| `project-artifacts` | `projects,dshtmp,projectcache` | 「清项目里的构建产物」 |
+| `ai-agents` | `agentversions` | 「agent 旧版本堆太多了」 |
+| `containers` | `docker` | 「只清 docker」 |
+
+组名与展开值以 `scripts/data/groups.tsv` 为单一事实源；`check-disk-cleanup-codes.mjs` 会校验组名不与编码重名、且只引用已声明编码。
+
 - 想只清某个编码内部的一部分（如只清 npm 不清 pnpm）：脚本不支持拆分，只能整组不勾、把那条具体命令交用户终端。**不要**为了粒度在任务里临时 `rm -rf`。
 
 ## 退出码

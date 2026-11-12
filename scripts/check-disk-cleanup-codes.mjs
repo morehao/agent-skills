@@ -31,6 +31,7 @@ const OPCODE_SCRIPT = join(repoRoot, "skills/disk-cleanup/scripts/cleanup-openco
 const SKILL = join(repoRoot, "skills/disk-cleanup/SKILL.md");
 const REFS_DIR = join(repoRoot, "skills/disk-cleanup/references");
 const REFS_ENTRY = join(REFS_DIR, "cleanup.md");
+const GROUPS_TSV = join(repoRoot, "skills/disk-cleanup/scripts/data/groups.tsv");
 
 const problems = [];
 const fail = (msg) => problems.push(msg);
@@ -76,6 +77,12 @@ function readText(file, what) {
   } catch (err) {
     die(`读不到${what} ${rel(file)}：${err.message}`);
   }
+}
+
+function readAllRefs() {
+    return listRefFiles()
+        .map((f) => readText(f, "references 文档"))
+        .join("\n\n");
 }
 
 function listRefFiles(dir = REFS_DIR) {
@@ -333,6 +340,55 @@ function checkSudoColumn(rows, tableById) {
 
 // ---------- ⑤ references 里 --only 示例只能引用已声明编码 ----------
 // 认三种写法：--only a,b / --only=a / `--only a,b`；占位符（<ids>、<编码>、N）跳过。
+// 场景组：名字不得与编码重名（编码优先）、只能引用已声明编码、文档里要能找到
+function readGroupsTsv(ids) {
+    const out = [];
+    for (const [i, line] of readText(GROUPS_TSV, "场景组表").split("\n").entries()) {
+        const raw = line.replace(/\r$/, "");
+        if (!raw.trim() || raw.trim().startsWith("#")) continue;
+        const cols = raw.split("\t");
+        if (cols.length < 2) {
+            fail(`${rel(GROUPS_TSV)}:${i + 1}  场景组行应为「组名<TAB>编码列表<TAB>说明」`);
+            continue;
+        }
+        const [name, codesRaw] = cols;
+        if (!name.trim()) {
+            fail(`${rel(GROUPS_TSV)}:${i + 1}  组名为空`);
+            continue;
+        }
+        if (ids.has(name)) {
+            fail(`${rel(GROUPS_TSV)}:${i + 1}  组名 \`${name}\` 与编码重名（编码优先，--only 会当成编码）`);
+        }
+        const codes = codesRaw.split(",").map((c) => c.trim()).filter(Boolean);
+        if (codes.length === 0) {
+            fail(`${rel(GROUPS_TSV)}:${i + 1}  场景组 \`${name}\` 没有引用任何编码`);
+        }
+        for (const c of codes) {
+            if (!ids.has(c)) {
+                fail(`${rel(GROUPS_TSV)}:${i + 1}  场景组 \`${name}\` 引用未声明编码 \`${c}\``);
+            }
+        }
+        out.push({ name, codes });
+    }
+    if (out.length === 0) fail(`${rel(GROUPS_TSV)}  没有任何场景组`);
+    const seen = new Set();
+    for (const g of out) {
+        if (seen.has(g.name)) fail(`${rel(GROUPS_TSV)}  场景组 \`${g.name}\` 重复定义`);
+        seen.add(g.name);
+    }
+    return out;
+}
+
+function checkGroupsDocumented(groups) {
+    const refs = readAllRefs();
+    for (const g of groups) {
+        if (!refs.includes(g.name)) {
+            fail(`references/**/*.md 里找不到场景组 \`${g.name}\`（改 groups.tsv 时要同步文档）`);
+        }
+    }
+    return groups.length;
+}
+
 const ONLY_RE = /--only(?:\s*=\s*|\s+)(`[^`]*`|[^\s`|，。；、）)]+)/g;
 const PLACEHOLDER_RE = /^(ids?|id|codes?|code|n|编码|编码列表|勾选项|列表|路径)$/i;
 
@@ -378,6 +434,8 @@ const tableById = checkRefsTable(tsvRows);
 checkSkillFlags();
 checkSudoColumn(tsvRows, tableById);
 const onlyCount = checkOnlyExamples(new Set(tsvRows.map((r) => r.id)));
+const groups = readGroupsTsv(new Set(tsvRows.map((r) => r.id)));
+const groupCount = checkGroupsDocumented(groups);
 
 if (problems.length > 0) {
   for (const p of problems) console.error(`[disk-cleanup-codes] ${p}`);
@@ -395,6 +453,7 @@ if (problems.length > 0) {
     `[disk-cleanup-codes] ok：${tsvRows.length} 个编码在 data/codes.tsv、--list --json、` +
       `references/cleanup.md 三处一致；SKILL.md 的 --flag 全部在 usage()；` +
       `sudo 标注一致（${tsvRows.filter((r) => r.sudo).length} 个需 sudo）；` +
-      `references 的 --only 示例 ${onlyCount} 处均为已声明编码`,
+      `references 的 --only 示例 ${onlyCount} 处均为已声明编码；` +
+      `场景组 ${groupCount} 个（${groups.map((g) => g.name).join(", ")}）均只引用已声明编码`,
   );
 }

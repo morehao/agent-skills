@@ -17,6 +17,7 @@ npx -y skills add morehao/agent-skills --skill disk-cleanup -g -a universal -y
 1. 看编码：`bash skills/disk-cleanup/scripts/mac_cleanup.sh --list`
 2. 只读测量：`bash skills/disk-cleanup/scripts/mac_cleanup.sh`（要结构化结果加 `--json`）
 3. 把可勾选项交给用户勾选，再执行：`--clean --dry-run --only <ids>` 复核 → `--clean --only <ids>`
+4. 只聚焦一个场景：`--only docker`（查询也用，只测这一项）/ `--group ios`、`--group containers`（组名见 `--groups`）
 
 编码与 JSON 契约：`skills/disk-cleanup/references/cleanup.md`
 protect 与 reason 应对：`skills/disk-cleanup/references/safety.md`

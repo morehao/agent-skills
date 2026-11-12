@@ -165,6 +165,46 @@ dc_codes_load() {
     [[ "$DC_CODE_COUNT" -gt 0 ]]
 }
 
+# ---------------- 场景组（data/groups.tsv） ----------------
+# 组名是「用户语言」到「编码」的映射；不得与编码同名（编码优先）。
+dc_groups_load() {
+    local f="$DC_SCRIPT_DIR/data/groups.tsv" tab name codes desc n=0
+    tab=$(printf '\t')
+    DC_GROUP_NAMES=(); DC_GROUP_CODES=(); DC_GROUP_DESCS=()
+    [[ -r "$f" ]] || { DC_GROUP_COUNT=0; return 0; }
+    while IFS="$tab" read -r name codes desc || [[ -n "${name:-}" ]]; do
+        case "${name:-}" in ''|'#'*) continue ;; esac
+        if dc_code_index "$name" >/dev/null 2>&1; then
+            printf '场景组名与编码重名：%s（codes.tsv 优先，组名必须换一个）\n' "$name" >&2
+            exit 2
+        fi
+        DC_GROUP_NAMES[$n]="$name"
+        DC_GROUP_CODES[$n]="$codes"
+        DC_GROUP_DESCS[$n]="${desc:-}"
+        n=$((n + 1))
+    done < "$f"
+    DC_GROUP_COUNT=$n
+}
+
+# dc_group_codes <name>：命中输出逗号列表（0），否则 1
+dc_group_codes() {
+    local want="$1" i
+    for ((i = 0; i < ${DC_GROUP_COUNT:-0}; i++)); do
+        [[ "${DC_GROUP_NAMES[$i]}" == "$want" ]] || continue
+        printf '%s' "${DC_GROUP_CODES[$i]}"
+        return 0
+    done
+    return 1
+}
+
+dc_group_list() {
+    local i
+    for ((i = 0; i < ${DC_GROUP_COUNT:-0}; i++)); do
+        printf '  %-18s %s\n' "${DC_GROUP_NAMES[$i]}" "${DC_GROUP_DESCS[$i]}"
+        printf '  %-18s   → %s\n' "" "${DC_GROUP_CODES[$i]}"
+    done
+}
+
 # dc_code_index <id>：输出下标，未找到输出空
 dc_code_index() {
     local want_id="$1" i

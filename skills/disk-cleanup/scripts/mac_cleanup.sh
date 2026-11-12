@@ -45,6 +45,7 @@ unset _dc_f
 # 编码与保护清单是运行前提，先于任何 $HOME 拼接断言
 dc_env_assert
 dc_codes_load || exit 2
+dc_groups_load
 dc_protect_load
 
 # ---------- 默认值 ----------
@@ -58,6 +59,7 @@ HISTORY_LIMIT=50
 TOP_N=0
 ONLY_RAW=""
 SKIP_RAW=""
+SHOW_GROUPS=0
 CACHE_AGE_DAYS=1
 LOG_AGE_DAYS=7
 SYSTEMLOG_AGE_DAYS=7
@@ -119,7 +121,9 @@ usage() {
   --clean --all          执行全部（只建议用户本人终端使用）
 
 选项:
-  --only <ids>           逗号分隔编码；--only=caches 亦可
+  --only <ids>           逗号分隔编码（也可用场景组名）；--only=caches 亦可
+  --group <names>        场景组：system/devcaches/ios/nodejs/project-artifacts/ai-agents/containers
+  --groups               列出全部场景组（与 --list 一起看更完整）
   --skip <ids>           从选择里排除
   --dry-run              必须与 --clean 同用：只打印计划，不删
   --json                 stdout 只输出 JSON（进度走 stderr）
@@ -150,6 +154,11 @@ while [[ $# -gt 0 ]]; do
             if [[ $# -lt 2 ]]; then printf '%s\n' '--only 需要一个逗号分隔的编码列表\n' >&2; exit 2; fi
             ONLY_RAW="${ONLY_RAW:+${ONLY_RAW},}${2}"; shift 2 ;;
         --only=*) ONLY_RAW="${ONLY_RAW:+${ONLY_RAW},}${1#--only=}"; shift ;;
+        --group)
+            if [[ $# -lt 2 ]]; then printf '%s\n' '--group 需要一个场景组名（多个用逗号）' >&2; exit 2; fi
+            ONLY_RAW="${ONLY_RAW:+${ONLY_RAW},}${2}"; shift 2 ;;
+        --group=*) ONLY_RAW="${ONLY_RAW:+${ONLY_RAW},}${1#--group=}"; shift ;;
+        --groups) SHOW_GROUPS=1; shift ;;
         --skip)
             if [[ $# -lt 2 ]]; then printf '%s\n' '--skip 需要一个逗号分隔的编码列表\n' >&2; exit 2; fi
             SKIP_RAW="${SKIP_RAW:+${SKIP_RAW},}${2}"; shift 2 ;;
@@ -207,8 +216,21 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if [[ "$SHOW_GROUPS" == "1" && "$LIST" != "1" ]]; then
+    say "场景组（--group <名> 等价于把这些编码一起交给 --only）："
+    dc_group_list
+    exit 0
+fi
+
 if [[ "$LIST" == "1" ]]; then
-    if [[ "$JSON" == "1" ]]; then list_items_json; else list_items; fi
+    if [[ "$JSON" == "1" ]]; then
+        list_items_json
+    else
+        list_items
+        say ""
+        say "场景组（--group <名>）："
+        dc_group_list
+    fi
     exit 0
 fi
 
@@ -222,6 +244,42 @@ if [[ "$CLEAN" == "1" && "$DRY_RUN" != "1" && -z "$ONLY_RAW" && -z "$SKIP_RAW" &
     printf '   给用户勾选场景请传 --only <ids>；确实要全清请在用户终端跑 --clean --all。\n' >&2
     exit 2
 fi
+
+# 把场景组名展开成编码（编码优先：组名不得与编码同名，加载时已校验）
+expand_groups() {
+    local raw="$1" out="" tok codes
+    local OLD_IFS="$IFS"
+    IFS=','
+    for tok in $raw; do
+        tok=$(printf '%s' "$tok" | tr -d '[:space:]')
+        [[ -n "$tok" ]] || continue
+        if codes=$(dc_group_codes "$tok"); then
+            out="${out}${out:+,}${codes}"
+        else
+            out="${out}${out:+,}${tok}"
+        fi
+    done
+    IFS="$OLD_IFS"
+    printf '%s' "$out"
+}
+
+_unknown_group=""
+_old_ifs="$IFS"; IFS=','
+for _tok in $ONLY_RAW; do
+    _tok=$(printf '%s' "$_tok" | tr -d '[:space:]')
+    [[ -n "$_tok" ]] || continue
+    case " $KNOWN_IDS " in *" $_tok "*) continue ;; esac
+    dc_group_codes "$_tok" >/dev/null && continue
+    _unknown_group="$_tok"
+done
+IFS="$_old_ifs"
+if [[ -n "$_unknown_group" ]]; then
+    printf '未知清理项或场景组: %s\n' "$_unknown_group" >&2
+    printf '可用编码: %s\n' "$KNOWN_IDS" >&2
+    printf '可用场景组（--groups 查看）\n' >&2
+    exit 2
+fi
+ONLY_RAW=$(expand_groups "$ONLY_RAW")
 
 validate_ids "$ONLY_RAW" "--only"
 validate_ids "$SKIP_RAW" "--skip"
@@ -315,9 +373,17 @@ if [[ "$TOP_N" -gt 0 ]]; then
     exit 0
 fi
 
+SCOPE_ACTIVE=0
+[[ -n "$ONLY_IDS" || -n "$SKIP_IDS" ]] && SCOPE_ACTIVE=1
+
 _i=0
 while [[ "$_i" -lt "$DC_CODE_COUNT" ]]; do
     _id="${DC_CODE_IDS[$_i]}"
+    # 限定范围时只跑范围内的编码：查询模式只测它，执行模式也少测一遍无关目录
+    if [[ "$SCOPE_ACTIVE" == "1" ]] && ! want "$_id"; then
+        _i=$((_i + 1))
+        continue
+    fi
     # 编码里可能有连字符（xcode-ios），函数名用下划线
     _fn="target_${_id//-/_}"
     if ! declare -F "$_fn" >/dev/null 2>&1; then
@@ -347,6 +413,17 @@ _i=0
 while [[ "$_i" -lt "$DC_CODE_COUNT" ]]; do
     _id="${DC_CODE_IDS[$_i]}"
     if ! dc_has_item "$_id"; then
+        if [[ "$SCOPE_ACTIVE" == "1" ]] && ! want "$_id"; then
+            # 范围外的编码：执行模式记「未勾选」，查询模式干脆不列（scope 已说明范围）
+            if [[ "$CLEAN" == "1" ]]; then
+                STEP_TOTAL_KB=0; STEP_DEL_KB=0
+                STEP_NOTE="不在本次范围"; STEP_REASON="unselected"
+                json_add "$_id" "$(item_label "$_id")" "skipped-unselected"
+                mark_unselected "$_id"
+            fi
+            _i=$((_i + 1))
+            continue
+        fi
         STEP_TOTAL_KB=0; STEP_DEL_KB=0
         STEP_NOTE="未找到目标路径"; STEP_REASON="not-found"
         _st="queried"
@@ -363,7 +440,8 @@ if [[ -n "$MISSING_IDS" ]]; then
     say "  未找到目标（已查过，无占用）：${MISSING_IDS}"
 fi
 
-if declare -F targets_extras >/dev/null 2>&1; then
+# 只报告段（系统级大户）只在「不限定范围」时输出：用户聚焦某个场景时不该被无关大户稀释
+if [[ "${SCOPE_ACTIVE:-0}" != "1" ]] && declare -F targets_extras >/dev/null 2>&1; then
     targets_extras
 fi
 

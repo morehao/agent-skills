@@ -1,0 +1,10 @@
+# 场景组：把「用户关心的一个场景」映射到具体编码（data-only，逻辑在 lib/core.sh）
+# 格式：组名<TAB>逗号分隔编码<TAB>一句话说明
+# 规则：组名不得与任何编码同名（编码优先，避免 --only 歧义）；组只能引用 codes.tsv 里声明过的编码。
+system	caches,logs,tmp,varfolders,snapshots,trash,systemlogs	系统级：缓存/日志/临时/快照/废纸篓/系统日志
+devcaches	xcode,node,go,python,rust,jvm,homebrew,cocoapods,xcode-ios,jetbrains,agentversions,docker	开发工具缓存与旧版本（不含项目内产物）
+ios	xcode,xcode-ios,cocoapods	iOS/macOS 开发：DerivedData、固件与模拟器、Pods 缓存
+nodejs	node,projectcache	Node 生态：npm/yarn/pnpm 缓存 + 项目内 .pnpm-store 等编译缓存
+project-artifacts	projects,dshtmp,projectcache	项目内产物：构建产物、.dsh/tmp、编译缓存
+ai-agents	agentversions	AI agent 旧版本堆叠（Claude Code / Cursor Agent / Copilot）
+containers	docker	容器：未使用镜像/容器/构建缓存（不缩 Docker.raw）
