@@ -97,7 +97,15 @@ description: 磁盘空间回收与本地数据瘦身。当用户说「磁盘满�
 
 ## 按需加载
 
-执行前 `read references/cleanup.md`：清理项编码与阈值、参数与默认值、勾选命令示例、sudo 与沙箱交接方式、数据库瘦身的安全边界、需人工处理的手动清单。
+执行前先 `read references/cleanup.md`：通用规则（模式/勾选/参数/`--json`/双口径/验证收益/已知边界）与 16 个编码的索引表。
+按用户范围和要处理的对象，再读对应分篇：
+
+- 开发工具缓存（docker / node / go / python / rust / jvm / xcode-ios / homebrew-cocoapods / opencode）→ `references/tools/<tool>.md`
+- 系统级（缓存/日志/临时文件/快照/废纸篓/应用缓存/更新残留）→ `references/macos-system.md`
+- 项目内构建产物/过程产物/编译缓存 → `references/project-artifacts.md`
+- 已卸载 App 残留 → `references/orphans.md`
+
+每篇工具文档开头都写了「编码归属（现状 → 终局）」：说明该工具现落在哪个编码、能否单独清、终局应拆成什么编码。
 
 本技能只有一个分支（`cleanup`）——一次完整的空间回收流程；`/cleanup` 命令直接落到它。
 
