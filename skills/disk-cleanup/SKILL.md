@@ -63,8 +63,15 @@ description: 磁盘空间回收与本地数据瘦身。当用户说「磁盘满�
 | 临时文件 | `tmp,varfolders` | `/tmp` 需 sudo（走 `/private/tmp`），只能交用户终端；`varfolders` 由脚本自判当前用户容器 |
 | Time Machine 本地快照 | `snapshots` | 需 sudo，交用户终端 |
 | 废纸篓 | `trash` | 清空后不可恢复 |
-| 开发缓存 | `xcode,toolcache` | Xcode DerivedData、npm/pnpm/go/uv/playwright 等；下次构建/安装重下 |
-| 构建大件 | `bigbuild` | ipsw、Homebrew、CocoaPods、Gradle、iOS DeviceSupport、旧模拟器 |
+| Xcode DerivedData | `xcode` | 整个 DerivedData；下次构建全量重编 |
+| Node 生态缓存 | `node` | npm/yarn/bun/pnpm 缓存与无头运行时缓存；pnpm 只回收未引用包；下次重下/重编 |
+| Go 缓存 | `go` | go-build / go/pkg/mod / gopls 等；下次构建重下 |
+| Python 缓存 | `python` | uv / pip 缓存；下次重下 |
+| Rust 缓存 | `rust` | cargo registry；下次 `cargo build` 重下 crate |
+| JVM 缓存 | `jvm` | Maven `.m2` + Gradle `.gradle/caches`；下次构建重下 |
+| Homebrew | `homebrew` | brew cleanup/autoremove；旧版本不能回滚 |
+| CocoaPods | `cocoapods` | CocoaPods 缓存；下次 pod install 重下 |
+| iOS 大件 | `xcode-ios` | ipsw、iOS DeviceSupport、CoreSimulator、旧模拟器 |
 | Docker 无用资源 | `docker` | 删未使用镜像与停止的容器，镜像要重新 pull；**不会**缩小 Docker.raw，宿主可用空间可能不变 |
 | 应用内缓存 | `appcache` | VS Code / 浏览器壳应用的 Cache、GPUCache、Code Cache 等；app 会重建，不动配置与登录态 |
 | 应用更新残留 | `updaters` | `crx_cache`、`auto-updater`、`app-recovery-cache` 等已下载的更新包；会重新下载 |
@@ -97,7 +104,7 @@ description: 磁盘空间回收与本地数据瘦身。当用户说「磁盘满�
 
 ## 按需加载
 
-执行前先 `read references/cleanup.md`：通用规则（模式/勾选/参数/`--json`/双口径/验证收益/已知边界）与 16 个编码的索引表。
+执行前先 `read references/cleanup.md`：通用规则（模式/勾选/参数/`--json`/双口径/验证收益/已知边界）与 22 个编码的索引表。
 按用户范围和要处理的对象，再读对应分篇：
 
 - 开发工具缓存（docker / node / go / python / rust / jvm / xcode-ios / homebrew-cocoapods / opencode）→ `references/tools/<tool>.md`

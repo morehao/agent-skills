@@ -29,8 +29,14 @@ macOS 本机磁盘是主战场：系统缓存、日志、临时文件、Time Mac
 | `appcache` | Electron/Chromium 型 app 的 Cache | [macos-system.md](macos-system.md) |
 | `updaters` | 应用更新残留 | [macos-system.md](macos-system.md) |
 | `xcode` | Xcode DerivedData | [tools/xcode-ios.md](tools/xcode-ios.md) |
-| `toolcache` | 语言工具链/包管理器白名单 + pnpm store prune | [tools/node.md](tools/node.md)、[go.md](tools/go.md)、[python.md](tools/python.md)、[rust.md](tools/rust.md) |
-| `bigbuild` | ipsw、Homebrew、CocoaPods、Gradle、iOS DeviceSupport、模拟器 | [tools/homebrew-cocoapods.md](tools/homebrew-cocoapods.md)、[xcode-ios.md](tools/xcode-ios.md)、[jvm.md](tools/jvm.md) |
+| `node` | Node 生态缓存（npm/yarn/bun/pnpm/无头运行时）+ pnpm store prune | [tools/node.md](tools/node.md) |
+| `go` | Go 缓存（go-build / go/pkg/mod / gopls 等） | [tools/go.md](tools/go.md) |
+| `python` | uv / pip 缓存 | [tools/python.md](tools/python.md) |
+| `rust` | cargo registry 缓存 | [tools/rust.md](tools/rust.md) |
+| `jvm` | Maven `.m2` + Gradle `.gradle/caches` | [tools/jvm.md](tools/jvm.md) |
+| `homebrew` | Homebrew 缓存与旧版本（brew cleanup/autoremove） | [tools/homebrew-cocoapods.md](tools/homebrew-cocoapods.md) |
+| `cocoapods` | CocoaPods 缓存 | [tools/homebrew-cocoapods.md](tools/homebrew-cocoapods.md) |
+| `xcode-ios` | ipsw / iOS DeviceSupport / CoreSimulator / 模拟器 | [tools/xcode-ios.md](tools/xcode-ios.md) |
 | `docker` | 未使用镜像/容器/构建缓存/网络 | [tools/docker.md](tools/docker.md) |
 | `projects` | 项目内 `node_modules`/`dist`/`build`/`target` 等 | [project-artifacts.md](project-artifacts.md) |
 | `dshtmp` | 项目内 `**/.dsh/tmp` 过程产物 | [project-artifacts.md](project-artifacts.md) |
@@ -77,8 +83,8 @@ bash skills/disk-cleanup/scripts/mac_cleanup.sh --clean --dry-run --only dshtmp,
 - `--only a,b,c`：**只跑列出的项**，其余每步打印 `[跳过]`，报告里汇总为「未勾选（未执行）」。重复传 `--only` 会合并，不会互相覆盖。
 - `--skip a,b`：排除指定项；与 `--only` 同给时，先取 `--only` 再减 `--skip`。同样支持重复传。
 - 两个都不给 = 必须配 `--all`。**agent 代跑时必须显式给 `--only`**，这就是「最终清理项由用户决定」的落地方式。
-- 编码是**勾选单位，不能拆到编码内部**：例如 `bigbuild` 里 Homebrew 与 Gradle 同进同出。用户只想清其中一项时，只能该项整组不勾、由用户自己在终端跑那条具体命令；**不要**为了满足粒度在任务里临时 `rm -rf`。
-- 组合示例：`--clean --skip docker,bigbuild --only caches,logs`。
+- 编码是**勾选单位，不能拆到编码内部**：例如 `node` 里 npm/yarn/bun/pnpm 同进同出。用户只想清其中一项时，只能该项整组不勾、由用户自己在终端跑那条具体命令；**不要**为了满足粒度在任务里临时 `rm -rf`。
+- 组合示例：`--clean --skip docker,jvm --only caches,logs`。
 
 ## 参数与默认值
 
@@ -131,7 +137,7 @@ stdout 是**单个** JSON 对象（`--clean` 下外部命令输出一律走 stde
   "exit_code": 0,
   "failed_count": 0,
   "codes": [
-    {"id": "bigbuild", "status": "done", "total_kb": 0, "deletable_kb": 0, "items": 7}
+    {"id": "jvm", "status": "done", "total_kb": 0, "deletable_kb": 0, "items": 2}
   ],
   "reports": [
     {"id": "cores", "label": "崩溃转储", "kb": 0, "note": "…"}
@@ -143,14 +149,14 @@ stdout 是**单个** JSON 对象（`--clean` 下外部命令输出一律走 stde
 }
 ```
 
-- `codes[]`：按编码聚合的视图（`items[]` 里同一编码可能因分步执行有多条，如 `bigbuild`、`toolcache`）：`total_kb`/`deletable_kb` 求和、`items` 是出现次数；`status` 取最严重（`failed` > `partial` > `done` > `dry-run` > `reported` > `queried` > `skipped-sudo` > `skipped-unselected`），顺序按编码首次出现；
+- `codes[]`：按编码聚合的视图（`items[]` 里同一编码可能因分步执行有多条，如 `jvm`、`xcode-ios`）：`total_kb`/`deletable_kb` 求和、`items` 是出现次数；`status` 取最严重（`failed` > `partial` > `done` > `dry-run` > `reported` > `queried` > `skipped-sudo` > `skipped-unselected`），顺序按编码首次出现；
 - `reports[]`：只报告段的机器可读视图（`/cores`、`/Applications` 等系统级大户），每项 `{id,label,kb,note}`；**`kb=-1` 表示读不到**（不是 0）；不进 `items[]`、不计入可删量、不影响退出码；
 
 - `freed_kb`：只有 `--clean` 且非 `--dry-run` 时等于 `estimated_freed_kb`；**查询/预览恒为 0**；
 - `estimated_freed_kb`：本次状态为 `done` 的项，其 `deletable_kb` 之和；`partial`/`failed` 不计入（实际删除量无法确认）；
 - `df_delta_kb`：前后 `df` 差值，**始终**给出，作为旁证（含系统自身回收、其它进程写入等噪声，不能当成清理成果）；
 - `exit_code`：与进程退出码一致（JSON 只在通过手刹校验后输出，所以这里是 `0` 或 `1`；`2` 的情况见上，此时没有 JSON）；`failed_count`：状态为 `partial`/`failed` 的项数，`exit_code=1` 时至少为 1；
-- `items[].status` ∈ `queried` / `dry-run` / `skipped-unselected` / `skipped-sudo` / `done` / `partial` / `failed`（`orphans` 另有 `reported`）；同一编码可能因分步执行出现多条（如 `bigbuild`、`toolcache`），要按编码汇总用 `codes[]`（见上）；
+- `items[].status` ∈ `queried` / `dry-run` / `skipped-unselected` / `skipped-sudo` / `done` / `partial` / `failed`（`orphans` 另有 `reported`）；同一编码可能因分步执行出现多条（如 `jvm`、`xcode-ios`），要按编码汇总用 `codes[]`（见上）；
 - `items[].total_kb` / `deletable_kb` 是 KB 整数。
 
 ## 两个口径：目录总量 ≠ 本次可删量
@@ -205,7 +211,7 @@ agent 若跑在 `workspace-write` 类沙箱里，**工作区之外的删除会�
 
 - **正常终端**（预检未命中：`$HOME/Library` 与 `$HOME/.Trash` 都可写）：按 mtime 阈值 `find -delete`/整删的项
   （`caches`、`logs`、`varfolders`，以及复用同一 helper 的 `tmp`、`snapshots`）里出现 EPERM 视为 **TCC 已知跳过**，
-  不计失败（仍会单独报「N 个受保护子目录未计入」）；其它编码（`trash`、`xcode`、`toolcache`、`appcache`、`updaters`、
+  不计失败（仍会单独报「N 个受保护子目录未计入」）；其它编码（`trash`、`xcode`、`node`、`go`、`python`、`rust`、`jvm`、`homebrew`、`cocoapods`、`xcode-ios`、`appcache`、`updaters`、
   `projects`、`projectcache`、`dshtmp`、`orphans`）的 `rm` 失败**仍计失败** → 该项 `partial`、进程 exit 1（见「退出码」）。
 - **沙箱疑似**（预检发现 `$HOME/Library` 或 `$HOME/.Trash` 不可写）：EPERM **不再当 TCC 跳过**，一律计入失败
   → `partial`/`failed` + exit 1，避免「沙箱把删除全拦了还报 done」。

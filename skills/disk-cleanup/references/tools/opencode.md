@@ -1,18 +1,18 @@
 # opencode（本地数据库 + 缓存）
 
-> 编码：数据库编码 `opencode-db`（只在对话里用，**不传给 `mac_cleanup.sh`**，由 `cleanup-opencode.sh` 单独执行）；`.cache/opencode` 缓存归 `toolcache`。
+> 编码：数据库编码 `opencode-db`（只在对话里用，**不传给 `mac_cleanup.sh`**，由 `cleanup-opencode.sh` 单独执行）；`.cache/opencode` 缓存归 `node`。
 
 ## 覆盖对象（分属编码）
 
 | 对象 | 所属编码 / 脚本 |
 |---|---|
 | `~/.local/share/opencode/opencode.db`（SQLite 会话库） | `opencode-db`（`cleanup-opencode.sh`） |
-| `~/.cache/opencode` | `toolcache` |
+| `~/.cache/opencode` | `node` |
 
 ## 编码归属：现状 → 终局
 
-- **现状**：数据库已是独立编码 `opencode-db`（走独立脚本）；缓存 `.cache/opencode` 在 `toolcache` 里。
-- **只想清本工具**：数据库直接跑 `cleanup-opencode.sh`；缓存随 `toolcache` 一并清。
+- **现状**：数据库是独立编码 `opencode-db`（走独立脚本）；缓存 `.cache/opencode` 归 `node` 编码。
+- **只想清本工具**：数据库直接跑 `cleanup-opencode.sh`；缓存随 `--only node` 一并清。
 - **终局（第 2 期不涉及）**：数据库粒度已对齐，无需拆分。
 
 ---

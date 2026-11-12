@@ -1,8 +1,8 @@
 # Rust（cargo）
 
-> 编码：`toolcache`（`--only toolcache`）。cargo 的 registry 缓存在 `toolcache` 白名单里。
+> 编码：`rust`（`--only rust`）。cargo registry 缓存归这一个编码，可单独清理。
 
-## 覆盖的路径（归 `toolcache`）
+## 覆盖的路径（归 `rust`）
 
 ```text
 ~/.cargo/registry/cache
@@ -11,14 +11,12 @@
 ## 怎么清
 
 ```bash
-bash skills/disk-cleanup/scripts/mac_cleanup.sh --clean --only toolcache
+bash skills/disk-cleanup/scripts/mac_cleanup.sh --clean --only rust
 ```
 
-## 编码归属：现状 → 终局
+## 编码归属
 
-- **现状**：cargo 缓存与其它语言共享 `toolcache`，无单独开关。
-- **只想清本工具**：`toolcache` 整组不勾，交用户终端跑单条命令。
-- **终局（第 2 期）**：拆出 `rust` 编码。
+- **现状/终局**：`rust` 是独立编码（第 2 期从旧 `toolcache` 拆出），`--only rust` 即只清 cargo registry 缓存。
 
 ## 注意事项
 
