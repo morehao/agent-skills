@@ -73,7 +73,7 @@
 |------|------|
 | `cleanup` | 磁盘空间回收与本地数据瘦身（macOS 为主）：先只读测量 → 用户勾选清理项 → 只清所选；用户数据只报告不代删 |
 
-`/cleanup` 委托 `disk-cleanup` skill 的 `cleanup` 分支，逻辑单一真源在 `skills/disk-cleanup/`（`SKILL.md` 流程 + `references/cleanup.md` 清理对象 + `scripts/` 两个执行脚本）。
+`/cleanup` 委托 `disk-cleanup` skill 的 `cleanup` 分支，逻辑单一真源在 `skills/disk-cleanup/`（`SKILL.md` 流程 + `references/` 按清理对象分篇 + `scripts/` 两个执行脚本）。
 
 磁盘清理是一个动作而不是固定清单，所以命令**默认只读**，而且**最终删哪些由用户勾选**：
 

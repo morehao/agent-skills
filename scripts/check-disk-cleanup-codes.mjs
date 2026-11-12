@@ -1,30 +1,35 @@
 #!/usr/bin/env node
-// 校验 disk-cleanup 的清理项编码在「脚本 / SKILL.md / references/cleanup.md / skill-internals.md」四处是否一致，
+// 校验 disk-cleanup 的清理项编码在「脚本 / SKILL.md / references/*.md / skill-internals.md」四处是否一致，
 // 并做四类结构性检查（1 类原有 + 3 类新增，背景见 docs/agents/verification.md「disk-cleanup 文档一致性校验」）：
 //
 //   1) 编码集合：四处编码集合必须一致；`--list` 文本输出里每项都要出现（原有检查）。
-//   2) 阈值一致性：references/cleanup.md 每个编码行必须出现该编码的预期阈值 token（天 / 体积）。
-//   3) 参数一致性：`mac_cleanup.sh --help` 里的每个 `--xxx` 都要在 cleanup.md 或 SKILL.md 出现。
-//   4) 白名单一致性：脚本 SAFE_CACHE_DIRS / ORPHAN_ROOTS 的每条路径（`$HOME` 归一为 `~`）都要在 cleanup.md 出现。
+//   2) 阈值一致性：references/ 下编码行必须出现该编码的预期阈值 token（天 / 体积）。
+//   3) 参数一致性：`mac_cleanup.sh --help` 里的每个 `--xxx` 都要在 references/*.md 或 SKILL.md 出现。
+//   4) 白名单一致性：脚本 SAFE_CACHE_DIRS / ORPHAN_ROOTS 的每条路径（`$HOME` 归一为 `~`）都要在 references/*.md 出现。
+//
+// references 已按「清理对象」拆成多篇（cleanup.md 入口 + tools/*.md + 系统级/项目层/残留各篇）。
+// 编码索引表仍只在入口 cleanup.md（parseRefsTable 只解析它）；阈值/参数/白名单则跨 references 全目录联合校验。
 //
 // 单一事实源是 `mac_cleanup.sh --list --json`（脚本里的 KNOWN_IDS + 元数据），
 // 其余三处文档必须与之对齐：漏写 → 用户看不到这项；多写 → 报了个脚本不认的编码（--only 会 exit 1）。
 //
-// 文档侧允许两种简写（cleanup.md 现状写法，不必为了门禁改排版）：
+// 文档侧允许两种简写（现状写法，不必为了门禁改排版）：
 //   - 花括号列表：`~/Library/{Caches,Logs}` → ~/Library/Caches、~/Library/Logs；
 //   - 同行裸名列表：`~/.npm/_npx  _cacache  _logs` → 以该行首个路径的父目录为前缀补齐为 ~/.npm/_cacache。
 //
 // 退出码：0 一致 / 1 不一致 / 2 用法或环境错误。
 
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(repoRoot, "skills/disk-cleanup/scripts/mac_cleanup.sh");
 const SKILL = join(repoRoot, "skills/disk-cleanup/SKILL.md");
-const REFS = join(repoRoot, "skills/disk-cleanup/references/cleanup.md");
+const REFS_DIR = join(repoRoot, "skills/disk-cleanup/references");
+// 编码索引表仍只认入口文件；阈值/参数/白名单则跨 references 全目录联合校验。
+const REFS_ENTRY = join(REFS_DIR, "cleanup.md");
 const INTERNALS = join(repoRoot, "docs/agents/skill-internals.md");
 
 const problems = [];
@@ -37,6 +42,24 @@ function fail(msg) {
 function die(msg) {
   console.error(`[disk-cleanup-codes] ${msg}`);
   process.exit(2);
+}
+
+// 递归列出 references 目录下所有 .md（含 tools/ 子目录）
+function listRefFiles(dir = REFS_DIR) {
+  const out = [];
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name);
+    const st = statSync(p);
+    if (st.isDirectory()) out.push(...listRefFiles(p));
+    else if (name.endsWith(".md")) out.push(p);
+  }
+  return out.sort();
+}
+
+// 把所有 references/*.md 拼成一份联合文本，供阈值/参数/白名单跨篇校验
+function readAllRefs() {
+  const files = listRefFiles();
+  return files.map((f) => readFileSync(f, "utf8")).join("\n\n");
 }
 
 function runScript(args) {
@@ -67,12 +90,12 @@ function backticks(text) {
   return [...text.matchAll(/`([a-z][a-z0-9_-]*)`/g)].map((m) => m[1]);
 }
 
-// references/cleanup.md：编码表每行以 "| `code` |" 开头；返回 { id, row }，row 是整行原文
+// references/cleanup.md（入口编码索引表）：每行以 "| `code` |" 开头；返回 { id, row }，row 是整行原文
 function parseRefsTable(text) {
   const lines = text.split("\n");
   const start = lines.findIndex((l) => l.startsWith("### 清理项编码"));
   if (start === -1) {
-    die("references/cleanup.md 里找不到「### 清理项编码」小节");
+    die("references/cleanup.md 里找不到「### 清理项编码」小节（编码索引表须留在入口）");
   }
   const rows = [];
   for (let i = start + 1; i < lines.length; i++) {
@@ -82,7 +105,7 @@ function parseRefsTable(text) {
     if (m) rows.push({ id: m[1], row: line });
   }
   if (rows.length === 0) {
-    die("references/cleanup.md 的编码表里没解析到任何编码");
+    die("references/cleanup.md 的编码索引表里没解析到任何编码");
   }
   return rows;
 }
@@ -158,13 +181,25 @@ function normalizeRow(row) {
   return row.replace(/[`*]/g, "").replace(/[（）()]/g, "").replace(/\s+/g, " ").trim();
 }
 
-function checkThresholds(refsText) {
-  const rows = new Map(parseRefsTable(refsText).map((r) => [r.id, normalizeRow(r.row)]));
+function checkThresholds() {
+  // 阈值 token 可分布在 references 任一分篇（入口索引表只放一句话，详细阈值行在 tools/* / macos-system / project-artifacts）。
+  // 因此扫全目录所有「| `code` | … |」行，把一个编码在所有文件里的行拼起来一起判断。
+  const rowsById = new Map();
+  for (const file of listRefFiles()) {
+    const text = readFileSync(file, "utf8");
+    for (const line of text.split("\n")) {
+      const m = line.match(/^\|\s*`([a-z][a-z0-9_-]*)`\s*\|/);
+      if (!m) continue;
+      const id = m[1];
+      const prev = rowsById.get(id) ?? "";
+      rowsById.set(id, `${prev} ${normalizeRow(line)}`.trim());
+    }
+  }
   for (const { id, label, res } of THRESHOLDS) {
-    const row = rows.get(id);
+    const row = rowsById.get(id);
     if (row === undefined) continue; // 缺行由编码集合检查报，避免重复
     if (!res.some((re) => re.test(row))) {
-      fail(`references/cleanup.md 的 \`${id}\` 行缺少阈值 token：${label}`);
+      fail(`references/*.md 的 \`${id}\` 行缺少阈值 token：${label}`);
     }
   }
 }
@@ -264,25 +299,26 @@ function checkWhitelists(refsText) {
     total += paths.length;
     const missing = paths.filter((p) => !docs.has(p));
     if (missing.length) {
-      fail(`references/cleanup.md 缺少 ${name} 里的路径：${missing.join(", ")}`);
+      fail(`references/*.md 缺少 ${name} 里的路径：${missing.join(", ")}`);
     }
   }
   return total;
 }
 
 // ---------- 执行检查 ----------
-const refsText = readFileSync(REFS, "utf8");
+const refsEntryText = readFileSync(REFS_ENTRY, "utf8"); // 编码索引表（只认入口）
+const allRefsText = readAllRefs(); // 阈值/参数/白名单跨 references 全目录联合
 const skillText = readFileSync(SKILL, "utf8");
 const internalsText = readFileSync(INTERNALS, "utf8");
 
 const scriptCodes = readCodes();
-const refsCodes = parseRefsTable(refsText).map((r) => r.id);
+const refsCodes = parseRefsTable(refsEntryText).map((r) => r.id);
 const skillCodes = codesFromSkill(skillText);
 const internalsCodes = codesFromInternals(internalsText);
 
 const want = new Set(scriptCodes);
 const sources = [
-  ["references/cleanup.md 编码表", refsCodes],
+  ["references/cleanup.md 编码索引表", refsCodes],
   ["SKILL.md 勾选表", skillCodes],
   ["docs/agents/skill-internals.md 编码清单", internalsCodes],
 ];
@@ -301,16 +337,16 @@ for (const id of scriptCodes) {
   if (!new RegExp(`^\\s{2}${id}\\s`, "m").test(listed)) fail(`--list 文本输出里缺少编码 ${id}`);
 }
 
-checkThresholds(refsText);
-const paramCount = checkParams(refsText, skillText);
-const whitelistCount = checkWhitelists(refsText);
+checkThresholds();
+const paramCount = checkParams(allRefsText, skillText);
+const whitelistCount = checkWhitelists(allRefsText);
 
 if (problems.length) {
   for (const p of problems) console.error(`[disk-cleanup-codes] ${p}`);
   console.error(`\n[disk-cleanup-codes] 脚本编码：${scriptCodes.join(", ")}`);
   console.error(
     "提示：单一事实源是 mac_cleanup.sh 的 KNOWN_IDS 与 item_label/item_desc；" +
-      "改编码、阈值、参数或白名单时，cleanup.md / SKILL.md 要同步。",
+      "改编码、阈值、参数或白名单时，references/*.md / SKILL.md 要同步。",
   );
   process.exitCode = 1;
 } else {

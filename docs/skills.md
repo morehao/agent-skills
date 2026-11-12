@@ -101,7 +101,7 @@ Git 工作流的唯一真源。`SKILL.md` 只做意图路由：先判断命中�
 - 用户数据（聊天记录、浏览器配置、虚拟机镜像、iOS 设备备份、邮件附件）**只报告大小与路径**，不代删，也不进勾选清单；
 - agent 执行环境没有 TTY，`sudo` 三类（`/private/tmp`、Time Machine 快照、`/Library` 下的卸载残留）交给用户在自己的终端跑；跑在 `workspace-write` 沙箱里时 `$HOME` 外的删除会被拒（`Operation not permitted`），应改用可写沙箱或同样交用户终端；不可逆操作前先给 `.backup` 备份命令。
 
-细节见 `references/cleanup.md`（清理项与阈值、参数与默认值、`/var/folders` 定向、数据库安全边界、手动清单）。
+细节见 `references/`（按清理对象分篇：`cleanup.md` 入口通用规则 + `tools/*` 各开发工具 + `macos-system.md`/`project-artifacts.md`/`orphans.md`）。
 
 入口：opencode `/cleanup`（无参数时先给选项）、dsh `/cleanup`（由 dsh-commands 插件提供，语义相同）。
 
