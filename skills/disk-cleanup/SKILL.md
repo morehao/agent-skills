@@ -21,7 +21,7 @@ description: 回收本机磁盘空间：先测量、按编码清可再生产物�
 
 ## 流程 0–5
 
-**0. 无说明先给选项。** 用户没带具体说明（空消息、只 `@` 技能、`/cleanup` 无参数）→ 不跑脚本，先给编号选项等他选：1) 只看占用 2) 选勾清理 3) 卸载残留 4) 取消。不要替他选默认项，也不要「顺手先查一下」。
+**0. 无说明先给选项。** 用户没带具体说明（空消息、只 `@` 技能、`/cleanup` 无参数）→ 不跑脚本，先给编号选项等他选：1) 只看占用 2) 选勾清理 3) 只看卸载残留 4) 只处理本地数据库（opencode） 5) 取消。不要替他选默认项，也不要「顺手先查一下」。
 
 **1. 测量（只读）。** `bash scripts/mac_cleanup.sh` 默认查询；要编码用 `--list`；问「什么最占地方」用 `--top 10`；问「哪个 App 卸了还留着东西」看 orphans（`--orphans-list` 列全部）；要结构化结果加 `--json`。
 用户只关心一个场景时**直接把范围交下去**，不要先全量扫描再筛：`--only docker`、`--group ios`、`--group containers`（组名见 `--groups`）；范围在查询/预览/执行三侧都生效。非 macOS：只用 `df -h` / `du -sh *` 排查，并说明本技能只有 macOS 清理脚本。
@@ -35,6 +35,7 @@ description: 回收本机磁盘空间：先测量、按编码清可再生产物�
 **3. 勾选。** 用提问工具（dsh：`ask_user_question`，多选）把可勾选项变成选项，**每个选项带实测大小与代价**；低风险标「推荐」，风险项写清后果；至少留一个「暂不清理」。用户回「随便」就重问一次，仍不明确按「只看清单」结束。没有提问工具时输出编号让用户回数字。
 
 **4. 执行。** 勾选映射成 `--only <编码>`，先 `--clean --dry-run --only <编码>` 复核预览与勾选一致，再 `--clean --only <编码>`。含 sudo 编码的拆出来交终端；`orphans` 只报告，删除要逐条 `--orphans-delete <路径>`（路径须存在、是扫描根直接子项、在本次候选里，否则 `exit 1`）。失败与被跳过的项不吞。
+勾了「本地数据库」→ 走 `scripts/cleanup-opencode.sh`（默认先 `.backup` + `integrity_check`，通过才动数据），与磁盘清理**分开汇报**。
 
 **5. 回执。** 按下面「交付回执」写，只写一遍。
 
@@ -73,5 +74,6 @@ description: 回收本机磁盘空间：先测量、按编码清可再生产物�
 | 项目内构建产物、过程产物、编译缓存 | `references/project-artifacts.md` |
 | 已卸载 App 残留（A/B 档、归属证明） | `references/orphans.md` |
 | 单个开发工具（docker / node / go / python / rust / jvm / xcode / homebrew） | `references/tools/<tool>.md` |
+| 本地数据库（opencode）备份与瘦身 | `references/tools/opencode.md` |
 
 编码、参数、退出码的单一事实源是脚本本身：`--list --json` 与 `--help`。文档与脚本不一致时以实现为准。
