@@ -5,7 +5,7 @@
 //   1) 编码集合：四处编码集合必须一致；`--list` 文本输出里每项都要出现（原有检查）。
 //   2) 阈值一致性：references/ 下编码行必须出现该编码的预期阈值 token（天 / 体积）。
 //   3) 参数一致性：`mac_cleanup.sh --help` 里的每个 `--xxx` 都要在 references/*.md 或 SKILL.md 出现。
-//   4) 白名单一致性：脚本 SAFE_CACHE_DIRS / ORPHAN_ROOTS 的每条路径（`$HOME` 归一为 `~`）都要在 references/*.md 出现。
+//   4) 白名单一致性：脚本各工具缓存数组（NODE/GO/PYTHON/RUST/JVM_CACHE_DIRS）+ ORPHAN_ROOTS 的每条路径（`$HOME` 归一为 `~`）都要在 references/*.md 出现。
 //
 // references 已按「清理对象」拆成多篇（cleanup.md 入口 + tools/*.md + 系统级/项目层/残留各篇）。
 // 编码索引表仍只在入口 cleanup.md（parseRefsTable 只解析它）；阈值/参数/白名单则跨 references 全目录联合校验。
@@ -294,7 +294,7 @@ function docPathSet(text) {
 function checkWhitelists(refsText) {
   const docs = docPathSet(refsText);
   let total = 0;
-  for (const name of ["SAFE_CACHE_DIRS", "ORPHAN_ROOTS"]) {
+  for (const name of ["NODE_CACHE_DIRS", "GO_CACHE_DIRS", "PYTHON_CACHE_DIRS", "RUST_CACHE_DIRS", "JVM_CACHE_DIRS", "SAFE_CACHE_DIRS", "ORPHAN_ROOTS"]) {
     const paths = scriptArray(name).map(tilde);
     total += paths.length;
     const missing = paths.filter((p) => !docs.has(p));

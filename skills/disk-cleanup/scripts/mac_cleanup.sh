@@ -61,7 +61,7 @@ SANDBOX_SUSPECT=0          # 预检发现 $HOME 下不可写（疑似 workspace-
 
 # 清理项编码：勾选单位。新增清理项时必须同时更新这里、references/cleanup.md 与 SKILL.md 的清单；
 # scripts/check-disk-cleanup-codes.mjs 会校验三处是否一致（CI 会跑）。
-KNOWN_IDS="caches logs tmp varfolders snapshots trash xcode toolcache bigbuild docker appcache updaters projects dshtmp projectcache orphans"
+KNOWN_IDS="caches logs tmp varfolders snapshots trash xcode node go python rust jvm homebrew cocoapods xcode-ios docker appcache updaters projects dshtmp projectcache orphans"
 
 # 卸载残留的扫描根（只看顶层条目，不递归）：残留按「App 会往哪几处写东西」枚举，
 # 不做全盘扫描。新增位置要同时改这里和 references/cleanup.md 的 orphans 小节。
@@ -95,8 +95,14 @@ item_label() {
     snapshots)  echo "Time Machine 本地快照" ;;
     trash)      echo "废纸篓" ;;
     xcode)      echo "Xcode DerivedData" ;;
-    toolcache)  echo "语言工具链/包管理器缓存" ;;
-    bigbuild)   echo "构建大件（ipsw/Homebrew/CocoaPods/Gradle/DeviceSupport/模拟器）" ;;
+    node)       echo "Node 生态缓存（npm/yarn/bun/pnpm/无头运行时）" ;;
+    go)         echo "Go 缓存（模块/构建/工具）" ;;
+    python)     echo "Python 缓存（uv/pip）" ;;
+    rust)       echo "Rust 缓存（cargo registry）" ;;
+    jvm)        echo "JVM 缓存（Maven .m2 / Gradle）" ;;
+    homebrew)   echo "Homebrew 缓存与旧版本" ;;
+    cocoapods)  echo "CocoaPods 缓存" ;;
+    xcode-ios)  echo "iOS 大件（ipsw/DeviceSupport/CoreSimulator/模拟器）" ;;
     docker)     echo "Docker 无用资源" ;;
     appcache)   echo "应用内缓存（Electron/Chromium 型 app）" ;;
     updaters)   echo "应用自动更新残留" ;;
@@ -117,8 +123,14 @@ item_desc() {
     snapshots)  echo "tmutil thinlocalsnapshots（回滚粒度变粗，系统会重建）" ;;
     trash)      echo "清空，清后不可恢复" ;;
     xcode)      echo "整个 DerivedData 删除，下次构建全量重编" ;;
-    toolcache)  echo "白名单内可再生缓存 + pnpm store prune（删后重新下载/编译）" ;;
-    bigbuild)   echo "ipsw / Homebrew / CocoaPods / Gradle / DeviceSupport / 不可用模拟器" ;;
+    node)       echo "npm/yarn/bun/pnpm 缓存与无头运行时缓存；pnpm store prune（删后重新下载/编译）" ;;
+    go)         echo "go-build / go/pkg/mod / goimports / gopls / golangci-lint（删后重新下载/编译）" ;;
+    python)     echo "uv / pip 缓存（删后重新下载）" ;;
+    rust)       echo "cargo registry 缓存（删后重新下载 crate）" ;;
+    jvm)        echo "Maven ~/.m2/repository 与 Gradle ~/.gradle/caches（删后重新下载）" ;;
+    homebrew)   echo "brew cleanup --prune=all + autoremove（旧版本不能回滚）" ;;
+    cocoapods)  echo "CocoaPods 缓存（删后 pod install 重新下载）" ;;
+    xcode-ios)  echo "ipsw / iOS DeviceSupport / CoreSimulator / 不可用模拟器" ;;
     docker)     echo "docker system prune -a（镜像需重新 pull；不会缩小 Docker.raw）" ;;
     appcache)   echo "各 app 目录下的 Cache/GPUCache/Code Cache 等，app 会重建" ;;
     updaters)   echo "crx_cache / auto-updater 等更新下载残留" ;;
@@ -302,7 +314,7 @@ usage() {
     "  --clean           执行实际清理" \
     "  --dry-run         配合 --clean：只打印计划命令与预计可删量，不实际删除" \
     "  --only <ids>      只清理指定项（英文逗号分隔），如 --only caches,logs；可重复传，会合并" \
-    "  --skip <ids>      排除指定项，如 --skip docker,bigbuild；可重复传，会合并" \
+    "  --skip <ids>      排除指定项，如 --skip docker,gradle；可重复传，会合并" \
     "  --all             显式表示「清理全部项」；不带 --only/--skip 时 --clean 必须配 --all" \
     "  --list            列出全部清理项编码与说明后退出（加 --json 输出机器可读版）" \
     "  --top [N]         只读：列出 \$HOME 下最占空间的 N 项（目录与 >100MB 文件），默认 10，较慢" \
@@ -1078,8 +1090,8 @@ else
 fi
 say ""
 
-# ---------- 8. 大体积高危项目 [bigbuild] [docker] ----------
-say "----- 8. 大体积项目检测与清理 [bigbuild] [docker] -----"
+# ---------- 8. 大体积高危项目 [homebrew][cocoapods][gradle][xcode-ios][docker] ----------
+say "----- 8. 大体积项目检测与清理 [homebrew][cocoapods][gradle][xcode-ios][docker] -----"
 
 brew_cleanup() {
   local rc1=0 rc2=0
@@ -1113,7 +1125,7 @@ if [[ -d "$IPSW_DIR" ]]; then
   say "  ② 旧 iOS 固件 (ipsw): $(human "$IPSW_KB")"
   STEP_TOTAL_KB="$IPSW_KB"; STEP_DEL_KB="$IPSW_KB"; STEP_PATH="$IPSW_DIR"
   PLAN_CMD="rm -rf ${IPSW_DIR}"
-  run bigbuild "清理旧 iOS 固件" delete_whole "$IPSW_DIR"
+  run xcode-ios "清理旧 iOS 固件" delete_whole "$IPSW_DIR"
 else
   say "  ② 旧 iOS 固件: 未找到"
 fi
@@ -1125,7 +1137,7 @@ if command -v brew &> /dev/null; then
   say "  ③ Homebrew 缓存: $(human "$BREW_KB")（旧版本 Cellar 由 brew cleanup 一并处理）"
   STEP_TOTAL_KB="$BREW_KB"; STEP_DEL_KB="$BREW_KB"; STEP_PATH="${BREW_CACHE:-}"
   PLAN_CMD="brew cleanup --prune=all && brew autoremove"
-  run bigbuild "清理 Homebrew 缓存与旧版本" brew_cleanup
+  run homebrew "清理 Homebrew 缓存与旧版本" brew_cleanup
 else
   say "  ③ Homebrew 缓存: 未安装 Homebrew，跳过"
 fi
@@ -1137,7 +1149,7 @@ if [[ -d "$PODS_CACHE" ]]; then
   say "  ④ CocoaPods 缓存: $(human "$PODS_KB")"
   STEP_TOTAL_KB="$PODS_KB"; STEP_DEL_KB="$PODS_KB"; STEP_PATH="$PODS_CACHE"
   PLAN_CMD="rm -rf ${PODS_CACHE}"
-  run bigbuild "清理 CocoaPods 缓存" delete_whole "$PODS_CACHE"
+  run cocoapods "清理 CocoaPods 缓存" delete_whole "$PODS_CACHE"
 else
   say "  ④ CocoaPods 缓存: 未找到"
 fi
@@ -1149,7 +1161,7 @@ if [[ -d "$GRADLE_CACHE" ]]; then
   say "  ⑤ Gradle 缓存: $(human "$GRADLE_KB")"
   STEP_TOTAL_KB="$GRADLE_KB"; STEP_DEL_KB="$GRADLE_KB"; STEP_PATH="$GRADLE_CACHE"
   PLAN_CMD="rm -rf ${GRADLE_CACHE}"
-  run bigbuild "清理 Gradle 缓存" delete_whole "$GRADLE_CACHE"
+  run jvm "清理 Gradle 缓存" delete_whole "$GRADLE_CACHE"
 else
   say "  ⑤ Gradle 缓存: 未找到"
 fi
@@ -1172,7 +1184,7 @@ if [[ -d "$DEVSUPPORT" ]]; then
   say "  ⑦ Xcode iOS DeviceSupport: $(human "$DEV_KB")"
   STEP_TOTAL_KB="$DEV_KB"; STEP_DEL_KB="$DEV_KB"; STEP_PATH="$DEVSUPPORT"
   PLAN_CMD="rm -rf ${DEVSUPPORT}"
-  run bigbuild "清理旧 iOS DeviceSupport 符号文件" delete_whole "$DEVSUPPORT"
+  run xcode-ios "清理旧 iOS DeviceSupport 符号文件" delete_whole "$DEVSUPPORT"
 else
   say "  ⑦ Xcode iOS DeviceSupport: 未找到"
 fi
@@ -1181,89 +1193,116 @@ if command -v xcrun &> /dev/null; then
   say "  ⑧ 清理不可用的旧 iOS 模拟器 ..."
   STEP_TOTAL_KB=0; STEP_DEL_KB=0; STEP_PATH=""
   PLAN_CMD="xcrun simctl delete unavailable"
-  run bigbuild "删除不可用的旧模拟器" xcrun simctl delete unavailable
+  run xcode-ios "删除不可用的旧模拟器" xcrun simctl delete unavailable
   SIM_CACHE="$HOME/Library/Developer/CoreSimulator/Caches"
   if [[ -d "$SIM_CACHE" ]]; then
     SIM_CACHE_KB=$(du_kb "$SIM_CACHE")
     say "      CoreSimulator/Caches: $(human "$SIM_CACHE_KB")"
     STEP_TOTAL_KB="$SIM_CACHE_KB"; STEP_DEL_KB="$SIM_CACHE_KB"; STEP_PATH="$SIM_CACHE"
     PLAN_CMD="rm -rf ${SIM_CACHE}"
-    run bigbuild "清理 CoreSimulator 缓存" delete_whole "$SIM_CACHE"
+    run xcode-ios "清理 CoreSimulator 缓存" delete_whole "$SIM_CACHE"
   fi
 else
   say "  ⑧ 未安装 Xcode 命令行工具，跳过模拟器清理"
 fi
 say ""
 
-# ---------- 9. 语言工具链与包管理器缓存 [toolcache] ----------
-say "----- 9. 语言工具链与包管理器缓存（安全可再生）[toolcache] -----"
-SAFE_CACHE_DIRS=(
+# ---------- 9. 语言工具链与包管理器缓存 [node][go][python][rust][jvm] ----------
+# 每个工具一个编码，可单独勾选清理；路径按工具分组，删除时只动所勾编码的路径。
+say "----- 9. 语言工具链与包管理器缓存（安全可再生）[node][go][python][rust][jvm] -----"
+
+# 按工具分组的可再生缓存目录（删除时每组独立 rm_tree）
+NODE_CACHE_DIRS=(
   "$HOME/.npm/_npx"
   "$HOME/.npm/_cacache"
   "$HOME/.npm/_logs"
-  "$HOME/.cache/uv"
-  "$HOME/.cache/puppeteer"
-  "$HOME/.cache/node"
-  "$HOME/.cache/codex-runtimes"
-  "$HOME/.cache/opencode"
   "$HOME/.cache/yarn"
   "$HOME/.cache/bun"
   "$HOME/.bun/install/cache"
-  "$HOME/.cargo/registry/cache"
+  "$HOME/.cache/node"
+  "$HOME/.cache/puppeteer"
+  "$HOME/.cache/codex-runtimes"
+  "$HOME/.cache/opencode"
+  "$HOME/Library/Caches/Yarn"
+  "$HOME/Library/Caches/node-gyp"
+  "$HOME/Library/Caches/electron"
+  "$HOME/Library/Caches/ms-playwright"
+  "$HOME/Library/Caches/Cypress"
+)
+GO_CACHE_DIRS=(
   "$HOME/go/pkg/mod/cache/download"
-  "$HOME/.m2/repository"
   "$HOME/Library/Caches/go-build"
   "$HOME/Library/Caches/goimports"
   "$HOME/Library/Caches/gopls"
   "$HOME/Library/Caches/golangci-lint"
-  "$HOME/Library/Caches/ms-playwright"
-  "$HOME/Library/Caches/Cypress"
-  "$HOME/Library/Caches/Yarn"
-  "$HOME/Library/Caches/pip"
-  "$HOME/Library/Caches/node-gyp"
-  "$HOME/Library/Caches/electron"
-  "$HOME/Library/Caches/Homebrew"
 )
+PYTHON_CACHE_DIRS=(
+  "$HOME/.cache/uv"
+  "$HOME/Library/Caches/pip"
+)
+RUST_CACHE_DIRS=(
+  "$HOME/.cargo/registry/cache"
+)
+JVM_CACHE_DIRS=(
+  "$HOME/.m2/repository"
+)
+# 注意：Gradle 的 ~/.gradle/caches 在第 8 节由 gradle 步骤（同样归 jvm 编码）删除，
+# 不放进本数组，避免同一路径被删两次。
 PNPM_PMS="$HOME/Library/pnpm/package-manager-store"
-TOOLCACHE_TOTAL_KB=0
-TOOLCACHE_EXIST=0
-for d in "${SAFE_CACHE_DIRS[@]}"; do
-  if [[ -d "$d" ]]; then
+
+# 兼容旧变量名（--json/外部引用若提及 SAFE_CACHE_DIRS 时可回溯）；此处只是合并视图，不再用于删除
+SAFE_CACHE_DIRS=(
+  "${NODE_CACHE_DIRS[@]}" "${GO_CACHE_DIRS[@]}" "${PYTHON_CACHE_DIRS[@]}"
+  "${RUST_CACHE_DIRS[@]}" "${JVM_CACHE_DIRS[@]}" "$HOME/Library/Caches/Homebrew"
+)
+
+# toolcache_group <id> <desc> <dirs...>：按编码统计并清理一组目录；pnpm 的 store prune 与 PMS 单独附加
+toolcache_group() {
+  local id="$1" desc="$2"; shift 2
+  local dirs=("$@") total=0 exist=0 sz d
+  for d in "${dirs[@]}"; do
+    [[ -d "$d" ]] || continue
     sz=$(du_kb "$d")
-    TOOLCACHE_TOTAL_KB=$((TOOLCACHE_TOTAL_KB + sz))
-    TOOLCACHE_EXIST=$((TOOLCACHE_EXIST + 1))
+    total=$((total + sz))
+    exist=$((exist + 1))
     if [[ "$sz" -ge 1024 ]]; then
       say "    - $(human "$sz")  ${d/#$HOME/~}"
     fi
-  fi
-done
-PMS_KB=0
-if [[ -d "$PNPM_PMS" ]]; then
-  PMS_KB=$(du_kb "$PNPM_PMS")
-  say "    - $(human "$PMS_KB")  ~/Library/pnpm/package-manager-store（pnpm 工具版本仓库，删后重新下载）"
-fi
-say "  白名单命中 ${TOOLCACHE_EXIST} 个目录，合计 $(human "$TOOLCACHE_TOTAL_KB")；本次可删 $(human "$((TOOLCACHE_TOTAL_KB + PMS_KB))")"
-STEP_TOTAL_KB=$((TOOLCACHE_TOTAL_KB + PMS_KB))
-STEP_DEL_KB=$((TOOLCACHE_TOTAL_KB + PMS_KB))
-STEP_PATH=""
-PLAN_CMD="rm -rf <上列白名单目录>; rm -rf ~/Library/pnpm/package-manager-store"
-clean_toolcache() {
-  local fails=0 p
-  for p in "${SAFE_CACHE_DIRS[@]}"; do
-    [[ -d "$p" ]] || continue
-    rm_tree "$p" || fails=$((fails + 1))
   done
-  if [[ -d "$PNPM_PMS" ]]; then
-    rm_tree "$PNPM_PMS" || fails=$((fails + 1))
+  # pnpm 专属：package-manager-store（整删）+ store prune（回收未引用）
+  if [[ "$id" == "node" ]]; then
+    if [[ -d "$PNPM_PMS" ]]; then
+      local pms; pms=$(du_kb "$PNPM_PMS")
+      total=$((total + pms)); exist=$((exist + 1))
+      say "    - $(human "$pms")  ~/Library/pnpm/package-manager-store（pnpm 工具版本仓库，删后重新下载）"
+    fi
   fi
-  say "      白名单缓存清理完成；失败 ${fails} 个"
-  STEP_NOTE="失败 ${fails} 个"
-  [[ "$fails" -eq 0 ]]
+  PLAN_CMD="rm -rf <本组白名单目录>"
+  [[ "$id" == "node" ]] && PLAN_CMD="rm -rf <本组白名单目录>; rm -rf ~/Library/pnpm/package-manager-store; pnpm store prune"
+  STEP_TOTAL_KB="$total"; STEP_DEL_KB="$total"; STEP_PATH=""
+  STEP_NOTE=""
+  [[ "$id" == "node" ]] && STEP_NOTE="另含 pnpm store prune（仅回收未引用包）"
+  say "  ${id}: 命中 ${exist} 个目录，合计 $(human "$total")"
+  local fails=0
+  clean_group() {
+    local f=0 p
+    for p in "${dirs[@]}"; do
+      [[ -d "$p" ]] || continue
+      rm_tree "$p" || f=$((f + 1))
+    done
+    if [[ "$id" == "node" ]]; then
+      [[ -d "$PNPM_PMS" ]] && { rm_tree "$PNPM_PMS" || f=$((f + 1)); }
+      prune_pnpm_store || true
+    fi
+    STEP_NOTE="失败 ${f} 个"
+    return "$f"
+  }
+  run "$id" "$desc" clean_group
 }
-run toolcache "清理语言工具链/包管理器缓存" clean_toolcache
 
 # corepack 在 Node 25+ 已不再随发行版分发：缺失时回落直接调用 pnpm。
 prune_pnpm_store() {
+  command -v pnpm >/dev/null 2>&1 || return 0
   if command -v corepack >/dev/null 2>&1; then
     COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack pnpm store prune
     return $?
@@ -1272,20 +1311,12 @@ prune_pnpm_store() {
   pnpm store prune
 }
 
-if command -v pnpm &> /dev/null; then
-  PNPM_STORE_KB=$(du_kb "$HOME/Library/pnpm/store")
-  say "  pnpm store: $(human "$PNPM_STORE_KB")（只回收未被引用的包，可删量由 prune 决定）"
-  STEP_TOTAL_KB="$PNPM_STORE_KB"
-  STEP_DEL_KB=0
-  STEP_PATH="$HOME/Library/pnpm/store"
-  STEP_NOTE="仅回收未引用包"
-  PLAN_CMD="corepack pnpm store prune（无 corepack 时回落 pnpm store prune）"
-  run toolcache "回收 pnpm store 中未引用的包" prune_pnpm_store
-else
-  say "  pnpm store: 未安装 pnpm，跳过"
-fi
+toolcache_group node "清理 Node 生态缓存（npm/yarn/bun/pnpm）" "${NODE_CACHE_DIRS[@]}"
+toolcache_group go "清理 Go 缓存" "${GO_CACHE_DIRS[@]}"
+toolcache_group python "清理 Python 缓存（uv/pip）" "${PYTHON_CACHE_DIRS[@]}"
+toolcache_group rust "清理 Rust 缓存（cargo）" "${RUST_CACHE_DIRS[@]}"
+toolcache_group jvm "清理 JVM 缓存（Maven/Gradle）" "${JVM_CACHE_DIRS[@]}"
 say ""
-
 # ---------- 10. 应用内缓存 [appcache] ----------
 say "----- 10. 应用内缓存（Electron/Chromium 型 app）[appcache] -----"
 APPSUPPORT="$HOME/Library/Application Support"
@@ -1630,7 +1661,7 @@ orphan_skip() {
     # /Library 下的系统自身配置，不是任何 App 的残留
     systemconfiguration|logging|opendirectory|directoryservice|xsan|security|audio) return 0 ;;
     org.cups.*) return 0 ;;   # 系统打印配置
-    homebrew|pnpm|go-build|ms-playwright|cocoapods) return 0 ;;   # 已由 toolcache / bigbuild 覆盖
+    homebrew|pnpm|go-build|ms-playwright|cocoapods) return 0 ;;   # 已由 node/go/homebrew/cocoapods 等工具编码覆盖
   esac
   return 1
 }

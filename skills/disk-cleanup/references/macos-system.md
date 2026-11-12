@@ -21,9 +21,9 @@
 - **终局（第 2 期不涉及）**：保持不变。
 - 说明：Go 的 `/var/folders/T/go-build*` 也在此编码，工具视角见 [tools/go.md](tools/go.md)；`Toolcache` 白名单里的浏览器/无头运行时缓存（`ms-playwright`、`Cypress`、`puppeteer`、`electron`、`codex-runtimes`）见下「其他可再生缓存」。
 
-## 其他可再生缓存（归 `toolcache`）
+## 其他可再生缓存（归 `node`）
 
-以下不专属某门语言，按 `toolcache` 编码清理（见 [tools/node.md](tools/node.md) 的 `SAFE_CACHE_DIRS` 全表）：`~/Library/Caches/ms-playwright`、`~/Library/Caches/Cypress`、`~/Library/Caches/electron`、`~/.cache/puppeteer`、`~/.cache/codex-runtimes`。
+以下是无头运行时/浏览器缓存，归 `node` 编码清理（见 [tools/node.md](tools/node.md) 的 `NODE_CACHE_DIRS` 全表）：`~/Library/Caches/ms-playwright`、`~/Library/Caches/Cypress`、`~/Library/Caches/electron`、`~/.cache/puppeteer`、`~/.cache/codex-runtimes`。
 
 ## `tmp` 为什么走 `/private/tmp`
 
