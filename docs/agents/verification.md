@@ -38,35 +38,42 @@ node skills/tech-design/scripts/tests/check-design-doc-test.mjs
 
 `skills/tech-design/scripts/tests/behavior/baseline.md` 是**人工行为回归**（要跑模型，不进 CI）：技能新增或大改后按其中 B1–B5 场景复跑，把新出现的偷懒话术追加到 `references/anti-rationalization.md`。
 
-## disk-cleanup 文档一致性校验
+## disk-cleanup：编码契约 / 删除安全 / 回归测试
+
+三条命令，都能在 Linux 与 macOS 上跑（CI 是 ubuntu-latest）：
 
 ```bash
-node scripts/check-disk-cleanup-codes.mjs
+node scripts/check-disk-cleanup-codes.mjs     # 编码契约与文档一致
+node scripts/check-disk-cleanup-safety.mjs    # 删除出口与 bash 3.2 约束
+bash skills/disk-cleanup/scripts/tests/run.sh # 纯 bash 断言（假 HOME，不碰真实数据）
 ```
 
-退出码：`0` 全部通过 / `1` 有漂移（编码集合、阈值、参数、白名单任一不一致） / `2` 用法或环境错误（脚本跑不起来、`--help` / `--list --json` 解析失败）。
+退出码统一：`0` 通过 / `1` 有漂移或断言失败 / `2` 用法或环境错误（文件读不到、脚本跑不起来、JSON 解析失败）。
 
-单一事实源是 `skills/disk-cleanup/scripts/mac_cleanup.sh`：编码取 `--list --json`（`KNOWN_IDS` 与元数据），参数取 `--help`，白名单取脚本里的数组；**阈值是门禁里钉死的契约常量**（`THRESHOLDS`，不跟随脚本默认值，改默认值要同时改门禁）。校验的是**四类结构性一致**，不是逐字比对文案：
+**单一事实源**：`skills/disk-cleanup/scripts/data/codes.tsv`（编码 id/label/desc/sudo，29 个）与
+`scripts/data/protect.tsv`（保护清单 pattern/scope/reason）。`--list --json` 由 TSV 派生，
+文档与脚本都不许再硬编码编码列表——v1 的漂移（文档写「16 个」实际 22 个）就是因为数量没被校验。
 
-- **编码集合**：`references/cleanup.md`（入口索引表）的「清理项编码」表、`SKILL.md` 勾选表第二列（`--only` 编码）、`docs/agents/skill-internals.md` 的「清理项编码（…）」清单，三处必须与脚本 `KNOWN_IDS` 相等（漏写/多写都失败）；另需 `--list` 文本输出里含每个编码。编码索引表只认入口 `cleanup.md`。
-- **阈值**：`references/*.md`（全目录联合，详细阈值行在 `tools/*`、`macos-system.md`、`project-artifacts.md`）每个编码行必须出现该编码的阈值 token（如 `caches` 有「1 天」、`logs` 有「7 天」、`varfolders` 有「7 天」、`projects` 有「30 天」「50 MB」、`appcache` 有「10 MB」、`projectcache` 有「3 天」、`dshtmp` 有「0 天」）。写法用「数字 + 空格 + 单位」最稳（门禁也认 `mtime + 1`、`默认 30` 这类旧写法，但数字本身是钉死的）。
-- **参数**：`--help` 里的每个 `--xxx` 都必须能在 `references/*.md` 或 `SKILL.md` 找到（反向不强制：文档可以讲概念，多写的参数不判失败）。
-- **白名单**：脚本 `SAFE_CACHE_DIRS`、`ORPHAN_ROOTS` 里的每个路径（`$HOME` 归一为 `~`）都要出现在 `references/*.md` 文本里（references 已按清理对象分篇，路径可落在任一分篇）；文档多写的由人审，不自动判失败。
+`check-disk-cleanup-codes.mjs` 校验五类结构一致：
+`--list --json` 与 TSV 逐项相同（id/顺序/label/desc/sudo）、`references/cleanup.md` 索引表与 TSV 一一对应**且数量相同**、
+`SKILL.md` 里每个 `--flag` 在 `usage()` 里真实存在（反向检查，防文档教 agent 敲不存在的参数）、
+`--list` 文本的 `[需 sudo]` 与 TSV 的 sudo 列一致、references 的 `--only` 示例只用声明过的编码。
 
-**不校验**（别指望门禁兜住，改这些要人工对齐）：表格的其它列文案、编码之外的行为（如 `--orphans-delete` 的路径校验规则）、`cleanup-opencode.sh` 的参数与表名、`docs/skills.md` 等散文。
+`check-disk-cleanup-safety.mjs` 校验四条硬约束：
+`rm`/`find -delete` 只允许出现在 `lib/safety.sh` 的 `dc_funnel_rm` 内（报文件:行）、
+禁 bash 4 语法（`mapfile`/`readarray`/`declare -A`/`${v,,}`/`${v^^}`/`<<<`/`&>>`）、
+`mac_cleanup.sh` 必须调用 `dc_env_assert`、`scripts/**/*.sh` 全量过 `/bin/bash -n`、
+以及「变量后紧跟中文」直接失败（bash 3.2 会把它当成变量名的一部分 → `unbound variable`）。
 
-改了编码、阈值、参数名或白名单，**脚本常量 + 文档（`references/*.md` / `SKILL.md` / `skill-internals.md`）都要同步**——漏了会看到脚本不认的编码（`--only` 直接 exit 1）或门禁变红。
+`tests/run.sh` 覆盖内核不变量：路径断言拒绝清单、`HOME` 为空/相对时 `exit 2`、保护清单
+（hard 拦 / soft 拦 / `!pattern` 解 soft / hard 不可解 / 用户追加生效）、`dc_under` 的 `/Users/x` vs `/Users/xy`、
+`run_timeout` 返回 124 与耗时上界、`json_esc`、参数契约（`--clean` 缺 `--only/--skip/--all`、单独 `--dry-run`、未知编码、
+未知参数 → `exit 2`）、`codes.tsv` ↔ `--list --json`、reason/status 枚举闭合、dry-run 与 clean 的 `deletable_kb` 一致。
+所有删除类用例只在 `HOME=$(mktemp -d)` 的假树上跑，退出即清理。
 
-### CI
+**CI**（`.github/workflows/commands.yml` 的 `contract` job）跑：命令契约 + 上面三条 + tech-design 文档门禁 + `scripts/**`、`skills/**` 全量 `bash -n`。
 
-[`.github/workflows/commands.yml`](../../.github/workflows/commands.yml) 在 push 到 `main` 与所有 PR 上跑两个 job：
-
-| job | 内容 | 失败含义 |
-|---|---|---|
-| `contract` | `node scripts/check-opencode-commands.mjs` + `node scripts/check-disk-cleanup-codes.mjs` + `node skills/tech-design/scripts/tests/check-design-doc-test.mjs` + 两个安装脚本 `bash -n` | 命令契约/README/`$ARGUMENTS` 不合规、disk-cleanup 的编码/阈值/参数/白名单与文档漂移、tech-design 文档门禁规则或夹具失败，或脚本有语法错误 |
-| `dsh-parity` | checkout `morehao/dsh-commands` 到 `.ci/dsh-commands`，跑 `--dsh` | 两仓的 branch/skill 漂移（description 差异只提示，不失败） |
-
-本地等价：`node scripts/check-opencode-commands.mjs --dsh ../dsh-commands`。CI 依赖另一仓的 `main`，dsh-commands 改了 branch key 这里会立刻红——这是预期信号，不是 flaky。
+改了编码 / 阈值 / 参数 / 保护清单，要同步改：`data/codes.tsv` 或 `data/protect.tsv` + `references/*.md`（`cleanup.md` 索引表必改）+ 必要时 `SKILL.md` 的流程（不要在 SKILL 里抄编码表）。
 
 ## 环境类检查（本地，不进 CI）
 

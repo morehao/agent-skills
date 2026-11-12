@@ -1,0 +1,49 @@
+# 保护清单（data-only，逻辑在 lib/safety.sh）
+# 格式：pattern<TAB>scope<TAB>reason
+#   scope=hard  硬安全：永远生效，用户无法解除
+#   scope=soft  默认保护：用户可在 ~/.config/disk-cleanup/protect.txt 用 !pattern 解除
+# 匹配：按绝对路径 glob，* 匹配任意字符（含 /）；纯目录路径同时覆盖其下全部内容。
+# 判据不是「Mole 这么说」，而是：删了会破坏系统功能，或删的是用户数据。
+
+# ---------- hard：删了会破坏 macOS 功能 ----------
+$HOME/Library/Caches/com.apple.spotlight*	hard	spotlight-index
+$HOME/Library/Caches/com.apple.Spotlight*	hard	spotlight-index
+$HOME/Library/Caches/com.apple.FontRegistry*	hard	font-rendering
+$HOME/Library/Caches/CloudKit*	hard	icloud-sync
+$HOME/Library/Caches/kitty	hard	kitty-graphics-protocol
+$HOME/Library/Caches/pypoetry/virtualenvs*	hard	poetry-live-venvs
+$HOME/Library/Caches/org.R-project.R/R/renv*	hard	renv-linked-libraries
+$HOME/Library/Caches/com.apple.finder	hard	finder-metadata
+
+# ---------- hard：用户数据，任何编码都不许碰 ----------
+$HOME/Library/Mobile Documents*	hard	icloud-user-documents
+$HOME/Library/Application Support/MobileSync*	hard	ios-device-backup
+$HOME/Library/Containers/com.apple.mail*	hard	mail-data
+$HOME/Library/Messages*	hard	imessage-data
+$HOME/Library/Mail*	hard	mail-data
+
+# ---------- soft：默认保护，用户可解除 ----------
+$HOME/Library/Caches/ms-playwright*	soft	playwright-browsers
+$HOME/Library/Caches/Cypress*	soft	cypress-browsers
+$HOME/Library/Caches/camoufox*	soft	camoufox-browsers
+# JetBrains：只保护「IDE 配置目录」（丢了要重配），放过 Toolbox 的应用版本目录（可重下）
+$HOME/Library/Application Support/JetBrains/IntelliJIdea*	soft	jetbrains-config
+$HOME/Library/Application Support/JetBrains/IdeaIC*	soft	jetbrains-config
+$HOME/Library/Application Support/JetBrains/PyCharm*	soft	jetbrains-config
+$HOME/Library/Application Support/JetBrains/GoLand*	soft	jetbrains-config
+$HOME/Library/Application Support/JetBrains/WebStorm*	soft	jetbrains-config
+$HOME/Library/Application Support/JetBrains/Rider*	soft	jetbrains-config
+$HOME/Library/Application Support/JetBrains/CLion*	soft	jetbrains-config
+$HOME/Library/Application Support/JetBrains/PhpStorm*	soft	jetbrains-config
+$HOME/Library/Application Support/JetBrains/DataGrip*	soft	jetbrains-config
+$HOME/Library/Application Support/JetBrains/RubyMine*	soft	jetbrains-config
+$HOME/Library/Application Support/JetBrains/AppCode*	soft	jetbrains-config
+$HOME/Library/Application Support/JetBrains/Aqua*	soft	jetbrains-config
+$HOME/Library/Application Support/JetBrains/RustRover*	soft	jetbrains-config
+$HOME/Library/Application Support/JetBrains/Writerside*	soft	jetbrains-config
+$HOME/Library/Application Support/JetBrains/Fleet*	soft	jetbrains-config
+$HOME/Library/Caches/JetBrains*	soft	jetbrains-caches
+$HOME/Library/Caches/com.jetbrains.toolbox*	soft	jetbrains-toolbox
+$HOME/.ollama/models*	soft	ollama-models
+$HOME/Library/Caches/tealdeer/tldr-pages	soft	tealdeer-pages
+$HOME/Library/Caches/com.nssurge.surge-mac*	soft	surge-cache

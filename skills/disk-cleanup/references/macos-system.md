@@ -1,19 +1,29 @@
 # macOS 系统级清理（非工具类）
 
-> 覆盖编码：`caches`、`logs`、`tmp`、`varfolders`、`snapshots`、`trash`、`appcache`、`updaters`。这些是系统/应用层面的清理对象，不专属某个开发工具。
+> 覆盖编码：`caches`、`logs`、`systemlogs`、`tmp`、`varfolders`、`snapshots`、`trash`、`appcache`、`updaters`。这些是系统/应用层面的清理对象，不专属某个开发工具。
 
 ## 编码与策略
 
 | 编码 | 覆盖对象 | 策略 / 阈值 | sudo | 删除后代价 |
 |---|---|---|---|---|
 | `caches` | `~/Library/Caches` | 纯缓存目录（浏览器/更新器/App Store）整删——Chrome 只删 `Google/Chrome` 子目录、不删整个 `Google`；其余只删 1 天前未改动的文件 | 否 | 应用首次打开变慢 |
-| `logs` | `~/Library/Logs` | 只删 7 天前的文件，以及因此变空的旧目录（`find -delete` 的行为）；保留 `~/Library/Logs` 本身 | 否 | 基本无感 |
+| `logs` | `~/Library/Logs` | 只删 7 天前的文件，以及因此变空的旧目录（删除同样经统一漏斗，不用 `find -delete`）；保留 `~/Library/Logs` 本身 | 否 | 基本无感 |
+| `systemlogs` | `/Library/Logs/DiagnosticReports`、`/private/var/log` | 只删 7 天前的崩溃报告与系统日志，单批不超过 5 条 | **是** | 无（系统会重建） |
 | `tmp` | `/private/tmp` | 只删 1 天前的陈旧内容 | **是** | 运行中程序的临时文件会重建 |
 | `varfolders` | 当前用户 `/var/folders` 容器 | `T`/`C` 清 7 天以上；`X` 清 `*code_sign_clone*` 与 7 天前的顶层条目；`T/go-build*` 清 1 天前的顶层目录 | 否 | 无 |
 | `snapshots` | Time Machine 本地快照 | 存在快照时 `tmutil thinlocalsnapshots / 999999999999 4` | **是** | 回滚粒度变粗，系统会重建 |
 | `trash` | `~/.Trash` | 清空（含隐藏项，`-print0` 遍历） | 否 | **不可恢复** |
 | `appcache` | `~/Library/Application Support/*/{Cache,GPUCache,Code Cache,CachedData,CachedExtensionVSIXs,Service Worker/CacheStorage,…}` | 整目录删，<10 MB 不入清单 | 否 | app 首次启动重建缓存；不动配置/登录态 |
 | `updaters` | `crx_cache`、`auto-updater`、`app-recovery-cache`、`UpdateCache` | 整目录删，<10 MB 不入清单 | 否 | 重新下载更新包 |
+
+## `systemlogs`：系统日志为什么单开一个编码
+
+`logs` 只管当前用户的 `~/Library/Logs`，不需要提权；系统日志在 `/Library/Logs/DiagnosticReports`（崩溃报告）与 `/private/var/log`（系统日志），**必须 sudo**，且混着正在写的日志文件，和用户日志不是一回事，所以单独一个编码。
+
+- 阈值默认 **7 天**（没有对应命令行参数；`--log-age-days` 只作用于 `logs`，不影响 `systemlogs`）；
+- **单批不超过 5 条**：系统日志目录里有很多 `*.out`/`*.err` 与轮转文件，一次删一大批容易误伤正在写的日志，也让复盘变难；批量小、可重复跑；
+- 删的是文件，不是目录；`/private/var/log` 本身不动；
+- 需要 sudo 时按 SKILL.md 铁律 3 交用户终端，`--clean --only systemlogs` 的完整命令给用户自己跑；读不到总量的情况会在报告里写成「需 sudo（当前用户读不到总量）/ 已可读部分 N 天前可删」，不要当成 0。
 
 ## 编码归属：现状 → 终局
 

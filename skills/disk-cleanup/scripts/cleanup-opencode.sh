@@ -21,6 +21,18 @@
 #
 set -uo pipefail
 
+# 删除也要走 disk-cleanup 的单一漏斗（路径断言 + 保护清单 + 在用检测）。
+# 本脚本只删自己的备份/孤儿 snapshot，仍复用同一套断言，避免两套删除语义。
+DC_SCRIPT_DIR=$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+# shellcheck source=lib/timeout.sh
+. "$DC_SCRIPT_DIR/lib/timeout.sh"
+# shellcheck source=lib/core.sh
+. "$DC_SCRIPT_DIR/lib/core.sh"
+# shellcheck source=lib/probe.sh
+. "$DC_SCRIPT_DIR/lib/probe.sh"
+# shellcheck source=lib/safety.sh
+. "$DC_SCRIPT_DIR/lib/safety.sh"
+
 DB="${OC_DATA_DIR:-$HOME/.local/share/opencode}/opencode.db"
 KEEP_DAYS=7
 DO_KILL=0
@@ -342,7 +354,7 @@ if [[ -d "$SNAP_DIR" ]]; then
     [[ -d "$d" ]] || continue
     id="$(basename "$d")"
     if [[ -z "$(sqlite3 "$DB" "SELECT id FROM project WHERE id='$id'" 2>/dev/null)" ]]; then
-      rm -rf "$d" && removed=$((removed + 1))
+      if dc_delete_one "$d" >/dev/null 2>&1; then removed=$((removed + 1)); fi
     fi
   done
   echo "  已删除孤儿 snapshot 目录: $removed 个"

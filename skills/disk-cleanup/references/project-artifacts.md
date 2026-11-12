@@ -6,7 +6,7 @@
 
 | 编码 | 覆盖对象 | 策略 / 阈值 | sudo | 删除后代价 |
 |---|---|---|---|---|
-| `projects` | `--projects-roots`（默认 `~/Documents`）下的 `node_modules`、`dist`、`build`、`.next`、`.turbo`、`.venv`、`target`、`Pods` 等 | 只处理 ≥ `--projects-age-days`（默认 30 天）未改动的目录，<50 MB 不入清单；mtime 读不到则跳过（不当成 0 天可删） | 否 | 需重新 install/build |
+| `projects` | `--projects-roots`（默认 `~/Documents`）下的 `node_modules`、`dist`、`build`、`.next`、`.turbo`、`.venv`、`target`、`Pods` 等 | 只处理 ≥ `--projects-age-days`（默认 30 天）未改动的目录，<50 MB 不入清单；**树内**（`tree_active`）有近期文件则跳过；`dist`/`build` 里还有 git 跟踪的文件则跳过；嵌套仓库跳过 | 否 | 需重新 install/build |
 | `dshtmp` | 项目内 `**/.dsh/tmp` 过程产物（只在 `--projects-roots` 下扫） | 只清空内容、**保留 `.dsh/tmp` 目录本身**；`--dshtmp-age-days`（默认 0 天 = 全部可删）；<10 MB 不入清单；`docs/` 不动 | 否 | 过程产物消失，需要时重新生成 |
 | `projectcache` | 项目内编译缓存：`.gocache`、`.tmp-gocache`、`.dsh/gocache`、`.pnpm-store`、`.corepack` | 整目录删；`--projectcache-age-days`（默认 3 天）；<50 MB 不入清单 | 否 | 下次构建/install 重跑 |
 
@@ -20,10 +20,33 @@
 
 - 只在 `--projects-roots`（默认 `~/Documents`，可用冒号分隔多个）下扫描，**不进 git 仓库外的任意路径**；
 - `-maxdepth 6` + `-prune`，命中 `node_modules` 后不再往里钻；
-- 按**构建产物目录自身的 mtime** 判新旧：≥ `--projects-age-days`（默认 30）天未改动才列为可删，近期动过的直接跳过并在报告里标「N 天内有改动」；
+- 按**树内活跃度**判新旧（见下节）：目录自身 mtime 与树内近期文件任一活跃就跳过——只看目录 mtime 会把「长期在改、产物目录一直没重写」的项目误判成可删；
+- 删 `dist/`、`build/` 前查 git：仓库里还有被跟踪文件就跳过并注明（避免删掉被提交过的构建目录）；
+- 待删目录**自身含 `.git`** → 跳过（嵌套仓库 / submodule / worktree，删了会把别人的仓库连根带走）；
 - 用户要保住某个项目：`--projects-keep <绝对路径>`（可重复传）；
-- 报告要给「路径 + 大小 + 多少天未改动」，用户据此勾选；删除后需要重新 install/build，必须写进回执；
+- 报告要给「路径 + 大小 + 多少天未改动 + 被哪条守卫跳过」，用户据此勾选；删除后需要重新 install/build，必须写进回执；
 - `dist`/`build` 这类名字在非项目目录也可能出现，所以阈值与根目录限制不能放宽成「全盘扫」。
+
+## 三条新守卫（v2）
+
+三个守卫都在「目录 mtime 已经够旧」之后才跑；任何一条命中就跳过该目录，并把 `items[].reason` 记为 `user-kept`（报告里注明是哪一条）。
+
+**一、树内活跃度 `tree_active <目录> <天数>`**：跑 `find <目录> -type f -mmin -<天数×1440> -print -quit`——找到第一个近期文件就退出，代价接近 O(1)。任一近期文件即视为活跃，整个产物目录跳过；探测超时按**活跃**处理（保守方向），不按可删。天数与 `--projects-age-days` 同值；`dshtmp`、`projectcache` 各用各的阈值。
+
+只判目录自身 mtime 的问题：产物目录的 mtime 停在「上次构建」，一个每天都在改源码、但半年没重新构建的项目会被判成可删；反过来刚 `touch` 过目录、里面全是旧文件的项目又会被判成活跃。所以两个条件都要看。
+
+**二、git 追踪保护**：先确认目录在 git 工作树里，再列该目录下的被跟踪文件：
+
+```bash
+git -C <待删目录> rev-parse --is-inside-work-tree   # 失败/超时 → 不做这条判断
+git -C <待删目录> ls-files                          # 非空 = 目录里有被提交过的文件
+```
+
+`ls-files` **非空就跳过**——删掉 `dist/`、`build/` 里被跟踪的文件等于丢工作区内容。`git` 不可用、`rev-parse`/`ls-files` 超时或报错时，按保守方向**跳过**，报告写明「git 探测不可用/超时」。
+
+**三、嵌套仓库跳过**：待删目录自身含 `.git`（仓库根、submodule 的 `.git` 文件、worktree 都算）→ 跳过。删它会连带删掉另一个仓库的工作区，判不准就跳。
+
+三条守卫都只体现为「跳过 + 原因」（`reason=user-kept`、报告里注明），不会让整个编码失败；退出码不受影响。
 
 ## `dshtmp` / `projectcache`：项目内的过程产物与编译缓存
 

@@ -25,12 +25,19 @@ jobs:
       - name: disk-cleanup 编码表一致性
         run: node scripts/check-disk-cleanup-codes.mjs
 
+      - name: disk-cleanup 安全不变量（删除漏斗 / 禁 bash4 / HOME 断言 / 变量+中文）
+        run: node scripts/check-disk-cleanup-safety.mjs
+
+      - name: disk-cleanup 测试（纯 bash，假 HOME，禁碰真实用户数据）
+        run: bash skills/disk-cleanup/scripts/tests/run.sh
+
       - name: tech-design 文档门禁回归
         run: node skills/tech-design/scripts/tests/check-design-doc-test.mjs
 
-      - name: 安装脚本语法（按 bash 3.2 写）
+      - name: 脚本语法（安装脚本 + 技能脚本）
         run: |
-          for f in scripts/*.sh; do
+          files=$(find scripts skills -name '*.sh' -type f | sort)
+          for f in ${files}; do
             echo "bash -n ${f}"
             bash -n "${f}"
           done
