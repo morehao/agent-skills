@@ -1,0 +1,29 @@
+caches	用户缓存 ~/Library/Caches	纯缓存目录整删；其余只删 1 天前未改动内容	0
+logs	用户日志 ~/Library/Logs	只删 7 天前的旧日志文件与因此变空的旧目录；保留 ~/Library/Logs 本身	0
+tmp	/tmp 临时目录	只删 1 天前的陈旧内容	1
+varfolders	/var/folders 当前用户容器残留	T/C 清 7 天以上；X 清代码签名残留与 7 天前目录；go-build 清 1 天以上	0
+snapshots	Time Machine 本地快照	tmutil thinlocalsnapshots（回滚粒度变粗，系统会重建）	1
+trash	废纸篓	清空，清后不可恢复	0
+systemlogs	系统日志缓存 /Library/Logs/DiagnosticReports 与 /private/var/log	7 天前的崩溃报告与系统日志；单批不超过 5 条	1
+xcode	Xcode DerivedData	整个 DerivedData 删除，下次构建全量重编	0
+node	Node 生态缓存（npm/yarn/bun/pnpm/无头运行时）	npm/yarn/bun/pnpm 缓存与无头运行时缓存；pnpm store prune（删后重新下载/编译）	0
+go	Go 缓存（模块/构建/工具）	go-build / go/pkg/mod / goimports / gopls / golangci-lint（删后重新下载/编译）	0
+python	Python 缓存（uv/pip）	uv / pip 缓存（删后重新下载）	0
+rust	Rust 缓存（cargo registry）	cargo registry 缓存（删后重新下载 crate）	0
+jvm	JVM 缓存（Maven .m2 / Gradle）	Maven ~/.m2/repository 与 Gradle ~/.gradle/caches（删后重新下载）	0
+homebrew	Homebrew 缓存与旧版本	brew cleanup --prune=all + autoremove（旧版本不能回滚）	0
+cocoapods	CocoaPods 缓存	CocoaPods 缓存（删后 pod install 重新下载）	0
+xcode-ios	iOS 大件（ipsw/DeviceSupport/CoreSimulator/模拟器）	ipsw / iOS DeviceSupport / CoreSimulator / 不可用模拟器	0
+jetbrains	JetBrains 缓存与旧版本	Toolbox 旧版本保留最新一份；IDE logs 只清旧文件	0
+docker	Docker 无用资源	docker system prune -a（镜像需重新 pull；不会缩小 Docker.raw）	0
+appcache	应用内缓存（Electron/Chromium 型 app）	各 app 目录下的 Cache/GPUCache/Code Cache 等，app 会重建	0
+updaters	应用自动更新残留	crx_cache / auto-updater 等更新下载残留	0
+browserold	浏览器旧版本目录	Chrome/Edge/Brave 只保留最新版本与正在运行的版本	0
+groupcontainers	Group Containers 内的缓存	~/Library/Group Containers/*/Library/Caches，仅当容器 App 未运行	0
+agentversions	AI agent 旧版本堆叠	Claude Code / Cursor Agent / Copilot 的 versions 保留 2 份与活跃软链指向的那份	0
+halfdownloads	未完成的下载	~/Downloads 下 *.download/*.crdownload/*.part；30 天未动、树内无近期改动、无进程占用	0
+installers	安装包残留	.dmg/.pkg/.iso/.xip/.zip 且 >100MB、30 天未动（~/Downloads 与 ~/Desktop）	0
+projects	项目构建产物（node_modules 等）	只处理 30 天前未改动的构建产物目录；树内仍有近期改动则跳过（需重新 build）	0
+dshtmp	项目内 .dsh/tmp 过程产物	只清空 */.dsh/tmp 的内容、保留目录；--dshtmp-age-days 默认 0（全部可删）	0
+projectcache	项目内编译缓存	.gocache/.tmp-gocache/.dsh/gocache/.pnpm-store/.corepack 整目录删；默认 3 天	0
+orphans	已卸载 App 残留（只报告）	A 档=三根+反向 DNS 名+30 天无改动且过归属证明；B 档=其余根（低置信）	0

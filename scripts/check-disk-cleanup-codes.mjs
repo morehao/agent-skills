@@ -1,50 +1,90 @@
 #!/usr/bin/env node
-// 校验 disk-cleanup 的清理项编码在「脚本 / SKILL.md / references/*.md / skill-internals.md」四处是否一致，
-// 并做四类结构性检查（1 类原有 + 3 类新增，背景见 docs/agents/verification.md「disk-cleanup 文档一致性校验」）：
+// 校验 disk-cleanup v2 的编码契约（单一事实源 = skills/disk-cleanup/scripts/data/codes.tsv）。
 //
-//   1) 编码集合：四处编码集合必须一致；`--list` 文本输出里每项都要出现（原有检查）。
-//   2) 阈值一致性：references/ 下编码行必须出现该编码的预期阈值 token（天 / 体积）。
-//   3) 参数一致性：`mac_cleanup.sh --help` 里的每个 `--xxx` 都要在 references/*.md 或 SKILL.md 出现。
-//   4) 白名单一致性：脚本各工具缓存数组（NODE/GO/PYTHON/RUST/JVM_CACHE_DIRS）+ ORPHAN_ROOTS 的每条路径（`$HOME` 归一为 `~`）都要在 references/*.md 出现。
+// 五类结构性一致（不是逐字比对文案）：
+//   ① 运行时：`--list --json` 的 id / 顺序 / label / desc / sudo 必须与 TSV 逐项相同。
+//   ② 索引表：`references/cleanup.md` 的「### 清理项编码」表必须与 TSV 一一对应，
+//             **数量也要比**（v1 只比集合，导致文档写「16 个」而实际 22 个也没红）。
+//   ③ 参数   ：`SKILL.md` 里出现的每个 `--flag` 都必须在 `mac_cleanup.sh` 的 usage()
+//             （或 `cleanup-opencode.sh` 的 usage()）里真的存在 —— 反向检查，防 agent 照着文档敲出不存在的参数。
+//   ④ sudo   ：TSV 的 sudo 列要与 `--list` 文本的 `[需 sudo]`、以及 `references/cleanup.md`
+//             索引表的 sudo 标注一致（三处都得说同一件事）。
+//   ⑤ 编码引用：references/**/*.md 里 `--only` 示例只允许出现 TSV 声明过的编码。
 //
-// references 已按「清理对象」拆成多篇（cleanup.md 入口 + tools/*.md + 系统级/项目层/残留各篇）。
-// 编码索引表仍只在入口 cleanup.md（parseRefsTable 只解析它）；阈值/参数/白名单则跨 references 全目录联合校验。
+// 所有失败信息都指名「哪个文件哪一行、期望什么」。
+// 退出码：0 一致 / 1 有漂移 / 2 用法或环境错误（文件读不到、脚本跑不起来、JSON 解析失败）。
 //
-// 单一事实源是 `mac_cleanup.sh --list --json`（脚本里的 KNOWN_IDS + 元数据），
-// 其余三处文档必须与之对齐：漏写 → 用户看不到这项；多写 → 报了个脚本不认的编码（--only 会 exit 1）。
-//
-// 文档侧允许两种简写（现状写法，不必为了门禁改排版）：
-//   - 花括号列表：`~/Library/{Caches,Logs}` → ~/Library/Caches、~/Library/Logs；
-//   - 同行裸名列表：`~/.npm/_npx  _cacache  _logs` → 以该行首个路径的父目录为前缀补齐为 ~/.npm/_cacache。
-//
-// 退出码：0 一致 / 1 不一致 / 2 用法或环境错误。
+// 用法：node scripts/check-disk-cleanup-codes.mjs
 
 import { spawnSync } from "node:child_process";
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const rel = (p) => relative(repoRoot, p);
+
+const TSV = join(repoRoot, "skills/disk-cleanup/scripts/data/codes.tsv");
 const SCRIPT = join(repoRoot, "skills/disk-cleanup/scripts/mac_cleanup.sh");
+const OPCODE_SCRIPT = join(repoRoot, "skills/disk-cleanup/scripts/cleanup-opencode.sh");
 const SKILL = join(repoRoot, "skills/disk-cleanup/SKILL.md");
 const REFS_DIR = join(repoRoot, "skills/disk-cleanup/references");
-// 编码索引表仍只认入口文件；阈值/参数/白名单则跨 references 全目录联合校验。
 const REFS_ENTRY = join(REFS_DIR, "cleanup.md");
-const INTERNALS = join(repoRoot, "docs/agents/skill-internals.md");
+const GROUPS_TSV = join(repoRoot, "skills/disk-cleanup/scripts/data/groups.tsv");
 
 const problems = [];
+const fail = (msg) => problems.push(msg);
 
-function fail(msg) {
-  problems.push(msg);
-}
-
-// 环境 / 用法错误：立即 exit 2（不当作「文档漂移」）
+// 环境/用法错误：立即 exit 2，不当作「文档漂移」
 function die(msg) {
   console.error(`[disk-cleanup-codes] ${msg}`);
   process.exit(2);
 }
 
-// 递归列出 references 目录下所有 .md（含 tools/ 子目录）
+// 沙箱 HOME：跑脚本时不让它读/写真实 HOME（--list 本来就只读，但别留口子）
+let tmpHome = null;
+function sandboxHome() {
+  if (!tmpHome) tmpHome = mkdtempSync(join(tmpdir(), "dc-codes-"));
+  return tmpHome;
+}
+process.on("exit", () => {
+  if (!tmpHome) return;
+  try {
+    rmSync(tmpHome, { recursive: true, force: true });
+  } catch {
+    /* 清理失败不影响退出码 */
+  }
+});
+
+function runScript(file, args) {
+  const home = sandboxHome();
+  const r = spawnSync("bash", [file, ...args], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, HOME: home, DC_AUDIT_LOG: join(home, "audit.log") },
+  });
+  if (r.error) die(`无法执行 ${rel(file)} ${args.join(" ")}：${r.error.message}`);
+  if (r.status !== 0) {
+    die(`执行 ${rel(file)} ${args.join(" ")} 失败（exit ${r.status}）：${(r.stderr || "").trim()}`);
+  }
+  return r.stdout;
+}
+
+function readText(file, what) {
+  try {
+    return readFileSync(file, "utf8");
+  } catch (err) {
+    die(`读不到${what} ${rel(file)}：${err.message}`);
+  }
+}
+
+function readAllRefs() {
+    return listRefFiles()
+        .map((f) => readText(f, "references 文档"))
+        .join("\n\n");
+}
+
 function listRefFiles(dir = REFS_DIR) {
   const out = [];
   for (const name of readdirSync(dir)) {
@@ -56,302 +96,364 @@ function listRefFiles(dir = REFS_DIR) {
   return out.sort();
 }
 
-// 把所有 references/*.md 拼成一份联合文本，供阈值/参数/白名单跨篇校验
-function readAllRefs() {
-  const files = listRefFiles();
-  return files.map((f) => readFileSync(f, "utf8")).join("\n\n");
-}
-
-function runScript(args) {
-  const r = spawnSync("bash", [SCRIPT, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  if (r.error) die(`无法执行 ${SCRIPT} ${args.join(" ")}：${r.error.message}`);
-  if (r.status !== 0) {
-    die(`执行 ${SCRIPT} ${args.join(" ")} 失败（exit ${r.status}）：${(r.stderr || "").trim()}`);
+// ---------- 单一事实源：data/codes.tsv ----------
+// 格式：id<TAB>label<TAB>desc<TAB>sudo（0|1），`#` 注释与空行忽略
+function readCodesTsv() {
+  const text = readText(TSV, "编码表");
+  const rows = [];
+  const seen = new Map();
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const ln = i + 1;
+    const line = lines[i];
+    if (line.trim() === "" || line.trimStart().startsWith("#")) continue;
+    const cols = line.split("\t");
+    if (cols.length !== 4) {
+      fail(
+        `${rel(TSV)}:${ln}  期望 4 列（id<TAB>label<TAB>desc<TAB>sudo），实际 ${cols.length} 列：` +
+          `${JSON.stringify(line.slice(0, 80))}`,
+      );
+      continue;
+    }
+    const [rawId, label, desc, rawSudo] = cols;
+    const id = rawId.trim();
+    const sudo = rawSudo.trim();
+    if (!/^[a-z][a-z0-9-]*$/.test(id)) {
+      fail(`${rel(TSV)}:${ln}  id 期望小写字母开头的 [a-z0-9-] 串，实际 ${JSON.stringify(rawId)}`);
+      continue;
+    }
+    if (sudo !== "0" && sudo !== "1") {
+      fail(`${rel(TSV)}:${ln}  第 4 列 sudo 期望 0 或 1，实际 ${JSON.stringify(rawSudo)}`);
+      continue;
+    }
+    if (label.trim() === "" || desc.trim() === "") {
+      fail(`${rel(TSV)}:${ln}  \`${id}\` 的 label / desc 不能为空（--list 与文档都靠它）`);
+      continue;
+    }
+    if (seen.has(id)) {
+      fail(`${rel(TSV)}:${ln}  重复编码 \`${id}\`（首次出现在第 ${seen.get(id)} 行）`);
+      continue;
+    }
+    seen.set(id, ln);
+    rows.push({ id, label: label.trim(), desc: desc.trim(), sudo: sudo === "1", line: ln });
   }
-  return r.stdout;
+  if (rows.length === 0) {
+    for (const p of problems) console.error(`[disk-cleanup-codes] ${p}`);
+    console.error(`[disk-cleanup-codes] ${rel(TSV)} 里没有解析到任何合法编码（数据漂移，不是环境错误）`);
+    process.exit(1);
+  }
+  return rows;
 }
 
-function readCodes() {
-  const out = runScript(["--list", "--json"]);
+// ---------- ① --list --json 与 TSV 逐项一致 ----------
+function checkListJson(rows) {
+  const out = runScript(SCRIPT, ["--list", "--json"]);
   let data;
   try {
     data = JSON.parse(out);
   } catch (err) {
     die(`--list --json 输出不是合法 JSON：${err.message}`);
   }
-  if (!Array.isArray(data.codes) || data.codes.length === 0) {
-    die("--list --json 里没有 codes 数组");
+  if (data.schema !== 2) {
+    fail(`${rel(SCRIPT)} 的 --list --json 输出 schema 期望 2，实际 ${JSON.stringify(data.schema)}`);
   }
-  return data.codes.map((c) => c.id);
+  const codes = Array.isArray(data.codes) ? data.codes : null;
+  if (!codes) die(`--list --json 里没有 codes 数组`);
+
+  if (codes.length !== rows.length) {
+    fail(
+      `${rel(TSV)} 有 ${rows.length} 个编码，但 \`--list --json\` 输出 ${codes.length} 个（数量必须一致）`,
+    );
+  }
+  const n = Math.min(codes.length, rows.length);
+  for (let i = 0; i < n; i++) {
+    const want = rows[i];
+    const got = codes[i];
+    const where = `${rel(TSV)}:${want.line} 与 --list --json 第 ${i + 1} 项`;
+    if (got.id !== want.id) {
+      fail(`${where} 的 id 不一致：期望 \`${want.id}\`，实际 \`${got.id}\`（顺序必须与 TSV 一致）`);
+      continue;
+    }
+    if (got.label !== want.label) {
+      fail(`${where}（\`${want.id}\`）的 label 不一致：期望 ${JSON.stringify(want.label)}，实际 ${JSON.stringify(got.label)}`);
+    }
+    if (got.desc !== want.desc) {
+      fail(`${where}（\`${want.id}\`）的 desc 不一致：期望 ${JSON.stringify(want.desc)}，实际 ${JSON.stringify(got.desc)}`);
+    }
+    if (Boolean(got.sudo) !== want.sudo) {
+      fail(`${where}（\`${want.id}\`）的 sudo 不一致：期望 ${want.sudo}，实际 ${Boolean(got.sudo)}`);
+    }
+  }
+  if (codes.length > rows.length) {
+    fail(
+      `--list --json 多出 TSV 未声明的编码：${codes.slice(rows.length).map((c) => `\`${c.id}\``).join("、")}`,
+    );
+  }
 }
 
-// 抽取一段文本里所有 `xxx` 形式的标识符
-function backticks(text) {
-  return [...text.matchAll(/`([a-z][a-z0-9_-]*)`/g)].map((m) => m[1]);
-}
-
-// references/cleanup.md（入口编码索引表）：每行以 "| `code` |" 开头；返回 { id, row }，row 是整行原文
+// ---------- ② references/cleanup.md 编码索引表 ----------
 function parseRefsTable(text) {
   const lines = text.split("\n");
-  const start = lines.findIndex((l) => l.startsWith("### 清理项编码"));
-  if (start === -1) {
-    die("references/cleanup.md 里找不到「### 清理项编码」小节（编码索引表须留在入口）");
-  }
+  const start = lines.findIndex((l) => /^#{2,6}\s*清理项编码/.test(l));
+  if (start === -1) return null;
   const rows = [];
   for (let i = start + 1; i < lines.length; i++) {
     const line = lines[i];
-    if (line.startsWith("#")) break;
+    if (/^#{1,6}\s/.test(line)) break;
     const m = line.match(/^\|\s*`([a-z][a-z0-9_-]*)`\s*\|/);
-    if (m) rows.push({ id: m[1], row: line });
-  }
-  if (rows.length === 0) {
-    die("references/cleanup.md 的编码索引表里没解析到任何编码");
+    if (m) rows.push({ id: m[1], line: i + 1, text: line });
   }
   return rows;
 }
 
-// SKILL.md：只取勾选表（表头含「传给 `--only` 的编码」那张表）里的编码
-function codesFromSkill(text) {
+function checkRefsTable(rows) {
+  const table = parseRefsTable(readText(REFS_ENTRY, "编码索引表"));
+  if (table === null) {
+    fail(
+      `${rel(REFS_ENTRY)}  找不到「### 清理项编码」小节` +
+        `（编码索引表必须留在入口，表格行以 \`| \\\`id\\\` |\` 开头）`,
+    );
+    return new Map();
+  }
+  const byId = new Map();
+  for (const r of table) {
+    if (byId.has(r.id)) {
+      fail(`${rel(REFS_ENTRY)}:${r.line}  编码表里 \`${r.id}\` 重复（首次在第 ${byId.get(r.id).line} 行）`);
+      continue;
+    }
+    byId.set(r.id, r);
+  }
+  if (table.length !== rows.length) {
+    fail(
+      `${rel(REFS_ENTRY)}:${table.length > 0 ? table[0].line : 1}  编码表有 ${table.length} 行，` +
+        `${rel(TSV)} 有 ${rows.length} 个编码（数量必须相等）`,
+    );
+  }
+  for (const row of rows) {
+    if (!byId.has(row.id)) {
+      fail(
+        `${rel(REFS_ENTRY)}  编码表缺少 \`${row.id}\`（${rel(TSV)}:${row.line} 声明了它；漏写用户就看不到这项）`,
+      );
+    }
+  }
+  const declared = new Set(rows.map((r) => r.id));
+  for (const r of table) {
+    if (!declared.has(r.id)) {
+      fail(
+        `${rel(REFS_ENTRY)}:${r.line}  出现 ${rel(TSV)} 未声明的编码 \`${r.id}\`` +
+          `（\`--only ${r.id}\` 会被脚本拒绝）`,
+      );
+    }
+  }
+  return byId;
+}
+
+// ---------- ③ SKILL.md 的 --flag 必须在 usage() 里存在 ----------
+// usage() 的正文：从 `usage() {` 到下一个顶格 `}`
+function usageFlags(file) {
+  const flags = new Set();
+  let text;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch {
+    return flags;
+  }
   const lines = text.split("\n");
-  const head = lines.findIndex((l) => l.includes("传给 `--only` 的编码"));
-  if (head === -1) {
-    die("SKILL.md 里找不到勾选表（表头含「传给 `--only` 的编码」）");
+  const start = lines.findIndex((l) => /^\s*usage\s*\(\s*\)\s*\{/.test(l));
+  if (start === -1) return flags;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^\}/.test(lines[i])) break;
+    for (const m of lines[i].matchAll(/--[a-z][a-z0-9-]*/g)) flags.add(m[0]);
   }
-  const codes = new Set();
-  for (let i = head + 2; i < lines.length; i++) {
-    const line = lines[i];
-    if (!line.startsWith("|")) break;
-    const cells = line.split("|");
-    // 第二列 = 传给 --only 的编码（可能写成 `caches,logs`）
-    const cell = cells[2] ?? "";
-    for (const tok of cell.split(/`([^`]*)`/)) {
-      for (const id of tok.split(",")) {
-        const t = id.trim();
-        if (/^[a-z][a-z0-9_-]*$/.test(t)) codes.add(t);
-      }
+  return flags;
+}
+
+function checkSkillFlags() {
+  const allowed = new Set([...usageFlags(SCRIPT), ...usageFlags(OPCODE_SCRIPT)]);
+  if (allowed.size === 0) die(`${rel(SCRIPT)} 的 usage() 里没解析到任何参数`);
+  const text = readText(SKILL, "技能说明");
+  const lines = text.split("\n");
+  const used = new Map(); // flag -> [line...]
+  for (let i = 0; i < lines.length; i++) {
+    for (const m of lines[i].matchAll(/--[a-z][a-z0-9-]*/g)) {
+      const flag = m[0];
+      if (!used.has(flag)) used.set(flag, []);
+      used.get(flag).push(i + 1);
     }
   }
-  if (codes.size === 0) {
-    die("SKILL.md 勾选表里没解析到任何编码");
+  if (used.size === 0) {
+    fail(`${rel(SKILL)}  里没解析到任何 \`--flag\`（技能说明至少要给出参数入口）`);
   }
-  return [...codes];
-}
-
-// skill-internals.md：取「清理项编码（…）」括号里那串
-function codesFromInternals(text) {
-  const m = text.match(/清理项编码（([^）]*)）/);
-  if (!m) {
-    die("skill-internals.md 里找不到「清理项编码（…）」清单");
+  for (const [flag, at] of [...used].sort()) {
+    if (allowed.has(flag)) continue;
+    fail(
+      `${rel(SKILL)}:${at[0]}  出现 \`${flag}\`，但 ${rel(SCRIPT)} 的 usage() 与 ` +
+        `${rel(OPCODE_SCRIPT)} 的 usage() 都没有这个参数` +
+        `（agent 会照着敲，脚本直接 exit 2；共 ${at.length} 处：第 ${at.join("、")} 行）`,
+    );
   }
-  return backticks(m[1]).filter((c) => c !== "all" && c !== "list");
 }
 
-// ---------- 阈值一致性 ----------
-// 每条 = 一个编码行里必须出现的阈值 token（多组则都要命中；组内多个正则命中任一即可）。
-// 用「包含」判断，但把数字本身钉死，避免写成「几天」这类无信息量描述。
-const THRESHOLDS = [
-  {
-    id: "caches",
-    label: "缓存年龄阈值 1 天",
-    res: [/(?:^|\D)1\s*天/, /mtime\s*\+\s*1/],
-  },
-  { id: "logs", label: "日志年龄阈值 7 天", res: [/(?:^|\D)7\s*天/] },
-  { id: "varfolders", label: "varfolders 年龄阈值 7 天", res: [/(?:^|\D)7\s*天/] },
-  {
-    id: "projects",
-    label: "projects 年龄阈值 30 天",
-    res: [/(?:^|\D)30\s*天/, /默认\s*30(?![0-9])/],
-  },
-  { id: "projects", label: "projects 最小体积 50 MB", res: [/(?:^|\D)50\s*MB/i] },
-  { id: "appcache", label: "appcache 最小体积 10 MB", res: [/(?:^|\D)10\s*MB/i] },
-  {
-    id: "projectcache",
-    label: "projectcache 年龄阈值 3 天",
-    res: [/(?:^|\D)3\s*天/, /默认\s*3(?![0-9])/],
-  },
-  {
-    id: "dshtmp",
-    label: "dshtmp 年龄阈值 0 天",
-    res: [/(?:^|\D)0\s*天/, /默认\s*0(?![0-9])/],
-  },
-];
+// ---------- ④ sudo 列：TSV ↔ --list 文本 ↔ cleanup.md 索引表 ----------
+function checkSudoColumn(rows, tableById) {
+  const listed = runScript(SCRIPT, ["--list"]);
+  for (const row of rows) {
+    // 取整行（`  <id>  <label>  [需 sudo]`），别只取匹配到的前缀
+    const lineRe = new RegExp(`^\\s{2,}${row.id}\\s.*$`, "m");
+    const line = listed.match(lineRe);
+    if (!line) {
+      fail(`${rel(SCRIPT)} 的 \`--list\` 文本里找不到编码 \`${row.id}\`（${rel(TSV)}:${row.line}）`);
+      continue;
+    }
+    const marked = line[0].includes("[需 sudo]");
+    if (row.sudo && !marked) {
+      fail(
+        `${rel(SCRIPT)} 的 \`--list\` 文本里 \`${row.id}\` 行缺少 \`[需 sudo]\`` +
+          `（${rel(TSV)}:${row.line} 的 sudo 列是 1）`,
+      );
+    }
+    if (!row.sudo && marked) {
+      fail(
+        `${rel(SCRIPT)} 的 \`--list\` 文本里 \`${row.id}\` 行标了 \`[需 sudo]\`` +
+          `（${rel(TSV)}:${row.line} 的 sudo 列是 0）`,
+      );
+    }
 
-// 编码行规范化：去 markdown 记号与括号，方便「默认 30)天」这类写法也能命中数字
-function normalizeRow(row) {
-  return row.replace(/[`*]/g, "").replace(/[（）()]/g, "").replace(/\s+/g, " ").trim();
+    // 索引表：sudo=1 必须写明 sudo；sudo=0 不能声称需要 sudo
+    const tr = tableById.get(row.id);
+    if (!tr) continue; // 缺行已由 ② 报过
+    const claimsSudo = /（sudo）|\(sudo\)|需要\s*sudo|需\s*sudo/i.test(tr.text);
+    if (row.sudo && !claimsSudo) {
+      fail(
+        `${rel(REFS_ENTRY)}:${tr.line}  编码表里 \`${row.id}\` 没写 sudo，` +
+          `但 ${rel(TSV)}:${row.line} 的 sudo 列是 1`,
+      );
+    }
+    if (!row.sudo && claimsSudo) {
+      fail(
+        `${rel(REFS_ENTRY)}:${tr.line}  编码表里 \`${row.id}\` 标了 sudo，` +
+          `但 ${rel(TSV)}:${row.line} 的 sudo 列是 0`,
+      );
+    }
+  }
 }
 
-function checkThresholds() {
-  // 阈值 token 可分布在 references 任一分篇（入口索引表只放一句话，详细阈值行在 tools/* / macos-system / project-artifacts）。
-  // 因此扫全目录所有「| `code` | … |」行，把一个编码在所有文件里的行拼起来一起判断。
-  const rowsById = new Map();
+// ---------- ⑤ references 里 --only 示例只能引用已声明编码 ----------
+// 认三种写法：--only a,b / --only=a / `--only a,b`；占位符（<ids>、<编码>、N）跳过。
+// 场景组：名字不得与编码重名（编码优先）、只能引用已声明编码、文档里要能找到
+function readGroupsTsv(ids) {
+    const out = [];
+    for (const [i, line] of readText(GROUPS_TSV, "场景组表").split("\n").entries()) {
+        const raw = line.replace(/\r$/, "");
+        if (!raw.trim() || raw.trim().startsWith("#")) continue;
+        const cols = raw.split("\t");
+        if (cols.length < 2) {
+            fail(`${rel(GROUPS_TSV)}:${i + 1}  场景组行应为「组名<TAB>编码列表<TAB>说明」`);
+            continue;
+        }
+        const [name, codesRaw] = cols;
+        if (!name.trim()) {
+            fail(`${rel(GROUPS_TSV)}:${i + 1}  组名为空`);
+            continue;
+        }
+        if (ids.has(name)) {
+            fail(`${rel(GROUPS_TSV)}:${i + 1}  组名 \`${name}\` 与编码重名（编码优先，--only 会当成编码）`);
+        }
+        const codes = codesRaw.split(",").map((c) => c.trim()).filter(Boolean);
+        if (codes.length === 0) {
+            fail(`${rel(GROUPS_TSV)}:${i + 1}  场景组 \`${name}\` 没有引用任何编码`);
+        }
+        for (const c of codes) {
+            if (!ids.has(c)) {
+                fail(`${rel(GROUPS_TSV)}:${i + 1}  场景组 \`${name}\` 引用未声明编码 \`${c}\``);
+            }
+        }
+        out.push({ name, codes });
+    }
+    if (out.length === 0) fail(`${rel(GROUPS_TSV)}  没有任何场景组`);
+    const seen = new Set();
+    for (const g of out) {
+        if (seen.has(g.name)) fail(`${rel(GROUPS_TSV)}  场景组 \`${g.name}\` 重复定义`);
+        seen.add(g.name);
+    }
+    return out;
+}
+
+function checkGroupsDocumented(groups) {
+    const refs = readAllRefs();
+    for (const g of groups) {
+        if (!refs.includes(g.name)) {
+            fail(`references/**/*.md 里找不到场景组 \`${g.name}\`（改 groups.tsv 时要同步文档）`);
+        }
+    }
+    return groups.length;
+}
+
+const ONLY_RE = /--only(?:\s*=\s*|\s+)(`[^`]*`|[^\s`|，。；、）)]+)/g;
+const PLACEHOLDER_RE = /^(ids?|id|codes?|code|n|编码|编码列表|勾选项|列表|路径)$/i;
+
+function checkOnlyExamples(ids) {
+  let checked = 0;
   for (const file of listRefFiles()) {
-    const text = readFileSync(file, "utf8");
-    for (const line of text.split("\n")) {
-      const m = line.match(/^\|\s*`([a-z][a-z0-9_-]*)`\s*\|/);
-      if (!m) continue;
-      const id = m[1];
-      const prev = rowsById.get(id) ?? "";
-      rowsById.set(id, `${prev} ${normalizeRow(line)}`.trim());
-    }
-  }
-  for (const { id, label, res } of THRESHOLDS) {
-    const row = rowsById.get(id);
-    if (row === undefined) continue; // 缺行由编码集合检查报，避免重复
-    if (!res.some((re) => re.test(row))) {
-      fail(`references/*.md 的 \`${id}\` 行缺少阈值 token：${label}`);
-    }
-  }
-}
-
-// ---------- 参数一致性 ----------
-function checkParams(refsText, skillText) {
-  const help = runScript(["--help"]);
-  const params = [...new Set([...help.matchAll(/--[a-z][a-z0-9-]*/g)].map((m) => m[0]))].sort();
-  if (params.length === 0) die("mac_cleanup.sh --help 输出里没解析到任何 --xxx 参数");
-  const docs = `${refsText}\n${skillText}`;
-  // 右侧加边界，避免文档里的 `--all` 把 `--allx` 这类未登记参数「顶掉」
-  const missing = params.filter((p) => !new RegExp(`${p}(?![a-z0-9-])`).test(docs));
-  if (missing.length) {
-    fail(`mac_cleanup.sh --help 的参数在 cleanup.md / SKILL.md 里都没提到：${missing.join(", ")}`);
-  }
-  return params.length;
-}
-
-// ---------- 白名单一致性 ----------
-// 解析脚本里的数组字面量：认 `NAME=(` 与 `NAME+=(`（含多行与单行写法），按括号/引号配对取出字符串
-function scriptArray(name) {
-  const text = readFileSync(SCRIPT, "utf8");
-  const re = new RegExp(`\\b${name}\\s*\\+?=\\s*\\(`, "g");
-  const vals = [];
-  for (const m of text.matchAll(re)) {
-    let depth = 1;
-    let quote = null;
-    let block = "";
-    for (let i = m.index + m[0].length; i < text.length; i++) {
-      const ch = text[i];
-      if (quote) {
-        if (ch === "\n") quote = null;
-        else if (ch === quote && text[i - 1] !== "\\") quote = null;
-        block += ch;
-        continue;
+    const lines = readText(file, "文档").split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line.includes("--only")) continue;
+      ONLY_RE.lastIndex = 0;
+      let m;
+      while ((m = ONLY_RE.exec(line)) !== null) {
+        const token = m[1].replace(/^`|`$/g, "").replace(/[，,。；;、]$/g, "").trim();
+        if (!token) continue;
+        if (/^[<（(]/.test(token)) continue; // <ids> / （编码）
+        if (PLACEHOLDER_RE.test(token)) continue;
+        if (/编码|列表|勾选/.test(token)) continue; // 中文占位符
+        const parts = token.split(/[,，]/).map((p) => p.trim()).filter(Boolean);
+        // --only a,b,c / --only x,y：文档里表示「任意若干编码」的记号，不是真实编码
+        if (parts.length > 1 && parts.every((p) => /^[a-z]$/.test(p))) continue;
+        for (const raw of parts) {
+          const part = raw.trim().replace(/^[`'"]+|[`'"]+$/g, "");
+          if (!part) continue;
+          if (!/^[a-z][a-z0-9_-]*$/.test(part)) continue; // 中文说明/其它写法
+          checked += 1;
+          if (ids.has(part)) continue;
+          fail(
+            `${rel(file)}:${i + 1}  \`--only\` 示例里出现 ${rel(TSV)} 未声明的编码 \`${part}\`` +
+              `（脚本会对 \`--only ${part}\` 直接报错）`,
+          );
+        }
       }
-      if (ch === '"' || ch === "'") {
-        quote = ch;
-        block += ch;
-        continue;
-      }
-      if (ch === "(") depth += 1;
-      if (ch === ")") {
-        depth -= 1;
-        if (depth === 0) break;
-      }
-      block += ch;
-    }
-    for (const q of block.matchAll(/"([^"]+)"/g)) vals.push(q[1]);
-  }
-  const paths = [...new Set(vals.filter((v) => v.startsWith("$HOME/") || v.startsWith("/")))];
-  if (paths.length === 0) die(`mac_cleanup.sh 里找不到 ${name}=() 数组，或数组里没解析到路径`);
-  return paths;
-}
-
-const tilde = (p) => p.replace(/^\$HOME/, "~").replace(/\/+$/, "");
-
-// 把 cleanup.md 文本展开成「文档里出现过的路径集合」，认两种简写（见文件头）
-function docPathSet(text) {
-  const set = new Set();
-  const add = (p) => {
-    const n = tilde(p);
-    if (n.length > 1) set.add(n);
-  };
-
-  // 1) 花括号简写：~/Library/{Caches,Logs}
-  for (const m of text.matchAll(/(?:~|\$HOME)?\/[^\s{,`]*\{([^{}`\n]+)\}/g)) {
-    const prefix = m[0].slice(0, m[0].indexOf("{"));
-    for (const part of m[1].split(",")) add(prefix + part.trim());
-  }
-
-  // 2) 普通路径 token（允许路径名里带一个空格，如 ~/Library/Application Support）；
-  //    同一行的裸名（如 `~/.npm/_npx  _cacache`）按该行首个路径的父目录补齐
-  const pathRe = /(?:~|\$HOME)?\/[A-Za-z0-9_.@/-]+(?: [A-Za-z0-9_.@-]+)*/g;
-  const bareRe = /(?:^|[\s|、,，；;（(`])([A-Za-z0-9_][A-Za-z0-9_.@-]*)(?=[\s|、,，；;）)`]|$)/g;
-  for (const line of text.split("\n")) {
-    const toks = [...line.matchAll(pathRe)].map((m) => m[0]);
-    for (const t of toks) add(t);
-    if (toks.length === 0) continue;
-    const first = tilde(toks[0]);
-    const parent = first.replace(/\/[^/]*$/, "");
-    for (const m of line.matchAll(bareRe)) {
-      const tok = m[1];
-      if (tok.length < 2) continue;
-      add(`${parent}/${tok}`);
-      add(`${first}/${tok}`);
     }
   }
-  return set;
-}
-
-function checkWhitelists(refsText) {
-  const docs = docPathSet(refsText);
-  let total = 0;
-  for (const name of ["NODE_CACHE_DIRS", "GO_CACHE_DIRS", "PYTHON_CACHE_DIRS", "RUST_CACHE_DIRS", "JVM_CACHE_DIRS", "SAFE_CACHE_DIRS", "ORPHAN_ROOTS"]) {
-    const paths = scriptArray(name).map(tilde);
-    total += paths.length;
-    const missing = paths.filter((p) => !docs.has(p));
-    if (missing.length) {
-      fail(`references/*.md 缺少 ${name} 里的路径：${missing.join(", ")}`);
-    }
-  }
-  return total;
+  return checked;
 }
 
 // ---------- 执行检查 ----------
-const refsEntryText = readFileSync(REFS_ENTRY, "utf8"); // 编码索引表（只认入口）
-const allRefsText = readAllRefs(); // 阈值/参数/白名单跨 references 全目录联合
-const skillText = readFileSync(SKILL, "utf8");
-const internalsText = readFileSync(INTERNALS, "utf8");
+const tsvRows = readCodesTsv();
+checkListJson(tsvRows);
+const tableById = checkRefsTable(tsvRows);
+checkSkillFlags();
+checkSudoColumn(tsvRows, tableById);
+const onlyCount = checkOnlyExamples(new Set(tsvRows.map((r) => r.id)));
+const groups = readGroupsTsv(new Set(tsvRows.map((r) => r.id)));
+const groupCount = checkGroupsDocumented(groups);
 
-const scriptCodes = readCodes();
-const refsCodes = parseRefsTable(refsEntryText).map((r) => r.id);
-const skillCodes = codesFromSkill(skillText);
-const internalsCodes = codesFromInternals(internalsText);
-
-const want = new Set(scriptCodes);
-const sources = [
-  ["references/cleanup.md 编码索引表", refsCodes],
-  ["SKILL.md 勾选表", skillCodes],
-  ["docs/agents/skill-internals.md 编码清单", internalsCodes],
-];
-
-for (const [name, got] of sources) {
-  const seen = new Set(got);
-  const missing = scriptCodes.filter((c) => !seen.has(c));
-  const extra = got.filter((c) => !want.has(c));
-  if (missing.length) fail(`${name} 缺少编码：${missing.join(", ")}`);
-  if (extra.length) fail(`${name} 出现脚本不认的编码：${[...new Set(extra)].join(", ")}`);
-}
-
-// 脚本里的元数据也要能用：每个编码都得有 label 和 desc
-const listed = runScript(["--list"]);
-for (const id of scriptCodes) {
-  if (!new RegExp(`^\\s{2}${id}\\s`, "m").test(listed)) fail(`--list 文本输出里缺少编码 ${id}`);
-}
-
-checkThresholds();
-const paramCount = checkParams(allRefsText, skillText);
-const whitelistCount = checkWhitelists(allRefsText);
-
-if (problems.length) {
+if (problems.length > 0) {
   for (const p of problems) console.error(`[disk-cleanup-codes] ${p}`);
-  console.error(`\n[disk-cleanup-codes] 脚本编码：${scriptCodes.join(", ")}`);
   console.error(
-    "提示：单一事实源是 mac_cleanup.sh 的 KNOWN_IDS 与 item_label/item_desc；" +
-      "改编码、阈值、参数或白名单时，references/*.md / SKILL.md 要同步。",
+    `\n[disk-cleanup-codes] 共 ${problems.length} 处漂移（单一事实源：${rel(TSV)}，` +
+      `${tsvRows.length} 个编码：${tsvRows.map((r) => r.id).join(", ")}）`,
+  );
+  console.error(
+    "提示：改编码/描述/sudo 时只改 data/codes.tsv，再同步 references/cleanup.md 的索引表；" +
+      "SKILL.md 只写 usage() 里真实存在的参数。",
   );
   process.exitCode = 1;
 } else {
   console.log(
-    `[disk-cleanup-codes] ok：${scriptCodes.length} 个编码在四处一致；` +
-      `阈值 ${THRESHOLDS.length} 项、参数 ${paramCount} 个、白名单 ${whitelistCount} 条路径均已覆盖`,
+    `[disk-cleanup-codes] ok：${tsvRows.length} 个编码在 data/codes.tsv、--list --json、` +
+      `references/cleanup.md 三处一致；SKILL.md 的 --flag 全部在 usage()；` +
+      `sudo 标注一致（${tsvRows.filter((r) => r.sudo).length} 个需 sudo）；` +
+      `references 的 --only 示例 ${onlyCount} 处均为已声明编码；` +
+      `场景组 ${groupCount} 个（${groups.map((g) => g.name).join(", ")}）均只引用已声明编码`,
   );
 }
