@@ -60,7 +60,7 @@ bash skills/disk-cleanup/scripts/tests/run.sh # 纯 bash 断言（假 HOME，不
 `--list` 文本的 `[需 sudo]` 与 TSV 的 sudo 列一致、references 的 `--only` 示例只用声明过的编码。
 
 `check-disk-cleanup-safety.mjs` 校验四条硬约束：
-`rm`/`find -delete` 只允许出现在 `lib/safety.sh` 的 `dc_funnel_rm` 内（报文件:行）、
+`rm`/`find -delete` 只允许出现在 `lib/safety.sh` 的 `dc_funnel_rm`（单条）与 `dc_batch_flush`（批量）内（报文件:行）、
 禁 bash 4 语法（`mapfile`/`readarray`/`declare -A`/`${v,,}`/`${v^^}`/`<<<`/`&>>`）、
 `mac_cleanup.sh` 必须调用 `dc_env_assert`、`scripts/**/*.sh` 全量过 `/bin/bash -n`、
 以及「变量后紧跟中文」直接失败（bash 3.2 会把它当成变量名的一部分 → `unbound variable`）。

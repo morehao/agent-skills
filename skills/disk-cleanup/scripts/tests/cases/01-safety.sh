@@ -74,10 +74,41 @@ dc_case_dc_under() {
     dc_assert_ok '根 / 包含一切绝对路径' dc_under /anything/here /
 }
 
+# 批量入口：一批路径只调一次 rm（不是一条一次），非法路径进不了批、仍计失败。
+# 这条盯的是「进程数」：几千个小文件逐条 rm 会把 macOS 的进程上限顶满。
+dc_case_batch_delete() {
+    local dir="$HOME/batch-probe" mark="$HOME/.batch-rm-args" i out ok fail calls args
+    rm -rf -- "$dir"; rm -f -- "$mark"
+    mkdir -p "$dir"
+    for i in $(seq 1 40); do mkdir -p "$dir/d${i}"; done
+    out=$( (
+        rm() { printf '%s\n' "$(( $# - 2 ))" >> "$mark"; command rm -rf -- "$@"; }
+        dc_counters_reset
+        dc_batch_reset
+        for i in $(seq 1 40); do
+            dc_batch_add "$dir/d${i}" 0 >/dev/null 2>&1 || true
+        done
+        dc_batch_add 'relative/dirty' 0 >/dev/null 2>&1 || true
+        dc_batch_flush 0
+        printf '%s %s' "$DC_DEL_OK" "$DC_DEL_FAILS"
+    ) )
+    ok=${out%% *}
+    fail=${out##* }
+    calls=$(wc -l < "$mark" 2>/dev/null | tr -d ' ')
+    args=$(head -1 "$mark" 2>/dev/null | tr -d ' ')
+    dc_assert_eq 40 "$ok" '40 个目录应计 40 条成功'
+    dc_assert_eq 1 "$fail" '非法路径应计 1 条失败且不进批'
+    dc_assert_eq 1 "$calls" '40 条路径应只触发 1 次 rm（批量入口）'
+    dc_assert_eq 40 "$args" '这一次 rm 应带上全部 40 个参数'
+    dc_assert_ok '目录应已删除' test ! -e "$dir/d1"
+    rm -rf -- "$dir"; rm -f -- "$mark"
+}
+
 DC_CASES+=(
     dc_case_path_assert_rejects
     dc_case_funnel_rm_rejects
     dc_case_env_assert_home
     dc_case_run_timeout
     dc_case_dc_under
+    dc_case_batch_delete
 )
