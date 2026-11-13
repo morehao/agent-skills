@@ -10,6 +10,8 @@
 //                macOS 上是 3.2，能拦住只在 4.x 才合法的写法）
 //   ⑤ 变量+中文：`$var` 后紧跟非 ASCII 字符（bash 3.2 会把它并进变量名 → unbound variable），
 //                必须写成 `${var}中文`。这是仓库硬约束。
+//   ⑥ 禁外包删除：不许把删除委托给外部清理工具（mo / mole 的 clean/uninstall/purge/optimize）。
+//                删除只能出自本仓库的漏斗；理由见 docs/agents/decisions.md。
 //
 // 行级判断先去掉注释（引号内的 # 不切），避免文档性注释误报。
 // 退出码：0 通过 / 1 有违规。
@@ -112,6 +114,8 @@ const FUNC_HEADER_RE = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)\s*\{/;
 // 词边界：避免 DC_TIMEOUT_RM / rmmv / charm 之类的误报
 const RM_RE = /(^|[^A-Za-z0-9_])rm([^A-Za-z0-9_]|$)/;
 const FIND_DELETE_RE = /(^|\s)-delete(\s|$)/;
+// 外部清理工具的删除子命令：一旦出现就是把漏斗整个绕开了
+const DELEGATION_RE = /(^|[^A-Za-z0-9_.-])(mo|mole)\s+(clean|uninstall|purge|optimize|installer|slim)\b/;
 
 const BASH4_RULES = [
   { re: /\bmapfile\b/, name: "mapfile（bash 4 才有，改用 while read）" },
@@ -184,6 +188,14 @@ for (const file of files) {
             (curFn ? `｜当前在 ${curFn}()` : ""),
         );
       }
+      if (DELEGATION_RE.test(code)) {
+        fail(
+          file,
+          ln,
+          "把删除委托给外部清理工具（mo/mole）——删除只能出自本仓库的漏斗，" +
+            "理由见 docs/agents/decisions.md",
+        );
+      }
     }
 
     // ② 禁 bash4 语法
@@ -246,7 +258,7 @@ if (problems.length > 0) {
   for (const p of problems) console.error(`[disk-cleanup-safety] ${p}`);
   console.error(`\n[disk-cleanup-safety] 共 ${problems.length} 处违规`);
   console.error(
-    "提示：删除只走 lib/safety.sh 的 dc_funnel_rm / dc_batch_flush；脚本按 bash 3.2 写；变量后紧跟中文要写 ${var}。",
+    "提示：删除只走 lib/safety.sh 的 dc_funnel_rm / dc_batch_flush，也不许外包给 mo/mole；脚本按 bash 3.2 写；变量后紧跟中文要写 ${var}。",
   );
   process.exit(1);
 }
@@ -254,5 +266,5 @@ if (problems.length > 0) {
 console.log(
   `[disk-cleanup-safety] ok：${files.length} 个脚本过 ${BASH} -n（其中 ${runtimeFiles.length} 个运行期脚本）；` +
     `rm 仅出现在 ${FUNNEL_LABEL}（${funnelHits} 处）；` +
-    `bash4 语法 ${bash4Checked} 处；HOME 断言已调用；变量+中文 ${cjkChecked} 处`,
+    `bash4 语法 ${bash4Checked} 处；HOME 断言已调用；变量+中文 ${cjkChecked} 处；无外包删除调用`,
 );

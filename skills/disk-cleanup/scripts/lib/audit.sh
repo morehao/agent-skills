@@ -104,7 +104,7 @@ dc_history_text() {
 
 dc_history_json() {
     local n="${1:-50}" ts run id action path kb reason extra sep="" kb_num
-    printf '{"schema":2,"mode":"history","entries":['
+    printf '{"schema":%s,"mode":"history","entries":[' "${DC_SCHEMA_VERSION:-3}"
     while IFS="$(printf '\t')" read -r ts run id action path kb reason extra; do
         [[ -n "${ts:-}" ]] || continue
         [[ "$path" == "-" ]] && path=""

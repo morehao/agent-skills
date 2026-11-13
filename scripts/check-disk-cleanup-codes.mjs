@@ -32,6 +32,7 @@ const SKILL = join(repoRoot, "skills/disk-cleanup/SKILL.md");
 const REFS_DIR = join(repoRoot, "skills/disk-cleanup/references");
 const REFS_ENTRY = join(REFS_DIR, "cleanup.md");
 const GROUPS_TSV = join(repoRoot, "skills/disk-cleanup/scripts/data/groups.tsv");
+const CORE_SH = join(repoRoot, "skills/disk-cleanup/scripts/lib/core.sh");
 
 const problems = [];
 const fail = (msg) => problems.push(msg);
@@ -145,6 +146,15 @@ function readCodesTsv() {
   return rows;
 }
 
+// 契约版本只有一处定义（lib/core.sh 的 DC_SCHEMA_VERSION），门禁跟着它走，
+// 升版本时不用改门禁、也不允许两边各写一个数字。
+function expectedSchema() {
+  const src = readFileSync(CORE_SH, "utf8");
+  const m = /^DC_SCHEMA_VERSION=(\d+)\s*$/m.exec(src);
+  if (!m) die(`${rel(CORE_SH)} 里找不到 DC_SCHEMA_VERSION`);
+  return Number(m[1]);
+}
+
 // ---------- ① --list --json 与 TSV 逐项一致 ----------
 function checkListJson(rows) {
   const out = runScript(SCRIPT, ["--list", "--json"]);
@@ -154,8 +164,11 @@ function checkListJson(rows) {
   } catch (err) {
     die(`--list --json 输出不是合法 JSON：${err.message}`);
   }
-  if (data.schema !== 2) {
-    fail(`${rel(SCRIPT)} 的 --list --json 输出 schema 期望 2，实际 ${JSON.stringify(data.schema)}`);
+  const wantSchema = expectedSchema();
+  if (data.schema !== wantSchema) {
+    fail(
+      `${rel(SCRIPT)} 的 --list --json 输出 schema 期望 ${wantSchema}（见 ${rel(CORE_SH)} 的 DC_SCHEMA_VERSION），实际 ${JSON.stringify(data.schema)}`,
+    );
   }
   const codes = Array.isArray(data.codes) ? data.codes : null;
   if (!codes) die(`--list --json 里没有 codes 数组`);

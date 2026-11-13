@@ -95,11 +95,13 @@ Git 工作流的唯一真源。`SKILL.md` 只做意图路由：先判断命中�
 磁盘空间回收与本地数据瘦身。核心分工：**脚本是执行引擎，判断与安全门在 `SKILL.md`**。
 
 - 一条流程不分叉：只读测量 → 分类报告 → **用户勾选最终清理项** → 只跑勾选项 → 前后对比复核；
-- macOS 磁盘（`scripts/mac_cleanup.sh`，查询 / `--list` / `--top [N]` / `--clean --dry-run` / `--clean --only <ids>` / `--json`）覆盖缓存（`caches`）、日志（`logs`）、临时文件（`tmp`、`varfolders`）、Time Machine 快照（`snapshots`）、开发工具与容器缓存（`xcode`/`xcode-ios`/`node`/`go`/`python`/`rust`/`jvm`/`homebrew`/`cocoapods`/`docker`），以及**项目层**（`projects`：node_modules/构建产物；`dshtmp`：`.dsh/tmp` 过程产物；`projectcache`：Go/pnpm 编译缓存）与**应用内缓存**（`appcache`、`updaters`）、**卸载残留**（`orphans`，只报告、按路径删）；清理项编码是勾选单位，`--only/--skip` 决定这次到底删什么，`--clean` 不带 `--only` 时必须显式 `--all`；
+- macOS 磁盘（`scripts/mac_cleanup.sh`，查询 / `--list` / `--top [N]` / `--clean --dry-run` / `--clean --only <ids>` / `--json` / `--manifest <路径>`）覆盖缓存（`caches`）、日志（`logs`）、临时文件（`tmp`、`varfolders`）、Time Machine 快照（`snapshots`）、开发工具与容器缓存（`xcode`/`xcode-ios`/`node`/`go`/`python`/`rust`/`jvm`/`homebrew`/`cocoapods`/`docker`），以及**项目层**（`projects`：node_modules/构建产物；`dshtmp`：`.dsh/tmp` 过程产物；`projectcache`：Go/pnpm 编译缓存）与**应用内缓存**（`appcache`、`updaters`）、**卸载残留**（`orphans`，只报告、按路径删）；清理项编码是勾选单位，`--only/--skip` 决定这次到底删什么，`--clean` 不带 `--only` 时必须显式 `--all`；
+- 预览产出**候选清单**：`--clean --dry-run` 把每条候选路径（编码 / 判定 / 类型 / 路径 / 保护原因）写成 TSV，执行前可逐条核对，`sample_paths` 只作摘要；
 - 报告给**两个数字**：目录总量与本次可删量（只删 mtime 阈值的项两者可能差一个数量级），受 TCC 保护的目录单独计数；释放量分两行——各清理项实测可删合计（估算）与 `df` 差值（旁证），不把 `df` 差当清理成果；
 - 本地数据库（`scripts/cleanup-opencode.sh`）只是其中一个对象：**用户勾选或点名才处理**，不是每次清理的固定步骤；默认先备份 + `integrity_check` 再事务内删旧会话 + 清孤儿 snapshot + `VACUUM`，`--dry-run` 只统计不落盘；
 - 用户数据（聊天记录、浏览器配置、虚拟机镜像、iOS 设备备份、邮件附件）**只报告大小与路径**，不代删，也不进勾选清单；
 - agent 执行环境没有 TTY，`sudo` 三类（`/private/tmp`、Time Machine 快照、`/Library` 下的卸载残留）交给用户在自己的终端跑；跑在 `workspace-write` 沙箱里时 `$HOME` 外的删除会被拒（`Operation not permitted`），应改用可写沙箱或同样交用户终端；不可逆操作前先给 `.backup` 备份命令。
+- 与 [Mole](https://mole.fit) 的关系：**不接运行时依赖，也不内联其代码与清单**。Mole 面向终端里的人（TUI、广度、GPL-3.0），本技能面向 agent（`--only` 勾选粒度、JSON 契约、自家台账）；两者**白名单与台账互不相认**，同一台机器上别当成一套。取舍理由与后续改造见[决策记录](agents/decisions.md)。
 
 细节见 `references/`（按清理对象分篇：`cleanup.md` 入口通用规则 + `tools/*` 各开发工具 + `macos-system.md`/`project-artifacts.md`/`orphans.md`）。
 

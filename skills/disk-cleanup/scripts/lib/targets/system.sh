@@ -305,6 +305,10 @@ clean_snapshots() {
         fi
         return 0
     fi
+    if [[ "${DC_PLAN_MODE:-0}" == "1" ]]; then
+        dc_plan_command "sudo tmutil thinlocalsnapshots / 999999999999 4（Apple 本地快照 ${SNAP_APPLE_N} 个）"
+        return 0
+    fi
     run_timeout "$DC_TIMEOUT_SNAPSHOT" sudo -n tmutil thinlocalsnapshots / 999999999999 4 || rc=$?
     if [[ "$rc" -eq 124 ]]; then
         STEP_NOTE="thinlocalsnapshots 超时（系统会继续在后台精简，可稍后复查快照数）"

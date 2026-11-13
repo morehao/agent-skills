@@ -2,7 +2,7 @@
 # 用例 06：I8 dry-run 等价性 —— 同一份假缓存目录，dry-run 与 clean 的 deletable_kb 必须一致。
 # 只在 $HOME=$(mktemp -d) 的假目录里跑；clean 真删也只删假目录。目标未实现时跳过。
 
-# 从 schema 2 的 JSON 里取 codes[] 中某编码的整数字段（不引 jq）
+# 从契约 JSON（schema 版本见 DC_SCHEMA_VERSION）里取 codes[] 中某编码的整数字段（不引 jq）
 dc_json_code_kb() {
     printf '%s' "$1" | tr '{' '\n' \
         | grep -F "\"id\":\"$2\"" | head -1 \
@@ -32,7 +32,7 @@ dc_case_dryrun_matches_clean() {
     clean=$(run_timeout 120 bash "$DC_SCRIPT" --clean --only caches --json 2>/dev/null) || rc=$?
     dc_assert_eq 0 "$rc" '--clean --only caches 应 exit 0（只在假 HOME 下删）'
 
-    dc_assert_contains "$dry" '"schema":2' 'dry-run 的 JSON 应带 schema 2'
+    dc_assert_contains "$dry" '"schema":'"$DC_SCHEMA_VERSION" 'dry-run 的 JSON 应带当前 schema 版本'
     dc_assert_contains "$dry" '"mode":"dry-run"' 'dry-run 的 mode 应为 dry-run'
     dc_assert_contains "$clean" '"mode":"clean"' 'clean 的 mode 应为 clean'
     dc_assert_contains "$dry" '"freed_kb":0' 'dry-run 的 freed_kb 应为 0'

@@ -6,8 +6,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- **disk-cleanup**: 预览产出**候选清单**（manifest）——`--clean --dry-run` 时删除漏斗进入 plan 模式（只做路径断言与保护判定，不删、不跑 lsof），把每条候选（编码 / 判定 / 类型 / 路径 / 保护原因 / sudo）写成 TSV；`--json` 新增 `manifest` 块（`path`/`count`/`by_decision`/`by_kind`/`truncated`/`write_failed`），`--manifest <路径>` 可指定落点（默认跟台账同目录，只读沙箱退到 `$TMPDIR`）。清单与真实执行同源，`sample_paths` 退为摘要。代价是预览要完整枚举候选（`caches` 约 2s → 4s，候选上万条的编码可到几十秒）
+- **disk-cleanup**: JSON 契约升到 **schema 3**（`DC_SCHEMA_VERSION` 一处定义，主 JSON、`--list --json`、`--history --json` 同步）；`check-disk-cleanup-codes.mjs` 改为从常量读版本，不再硬编码
+- **disk-cleanup**: 安全门禁新增第 ⑥ 条——禁止把删除委托给外部清理工具（`mo`/`mole` 的 `clean`/`uninstall`/`purge`/`optimize`），删除只能出自本仓库的漏斗
+- **docs**: 新增[决策记录](docs/agents/decisions.md)；首条记录「不把 Mole CLI 接成 disk-cleanup 的运行时依赖」、被判掉的备选与后续改造顺序
+
 ### Changed
 
+- **docs**: `AGENTS.md` 新增「按终局设计，不做最小改动」的决策原则（归属 / 许可证 / 依赖 / 分发 / 可观测 五条判据），要求破坏性变更配迁移路径、会被反复讨论的理由落进 `docs/`
 - **scripts/docs**: 移除 `scripts/skills-install.sh`，技能发布不再由本仓脚本代跑；文档与安装脚本提示统一改为直接给 `skills` CLI 命令（`npx -y skills add ...`），agent 只告知用户可用 `skills` CLI 自行维护本地技能
 - **docs**: 移除「技能改动必须由维护者手动同步、agent 不得发布」的约定；保留「编辑源 → 本源 → 软链」的两层链路与 `skills-install.sh`，发布动作不再由仓库约定限制
 - **tech-design**: 配图从「有就好」升级为**配图下限**——轻量档有结构类章节即须有图、标准 ≥2、完整 ≥3；工作流改为「先填视图清单、先出骨架图再写正文」，交付报告带图清单

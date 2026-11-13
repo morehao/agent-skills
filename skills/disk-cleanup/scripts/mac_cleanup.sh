@@ -28,6 +28,8 @@ DC_SCRIPT_DIR=$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 . "$DC_SCRIPT_DIR/lib/core.sh"
 # shellcheck source=lib/probe.sh
 . "$DC_SCRIPT_DIR/lib/probe.sh"
+# shellcheck source=lib/plan.sh
+. "$DC_SCRIPT_DIR/lib/plan.sh"
 # shellcheck source=lib/safety.sh
 . "$DC_SCRIPT_DIR/lib/safety.sh"
 # shellcheck source=lib/audit.sh
@@ -57,6 +59,7 @@ ALL=0
 HISTORY=0
 HISTORY_LIMIT=50
 TOP_N=0
+DC_MANIFEST_PATH=""
 ONLY_RAW=""
 SKIP_RAW=""
 SHOW_GROUPS=0
@@ -127,6 +130,7 @@ usage() {
   --skip <ids>           从选择里排除
   --dry-run              必须与 --clean 同用：只打印计划，不删
   --json                 stdout 只输出 JSON（进度走 stderr）
+  --manifest <路径>      预览时把候选清单写到这里（仅 --clean --dry-run；默认跟台账同目录）
   --limit <N>            --history 的条数（默认 50）
   --orphans-delete <路径> 按用户点名删除某条残留（可多次）
   --orphans-age-days <N> 残留判定「多少天无改动」（默认 30）
@@ -149,6 +153,10 @@ while [[ $# -gt 0 ]]; do
         --clean) CLEAN=1; shift ;;
         -n|--dry-run) DRY_RUN=1; shift ;;
         --json) JSON=1; shift ;;
+        --manifest)
+            if [[ $# -lt 2 ]]; then printf '%s\n' '--manifest 需要一个文件路径' >&2; exit 2; fi
+            DC_MANIFEST_PATH="$2"; shift 2 ;;
+        --manifest=*) DC_MANIFEST_PATH="${1#--manifest=}"; shift ;;
         --all) ALL=1; shift ;;
         --only)
             if [[ $# -lt 2 ]]; then printf '%s\n' '--only 需要一个逗号分隔的编码列表\n' >&2; exit 2; fi
@@ -239,6 +247,10 @@ if [[ "$DRY_RUN" == "1" && "$CLEAN" != "1" ]]; then
     printf '%s\n' '--dry-run 必须与 --clean 同用（例：--clean --dry-run --only caches）\n' >&2
     exit 2
 fi
+if [[ -n "$DC_MANIFEST_PATH" && ( "$CLEAN" != "1" || "$DRY_RUN" != "1" ) ]]; then
+    printf '%s\n' '--manifest 只在预览时产出候选清单：请配合 --clean --dry-run 使用' >&2
+    exit 2
+fi
 if [[ "$CLEAN" == "1" && "$DRY_RUN" != "1" && -z "$ONLY_RAW" && -z "$SKIP_RAW" && "$ALL" != "1" ]]; then
     printf '⚠️ --clean 未指定 --only/--skip 时必须显式加 --all（防止误清全部）。\n' >&2
     printf '   给用户勾选场景请传 --only <ids>；确实要全清请在用户终端跑 --clean --all。\n' >&2
@@ -295,6 +307,11 @@ if [[ -n "$ORPHANS_DELETE_LIST" ]] && declare -F dc_orphans_prevalidate >/dev/nu
 fi
 
 dc_audit_init "mode=${CLEAN:+clean}${CLEAN:-query} only=${ONLY_NORM:-*} skip=${SKIP_NORM:-*} dry=${DRY_RUN}"
+
+# 候选清单只在预览时产出：数据来自 plan 模式的同一个删除漏斗
+if [[ "$CLEAN" == "1" && "$DRY_RUN" == "1" ]]; then
+    dc_plan_init
+fi
 
 if [[ "$HISTORY" == "1" ]]; then
     if [[ "$JSON" == "1" ]]; then dc_history_json "$HISTORY_LIMIT"; else dc_history_text "$HISTORY_LIMIT"; fi
@@ -465,6 +482,13 @@ if [[ "$CLEAN" != "1" ]]; then
 elif [[ "$DRY_RUN" == "1" ]]; then
     say "  清理报告（预览，未实际清理）"
     say "======================================"
+    if [[ -n "${DC_PLAN_TARGET:-}" ]]; then
+        say "  候选清单：${DC_PLAN_TARGET}（${DC_PLAN_COUNT} 项；逐条核对后再执行）"
+    else
+        say "  候选清单：${DC_PLAN_COUNT} 项（清单文件未落盘，目录不可写）"
+    fi
+    [[ "${DC_PLAN_TRUNCATED:-0}" == "1" ]] && say "  注意：候选超过 ${DC_PLAN_MAX} 项，清单已截断（只统计前 ${DC_PLAN_MAX} 项）"
+    [[ "${DC_PLAN_WRITE_FAILED:-0}" == "1" ]] && say "  注意：清单写入中途失败，文件可能不完整"
     say "  确认上列计划命令与勾选一致后，去掉 --dry-run 执行。"
 else
     say "  清理报告"

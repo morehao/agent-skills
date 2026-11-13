@@ -4,6 +4,9 @@
 [[ -n "${_DC_CORE_LOADED:-}" ]] && return 0
 _DC_CORE_LOADED=1
 
+# JSON 契约版本：一处定义，三处输出（主 JSON / --list / --history）共用
+DC_SCHEMA_VERSION=3
+
 # say：--json 时进度信息走 stderr，保证 stdout 只有 JSON
 say() {
     if [[ "${JSON:-0}" == "1" ]]; then
@@ -259,7 +262,7 @@ list_items() {
 
 list_items_json() {
     local i sep="" sudo
-    printf '{"schema":2,"codes":['
+    printf '{"schema":%s,"codes":[' "${DC_SCHEMA_VERSION}"
     for ((i = 0; i < DC_CODE_COUNT; i++)); do
         sudo=false
         [[ "${DC_CODE_SUDOS[$i]}" == "1" ]] && sudo=true

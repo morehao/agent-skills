@@ -59,16 +59,18 @@ bash skills/disk-cleanup/scripts/tests/run.sh # 纯 bash 断言（假 HOME，不
 `SKILL.md` 里每个 `--flag` 在 `usage()` 里真实存在（反向检查，防文档教 agent 敲不存在的参数）、
 `--list` 文本的 `[需 sudo]` 与 TSV 的 sudo 列一致、references 的 `--only` 示例只用声明过的编码。
 
-`check-disk-cleanup-safety.mjs` 校验四条硬约束：
+`check-disk-cleanup-safety.mjs` 校验五条硬约束：
 `rm`/`find -delete` 只允许出现在 `lib/safety.sh` 的 `dc_funnel_rm`（单条）与 `dc_batch_flush`（批量）内（报文件:行）、
 禁 bash 4 语法（`mapfile`/`readarray`/`declare -A`/`${v,,}`/`${v^^}`/`<<<`/`&>>`）、
 `mac_cleanup.sh` 必须调用 `dc_env_assert`、`scripts/**/*.sh` 全量过 `/bin/bash -n`、
-以及「变量后紧跟中文」直接失败（bash 3.2 会把它当成变量名的一部分 → `unbound variable`）。
+以及「变量后紧跟中文」直接失败（bash 3.2 会把它当成变量名的一部分 → `unbound variable`）、
+禁止把删除委托给外部清理工具（`mo`/`mole` 的 `clean`/`uninstall`/`purge`/`optimize`——删除只能出自本仓库的漏斗，理由见[决策记录](decisions.md)）。
 
 `tests/run.sh` 覆盖内核不变量：路径断言拒绝清单、`HOME` 为空/相对时 `exit 2`、保护清单
 （hard 拦 / soft 拦 / `!pattern` 解 soft / hard 不可解 / 用户追加生效）、`dc_under` 的 `/Users/x` vs `/Users/xy`、
 `run_timeout` 返回 124 与耗时上界、`json_esc`、参数契约（`--clean` 缺 `--only/--skip/--all`、单独 `--dry-run`、未知编码、
-未知参数 → `exit 2`）、`codes.tsv` ↔ `--list --json`、reason/status 枚举闭合、dry-run 与 clean 的 `deletable_kb` 一致。
+未知参数 → `exit 2`）、`codes.tsv` ↔ `--list --json`、reason/status 枚举闭合、dry-run 与 clean 的 `deletable_kb` 一致、
+**候选清单契约**（`--json` 的 `manifest` 与 TSV 行数一致、7 列、编码/判定/类型枚举闭合、plan 模式零删除、`--manifest` 落点与拒绝条件、查询模式为 `null`）。
 所有删除类用例只在 `HOME=$(mktemp -d)` 的假树上跑，退出即清理。
 
 **CI**（`.github/workflows/commands.yml` 的 `contract` job）跑：命令契约 + 上面三条 + tech-design 文档门禁 + `scripts/**`、`skills/**` 全量 `bash -n`。
