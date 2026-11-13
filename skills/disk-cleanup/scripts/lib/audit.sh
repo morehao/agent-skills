@@ -81,6 +81,18 @@ dc_audit_path() {
     dc_audit_raw "$ts" "$DC_RUN_ID" "_path" "removed" "$p" "$size_field" "$reason" ""
 }
 
+# dc_audit_failure <path> <size_kb> <reason>：**失败的路径**单独落一行。
+# 批量删除整批失败时会回退逐条，以前只汇总一个 failed 计数，事后根本查不到是哪几条；
+# 这条记录是「失败可复盘」的唯一来源，不受 DC_AUDIT_PATHS 闸门限制（失败必然要留痕）。
+dc_audit_failure() {
+    [[ -n "${DC_AUDIT_LOG:-}" ]] || return 0
+    local p="${1:-}" kb="${2:-0}" reason="${3:-failed}" size_field ts
+    [[ -n "$p" ]] || return 0
+    if [[ "$kb" == "0" || ! "$kb" =~ ^[0-9]+$ ]]; then size_field="unknown"; else size_field="$kb"; fi
+    ts=$(date +%Y-%m-%dT%H:%M:%S%z)
+    dc_audit_raw "$ts" "$DC_RUN_ID" "_path" "${DC_FAIL_ACTION:-failed}" "$p" "$size_field" "$reason" ""
+}
+
 # dc_history_tail <N>：流式读最后 N 条（不整读入内存）
 dc_history_tail() {
     local n="${1:-50}"

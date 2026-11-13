@@ -6,6 +6,8 @@ _DC_SAFETY_LOADED=1
 
 DC_DEL_OK=0
 DC_DEL_FAILS=0
+DC_DEL_EMPTY=0
+DC_DEL_EMPTY_SKIP=0
 DC_DEL_PROTECTED=0
 DC_DEL_INUSE=0
 DC_DEL_TIMEOUT=0
@@ -17,7 +19,7 @@ DC_RM_BATCH_MAX=${DC_RM_BATCH_MAX:-256}
 DC_TIMEOUT_BATCH=${DC_TIMEOUT_BATCH:-$DC_TIMEOUT_RM}
 
 dc_counters_reset() {
-    DC_DEL_OK=0; DC_DEL_FAILS=0; DC_DEL_PROTECTED=0
+    DC_DEL_OK=0; DC_DEL_FAILS=0; DC_DEL_EMPTY=0; DC_DEL_EMPTY_SKIP=0; DC_DEL_PROTECTED=0
     DC_DEL_INUSE=0; DC_DEL_TIMEOUT=0; DC_LAST_REASON=""
 }
 
@@ -256,10 +258,12 @@ dc_funnel_rm() {
     if [[ "$rc" -eq 124 ]]; then
         DC_DEL_TIMEOUT=$((DC_DEL_TIMEOUT + 1))
         DC_LAST_REASON="timeout"
+        dc_audit_failure "$p" 0 "timeout"
         return 3
     fi
     DC_DEL_FAILS=$((DC_DEL_FAILS + 1))
     DC_LAST_REASON=$(dc_classify_failure "$parent")
+    dc_audit_failure "$p" 0 "$DC_LAST_REASON"
     return 3
 }
 
@@ -300,6 +304,7 @@ dc_batch_flush() {
                 DC_DEL_FAILS=$((DC_DEL_FAILS + 1))
                 DC_LAST_REASON=$(dc_classify_failure "$parent")
             fi
+            dc_audit_failure "$p" 0 "${DC_LAST_REASON:-io-error}"
             dc_audit_path "$p" 0 "${DC_LAST_REASON:-io-error}"
         done
     fi
@@ -366,12 +371,26 @@ dc_delete_aged() {
     dc_batch_flush "$use_sudo"
     # plan 模式到此为止：删空的目录由删除结果决定，预览阶段无法预知，不进清单
     [[ "${DC_PLAN_MODE:-0}" == "1" ]] && return 0
-    # 空目录：不含新数据，删掉安全（不递归进非空目录）
+    # 空目录：不含新数据，删掉安全（不递归进非空目录）。
+    # 只清**当前用户**的空目录：/var/folders 里混着 WebKit、Safari 等系统进程的沙箱目录，
+    # 删别人的目录必然 EACCES，会把每一次清理都刷成 exit 1（本机实测一次 197 条）。
+    # 单独计数：它们是删除的**结果**而不是候选，混进「已删 N」会让回执和清单对不上。
+    local ok_before="$DC_DEL_OK" fail_before="$DC_DEL_FAILS" to_before="$DC_DEL_TIMEOUT" self_user action_before="${DC_FAIL_ACTION:-failed}"
+    DC_FAIL_ACTION="skipped-empty"
+    self_user=$(id -un 2>/dev/null || printf '')
     while IFS= read -r -d '' p; do
         [[ -d "$p" ]] || continue
         dc_batch_add "$p" "$use_sudo" >/dev/null 2>&1 || true
-    done < <(find "$dir" -mindepth 1 -type d -empty -print0 2>/dev/null)
+    done < <(find "$dir" -mindepth 1 -type d -empty ${self_user:+-user "$self_user"} -print0 2>/dev/null)
     dc_batch_flush "$use_sudo"
+    # 删不掉的多是系统进程的沙箱目录（TCC 护着，owner 却是当前用户），本来就删不动：
+    # 记成「跳过」而不是失败——否则每次清理都 exit 1，人就会开始无视失败。
+    DC_DEL_EMPTY=$((DC_DEL_EMPTY + DC_DEL_OK - ok_before))
+    DC_DEL_EMPTY_SKIP=$((DC_DEL_EMPTY_SKIP + DC_DEL_FAILS - fail_before + DC_DEL_TIMEOUT - to_before))
+    DC_DEL_OK="$ok_before"
+    DC_DEL_FAILS="$fail_before"
+    DC_DEL_TIMEOUT="$to_before"
+    DC_FAIL_ACTION="$action_before"
     [[ "$existed" -eq 1 ]] || { STEP_NOTE="路径不存在"; return 0; }
     STEP_NOTE="已删 ${DC_DEL_OK} / 保护 ${DC_DEL_PROTECTED} / 在用 ${DC_DEL_INUSE} / 失败 ${DC_DEL_FAILS}${DC_DEL_TIMEOUT:+/超时 ${DC_DEL_TIMEOUT}}"
     [[ "$DC_DEL_FAILS" -eq 0 && "$DC_DEL_TIMEOUT" -eq 0 ]]
@@ -416,6 +435,8 @@ dc_delete_paths_stdin() {
 # dc_deleted_summary：给文本回执的一行
 dc_deleted_summary() {
     printf '已删 %s' "$DC_DEL_OK"
+    [[ "${DC_DEL_EMPTY:-0}" -gt 0 ]] && printf ' + 清空目录 %s' "$DC_DEL_EMPTY"
+    [[ "${DC_DEL_EMPTY_SKIP:-0}" -gt 0 ]] && printf '（另有 %s 个系统目录删不动，已跳过）' "$DC_DEL_EMPTY_SKIP"
     [[ "$DC_DEL_PROTECTED" -gt 0 ]] && printf ' / 保护 %s' "$DC_DEL_PROTECTED"
     [[ "$DC_DEL_INUSE" -gt 0 ]] && printf ' / 在用 %s' "$DC_DEL_INUSE"
     [[ "$DC_DEL_FAILS" -gt 0 ]] && printf ' / 失败 %s' "$DC_DEL_FAILS"

@@ -30,6 +30,8 @@
 - **project-insight**: `verify-references.mjs` 支持零引用文档直接通过（打印「无引用（允许）」），新增 `--stats` 密度自查（只报告不阻断）；新增 `tests/references-smoke.sh` 回归
 - **project-insight**: 同步 SKILL.md、11 个 references / 8 个类型规格与仓库文档（`docs/skills.md`、`docs/agents/*`），清除 #57 回退遗留的 `check-doc.mjs`、决策卡等失效描述
 
+- **disk-cleanup**: 批量删除失败时**逐条记台账**（`action=failed`，含路径与原因）；以前只汇总一个 `failed` 计数，事后查不到是哪几个路径
+- **disk-cleanup**: `/var/folders` 的空目录清理单独计数——「已删 N」只算候选，「清空目录 M」与「跳过 K」分开写，回执终于能和候选清单对上；删不动的是系统进程沙箱目录（owner 是当前用户但被 TCC 护着），记为 `skipped-empty` 而不是失败，避免每次清理都 `exit 1`
 ### Fixed
 
 - **disk-cleanup**: `/var/folders` 老化清理不再碰 `AppTranslocation`——那是 macOS 给「从下载目录直接运行」的 App 做的隔离副本，里面是**正在运行的 app 本体**（本机 Obsidian 就在里面，`du` 还会报 `Result too large`）。删了会让运行中的 app 当场崩；`dc_delete_aged` 与同口径的 `subset_kb` 都加了 prune，并补了回归断言

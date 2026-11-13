@@ -118,7 +118,8 @@ bash skills/disk-cleanup/scripts/mac_cleanup.sh --history --json
 ```
 
 - `action`：`removed`（已删）/ `skipped`（被跳过）/ `failed`（失败）/ `plan`（预览时的计划）；每次运行还会先写一行 `start`（`id` 为 `_run`）——所以 `--history` 的第一条常常就是**本次**运行的开始行，别把它当成上次的清理记录。
-- `path`：只在整目录删除、预览计划或大件时有值；JSON 里缺省是空字符串（台账里写 `-`）。
+- `path`：整目录删除、预览计划、大件，以及**每一条失败或跳过的路径**都有值；JSON 里缺省是空字符串（台账里写 `-`）。
+- `action`：`removed`（成功）/ `failed`（失败，逐条一条）/ `skipped-empty`（空目录删不动，不算失败）/ `plan`（预览）/ `start`（每次运行一行）。批量删除整批失败会回退逐条，失败的每一条都单独落行——否则事后查不到是哪几个路径。
 - `size_kb`：整数 KB；取不到时台账写 `unknown`，JSON 里转为 **`-1`**（不是 0）。
 - `reason`：同上面的枚举。
 - `--limit` 默认 50；只读台账尾部，不整读入内存。
