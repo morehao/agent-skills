@@ -85,7 +85,10 @@ scripts/dev/mole-oracle.sh --collect-ours --limit 60         # 现跑我们的�
 scripts/dev/mole-oracle.sh --ours plan.tsv --out report.md   # 用已有清单
 ```
 
-前置：先在你自己的终端跑一次 `mo clean --dry-run`——Mole 必须写 `~/.config/mole/clean-list.txt`，沙箱里会失败。
+前置：**两端都在你自己的终端跑**。Mole 侧要写 `~/.config/mole/clean-list.txt`，沙箱里直接失败；
+我们这一侧虽然只读，但沙箱/TCC 下看不到 `~/.Trash`、`~/Library/Containers`、`~/Library/Group Containers`，
+读不到的目录等于「没有候选」，缺口一节会因此出现假缺口——报告会给这些行标 `⚠ 本进程读不到` 并单独计数，
+**别把假缺口当成覆盖盲区**。
 
 产出三类：**缺口**（Mole 会清、我们完全不碰）、**冲突**（我们标 `protected`、Mole 会清，安全相关）、**多出**（我们计划删、Mole 不碰）。三类都是**待审线索**，不是结论：Mole 认的不等于该删，它不认的也可能是它自己在保护。
 

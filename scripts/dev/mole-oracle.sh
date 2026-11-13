@@ -105,6 +105,10 @@ if [[ "$COLLECT" == "1" ]]; then
         printf '找不到 disk-cleanup 脚本：%s\n' "$CLEANUP_SCRIPT" >&2
         exit 1
     }
+    if ! find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -print -quit >/dev/null 2>&1; then
+        printf '提示：当前进程读不到 ~/.Trash（沙箱/TCC）。在我们的清单里，读不到的目录等于「没有候选」，\n' >&2
+        printf '      缺口一节会因此出现假阳性。要干净的结果，请在你自己终端跑同一个 --collect-ours。\n' >&2
+    fi
     printf '正在跑我们的预览（这一步可能几十秒到几分钟，取决于候选量）...\n' >&2
     rc=0
     if [[ -n "$ONLY" ]]; then
@@ -172,6 +176,30 @@ sum_kb() {
         END { printf "%d", s + 0 }' "$1"
 }
 
+# 缺口逐条探测可见性：我们的扫描器是从父目录往下找的，父目录列不出来就永远看不到。
+# 读不到 ≠ 我们不管——沙箱/TCC 下这是假缺口，必须单列出来，不能混进「覆盖盲区」。
+GAP_UNREADABLE=0
+GAP_READABLE_KB=0
+if [[ -s "$TMPD/gap.tsv" ]]; then
+    : > "$TMPD/gap2.tsv"
+    while IFS=$'\t' read -r kb sec p partial; do
+        unreadable=0
+        parent_dir=$(dirname -- "$p")
+        if ! find "$parent_dir" -mindepth 1 -maxdepth 1 -print -quit >/dev/null 2>&1; then
+            unreadable=1
+        elif [[ ! -e "$p" ]]; then
+            unreadable=1
+        fi
+        if [[ "$unreadable" == "1" ]]; then
+            GAP_UNREADABLE=$((GAP_UNREADABLE + 1))
+        elif [[ "$kb" -ge 0 && "${partial:-0}" != "1" ]]; then
+            GAP_READABLE_KB=$((GAP_READABLE_KB + kb))
+        fi
+        printf '%s\t%s\t%s\t%s\t%s\n' "$kb" "$sec" "$p" "$partial" "$unreadable" >> "$TMPD/gap2.tsv"
+    done < "$TMPD/gap.tsv"
+    mv -f "$TMPD/gap2.tsv" "$TMPD/gap.tsv"
+fi
+
 REPORT="$TMPD/report.md"
 
 {
@@ -185,14 +213,19 @@ REPORT="$TMPD/report.md"
 
     printf '## 1. 缺口：Mole 会清、我们完全不碰（%s 条，已知合计 %s，其中部分覆盖 %s 条）\n\n' \
         "$GAP_N" "$(fmt_kb "$(sum_kb "$TMPD/gap.tsv" 1 4)")" "$GAP_PART"
+    if [[ "$GAP_UNREADABLE" -gt 0 ]]; then
+        printf '> ⚠ 其中 %s 条的父目录本进程列不出来（沙箱/TCC），那些是**假缺口**；' "$GAP_UNREADABLE"
+        printf '扣掉它们后，真实可审约 %s 条、%s。\n\n' "$((GAP_N - GAP_UNREADABLE))" "$(fmt_kb "$GAP_READABLE_KB")"
+    fi
     if [[ "$GAP_N" -eq 0 ]]; then
         printf '无。\n\n'
     else
         printf '| 大小 | 路径 | Mole 分区 | 说明 |\n|---|---|---|---|\n'
-        sort -rn -k1,1 "$TMPD/gap.tsv" | head -n "$LIMIT" | while IFS=$'\t' read -r kb sec p partial; do
+        sort -rn -k1,1 "$TMPD/gap.tsv" | head -n "$LIMIT" | while IFS=$'\t' read -r kb sec p partial unreadable; do
             note=""
             [[ "${partial:-0}" == "1" ]] && note="我们只在其中删过部分文件"
             [[ "$kb" -lt 0 ]] && note="${note:+${note}；}大小未知"
+            [[ "${unreadable:-0}" == "1" ]] && note="${note:+${note}；}⚠ 本进程读不到（沙箱/TCC，可能是假缺口）"
             printf '| %s | `%s` | %s | %s |\n' "$(fmt_kb "$kb")" "$p" "$sec" "$note"
         done
         [[ "$GAP_N" -gt "$LIMIT" ]] && printf '\n其余 %s 条见文件尾部的原始清单。\n' "$((GAP_N - LIMIT))"
@@ -215,14 +248,22 @@ REPORT="$TMPD/report.md"
     if [[ "$EXT_N" -eq 0 ]]; then
         printf '无。\n\n'
     else
-        printf '按编码聚合（先看这张，再看下面的样例）：\n\n'
+        printf '按编码聚合：\n\n'
         printf '| 编码 | 条数 |\n|---|---|\n'
         cut -f1 "$TMPD/extra.tsv" | sort | uniq -c | sort -rn | while read -r n code; do
             printf '| `%s` | %s |\n' "$code" "$n"
         done
-        printf '\n样例（前 %s 条）：\n\n```\n' "$LIMIT"
-        cut -f2 "$TMPD/extra.tsv" | head -n "$LIMIT"
-        printf '```\n\n'
+        printf '\n按目录聚合（文件级几万条没法看，看目录才判断得了阈值）：\n\n'
+        printf '| 条数 | 编码 | 目录 |\n|---|---|---|\n'
+        awk -F'\t' '
+            { n = split($2, a, "/"); d = ""
+              for (i = 2; i < n; i++) d = d "/" a[i]
+              k[$1 "\t" d]++ }
+            END { for (x in k) printf "%d\t%s\n", k[x], x }' "$TMPD/extra.tsv" \
+            | sort -rn | head -n "$LIMIT" | while IFS=$'\t' read -r n code dir; do
+                printf '| %s | `%s` | `%s` |\n' "$n" "$code" "$dir"
+            done
+        printf '\n'
     fi
 
     printf '## 不可比的部分\n\n'
@@ -246,12 +287,13 @@ fi
 
 # 附上原始清单，便于逐条看（放在报告末尾，不干扰前面三节）
 {
-    printf '\n## 附：原始差异清单（TSV）\n\n### 缺口（大小 KB / 分区 / 路径 / 部分覆盖）\n```\n'
+    printf '\n## 附：原始差异清单（TSV）\n\n### 缺口（大小 KB / 分区 / 路径 / 部分覆盖 / 本进程读不到）\n```\n'
     cat "$TMPD/gap.tsv" 2>/dev/null || true
     printf '```\n\n### 冲突（大小 KB / 分区 / 路径 / 保护原因 / 部分覆盖）\n```\n'
     cat "$TMPD/conflict.tsv" 2>/dev/null || true
-    printf '```\n\n### 多出（编码 / 路径）\n```\n'
-    cat "$TMPD/extra.tsv" 2>/dev/null || true
+    printf '```\n\n### 多出（编码 / 路径，最多 200 条）\n```\n'
+    head -n 200 "$TMPD/extra.tsv" 2>/dev/null || true
+    [[ $(wc -l < "$TMPD/extra.tsv" 2>/dev/null || printf 0) -gt 200 ]] && printf '...（共 %s 条，已截断）\n' "$EXT_N"
     printf '```\n'
 } >> "$REPORT"
 

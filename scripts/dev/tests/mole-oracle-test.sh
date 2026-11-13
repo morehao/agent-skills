@@ -84,6 +84,21 @@ expect_absent "$REPORT" '| `homebrew` |' 'command 行不参与逐条比对'
 expect_absent "$REPORT" '`/Users/t/.npm/_cacache/x`' '多出清单里只放路径列，不带反引号包整行'
 expect_contains "$REPORT" '/Users/t/.npm/_cacache/x' '多出样例应列出具体路径'
 
+# ---------- 读不到的父目录要标成「可能是假缺口」 ----------
+mkdir -p "$TMPD/blocked"
+: > "$TMPD/blocked/kept.bin"
+chmod 000 "$TMPD/blocked"
+cat > "$TMPD/mole2.txt" <<EOF
+=== System ===
+$TMPD/blocked/kept.bin  # 1.0MB
+EOF
+: > "$TMPD/ours2.tsv"
+printf '#code\tdecision\tkind\tpath\treason\tsize_kb\tsudo\n' > "$TMPD/ours2.tsv"
+"$ORACLE" --ours "$TMPD/ours2.tsv" --mole "$TMPD/mole2.txt" --out "$TMPD/report2.md" > /dev/null 2>&1
+expect_contains "$TMPD/report2.md" '本进程读不到' '父目录列不出来时应标为可能的假缺口'
+expect_contains "$TMPD/report2.md" '真实可审约 0 条' '假缺口不计入「真实可审」'
+chmod 755 "$TMPD/blocked"
+
 # ---------- 边界 ----------
 "$ORACLE" --ours "$OURS" --mole "$TMPD/nope.txt" > "$TMPD/missing.out" 2>&1
 [[ "$?" -eq 1 ]] && ok '缺 Mole 清单应 exit 1' || bad '缺 Mole 清单应 exit 1'
