@@ -356,9 +356,13 @@ dc_delete_aged() {
     [[ -e "$dir" ]] || { STEP_NOTE="路径不存在"; return 0; }
     existed=1
     dc_batch_reset
+    # AppTranslocation 是 macOS 给「从下载目录直接运行」的 App 做的隔离副本，
+    # 里面是**正在运行的 app 本体**（du 甚至会报 Result too large）。它不是临时垃圾，
+    # 删了会让运行中的 app 当场崩；系统在 app 退出后会自己回收。
     while IFS= read -r -d '' p; do
         dc_batch_add "$p" "$use_sudo" >/dev/null 2>&1 || true
-    done < <(find "$dir" -mindepth 1 \( -type f -o -type l \) -mtime +"$days" -print0 2>/dev/null)
+    done < <(find "$dir" -mindepth 1 \( -path '*/AppTranslocation' -prune \) -o \
+        \( -type f -o -type l \) -mtime +"$days" -print0 2>/dev/null)
     dc_batch_flush "$use_sudo"
     # plan 模式到此为止：删空的目录由删除结果决定，预览阶段无法预知，不进清单
     [[ "${DC_PLAN_MODE:-0}" == "1" ]] && return 0

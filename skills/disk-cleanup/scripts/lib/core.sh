@@ -52,7 +52,9 @@ du_kb_strict() {
 subset_kb() {
     local p="$1" d="$2" kb
     [[ -e "$p" ]] || { printf '0'; return; }
-    kb=$(run_timeout "$DC_TIMEOUT_FIND" find "$p" \( -type f -o -type l \) -mtime +"$d" -exec du -k {} + 2>/dev/null \
+    # 与 dc_delete_aged 同一口径：跳过 AppTranslocation（运行中 App 的隔离副本）
+    kb=$(run_timeout "$DC_TIMEOUT_FIND" find "$p" \( -path '*/AppTranslocation' -prune \) -o \
+        \( -type f -o -type l \) -mtime +"$d" -exec du -k {} + 2>/dev/null \
         | awk '{s+=$1} END{printf "%d", s+0}')
     printf '%s' "${kb:-0}"
 }
