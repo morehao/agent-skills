@@ -100,6 +100,16 @@ browser_rel_dirs() {
     esac
 }
 
+# browser_framework_dirs <app>：app bundle 里的 *.framework/Versions 目录。
+# Chrome/Edge/Brave 升级会把旧框架留在 /Applications 里（本机 767 MB），
+# 只扫 ~/Library/Application Support 与 Caches 永远看不到这块。
+browser_framework_dirs() {
+    local app="${1:-}"
+    [[ -n "$app" && -d "$app/Contents/Frameworks" ]] || return 0
+    run_timeout "$DC_TIMEOUT_QUICK" find "$app/Contents/Frameworks" -mindepth 2 -maxdepth 2 \
+        -type d -name Versions 2>/dev/null
+}
+
 # browser_running_version <key>：输出运行中版本的短版本号；读不到返回 1
 browser_running_version() {
     local key="$1" app v=""
@@ -122,8 +132,8 @@ clean_browserold() {
 }
 
 target_browserold() {
-    local key label bid running runv rel base dir versions vn newest vdir bn sz kept kept_why
-    local total=0 del=0 keep_desc
+    local key label bid running runv rel dir versions vn newest vdir bn sz kept kept_why
+    local total=0 del=0 scan_dirs app keep_desc
     dc_section browserold
     BROWSER_DEL_LIST=""; BROWSER_DEL_N=0; BROWSER_KEEP_N=0
     BROWSER_KEEP_RUN_N=0; BROWSER_UNREADABLE_N=0; BROWSER_EMPTY_N=0
@@ -143,54 +153,68 @@ target_browserold() {
             runv=$(browser_running_version "$key")
             [[ -n "$runv" ]] || say "  ${label}: 正在运行但版本读不到，只保留最新 1 个版本目录"
         fi
-        while IFS= read -r rel; do
-            [[ -n "$rel" ]] || continue
-            for base in "$HOME/Library/Application Support" "$HOME/Library/Caches"; do
-                dir="$base/$rel"
-                [[ -d "$dir" ]] || continue
-                if ! dc_dir_listable "$dir"; then
-                    BROWSER_UNREADABLE_N=$((BROWSER_UNREADABLE_N + 1))
-                    say "  ${label}: ${dir#"$HOME"/} 读不到（TCC/权限），未计入"
-                    continue
-                fi
-                versions=$(run_timeout "$DC_TIMEOUT_FIND" app_version_dirs "$dir" 2>/dev/null) || versions=""
-                vn=$(printf '%s\n' "$versions" | grep -c . 2>/dev/null || true)
-                [[ -n "$vn" ]] || vn=0
-                if [[ "$vn" -eq 0 ]]; then
-                    BROWSER_EMPTY_N=$((BROWSER_EMPTY_N + 1))
-                    continue
-                fi
-                newest=$(printf '%s\n' "$versions" | tail -1)
+        # 扫描面 = ~/Library 下两个根 + app bundle 里的 Framework Versions
+        scan_dirs=$(
+            while IFS= read -r rel; do
+                [[ -n "$rel" ]] || continue
+                printf '%s\n' "$HOME/Library/Application Support/$rel" "$HOME/Library/Caches/$rel"
+            done < <(browser_rel_dirs "$key")
+            app=$(browser_app_path "$key")
+            if [[ -n "$app" && -d "$app" ]]; then
+                browser_framework_dirs "$app"
+            fi
+        )
+        while IFS= read -r dir; do
+            [[ -n "$dir" ]] || continue
+            [[ -d "$dir" ]] || continue
+            if ! dc_dir_listable "$dir"; then
+                BROWSER_UNREADABLE_N=$((BROWSER_UNREADABLE_N + 1))
+                say "  ${label}: ${dir#"$HOME"/} 读不到（TCC/权限），未计入"
+                continue
+            fi
+            versions=$(run_timeout "$DC_TIMEOUT_FIND" app_version_dirs "$dir" 2>/dev/null) || versions=""
+            vn=$(printf '%s\n' "$versions" | grep -c . 2>/dev/null || true)
+            [[ -n "$vn" ]] || vn=0
+            if [[ "$vn" -eq 0 ]]; then
+                BROWSER_EMPTY_N=$((BROWSER_EMPTY_N + 1))
+                continue
+            fi
+            newest=$(printf '%s\n' "$versions" | tail -1)
+            if [[ "$dir" == "$HOME"/* ]]; then
                 say "  ${label}（${dir#"$HOME"/}）: ${vn} 个版本目录，最新 ${newest##*/}"
-                while IFS= read -r vdir; do
-                    [[ -n "$vdir" ]] || continue
-                    bn=$(basename "$vdir")
-                    sz=$(du_kb "$vdir")
-                    total=$((total + sz))
-                    kept=0
-                    kept_why=""
-                    if [[ "$vdir" == "$newest" ]]; then
-                        kept=1
-                        kept_why="最新"
-                    fi
-                    if [[ "$kept" -eq 0 && -n "$runv" ]]; then
-                        case "$bn" in
-                            "$runv"|"$runv".*) kept=1; kept_why="运行中" ;;
-                        esac
-                    fi
-                    if [[ "$kept" -eq 1 ]]; then
-                        BROWSER_KEEP_N=$((BROWSER_KEEP_N + 1))
-                        [[ "$kept_why" == "运行中" ]] && BROWSER_KEEP_RUN_N=$((BROWSER_KEEP_RUN_N + 1))
-                        say "    保留 ${bn}（$(human "$sz")，${kept_why}）"
-                    else
-                        BROWSER_DEL_LIST="${BROWSER_DEL_LIST}${vdir}"$'\n'
-                        BROWSER_DEL_N=$((BROWSER_DEL_N + 1))
-                        del=$((del + sz))
-                        say "    可删 ${bn}（$(human "$sz")）"
-                    fi
-                done < <(printf '%s\n' "$versions")
-            done
-        done < <(browser_rel_dirs "$key")
+            else
+                say "  ${label}（${dir}）: ${vn} 个版本目录，最新 ${newest##*/}"
+            fi
+            while IFS= read -r vdir; do
+                [[ -n "$vdir" ]] || continue
+                bn=$(basename "$vdir")
+                sz=$(du_kb "$vdir")
+                total=$((total + sz))
+                kept=0
+                kept_why=""
+                if [[ "$vdir" == "$newest" ]]; then
+                    kept=1
+                    kept_why="最新"
+                fi
+                if [[ "$kept" -eq 0 && -n "$runv" ]]; then
+                    case "$bn" in
+                        "$runv"|"$runv".*) kept=1; kept_why="运行中" ;;
+                    esac
+                fi
+                if [[ "$kept" -eq 1 ]]; then
+                    BROWSER_KEEP_N=$((BROWSER_KEEP_N + 1))
+                    [[ "$kept_why" == "运行中" ]] && BROWSER_KEEP_RUN_N=$((BROWSER_KEEP_RUN_N + 1))
+                    say "    保留 ${bn}（$(human "$sz")，${kept_why}）"
+                else
+                    BROWSER_DEL_LIST="${BROWSER_DEL_LIST}${vdir}"$'\n'
+                    BROWSER_DEL_N=$((BROWSER_DEL_N + 1))
+                    del=$((del + sz))
+                    say "    可删 ${bn}（$(human "$sz")）"
+                fi
+            done < <(printf '%s\n' "$versions")
+        done <<EOF
+$scan_dirs
+EOF
     done
 
     say "  版本目录合计: $(human "$total") / 本次可删（整删旧版本目录）: $(human "$del")"

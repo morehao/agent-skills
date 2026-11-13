@@ -1,7 +1,7 @@
 caches	用户缓存 ~/Library/Caches	纯缓存目录整删；其余只删 1 天前未改动内容	0
 logs	用户日志 ~/Library/Logs	只删 7 天前的旧日志文件与因此变空的旧目录；保留 ~/Library/Logs 本身	0
 tmp	/tmp 临时目录	只删 1 天前的陈旧内容	1
-varfolders	/var/folders 当前用户容器残留	T/C 清 7 天以上；X 清代码签名残留与 7 天前目录；go-build 清 1 天以上	0
+varfolders	/var/folders 当前用户容器残留	T/C 清 7 天以上；X 清代码签名残留与 7 天前目录；go-build 与 clang ModuleCache 清 1 天以上	0
 snapshots	Time Machine 本地快照	tmutil thinlocalsnapshots（回滚粒度变粗，系统会重建）	1
 trash	废纸篓	清空，清后不可恢复	0
 systemlogs	系统日志缓存 /Library/Logs/DiagnosticReports 与 /private/var/log	7 天前的崩溃报告与系统日志；单批不超过 5 条	1
@@ -17,7 +17,7 @@ xcode-ios	iOS 大件（ipsw/DeviceSupport/CoreSimulator/模拟器）	ipsw / iOS 
 jetbrains	JetBrains 缓存与旧版本	Toolbox 旧版本保留最新一份；IDE logs 只清旧文件	0
 docker	Docker 无用资源	docker system prune -a（镜像需重新 pull；不会缩小 Docker.raw）	0
 appcache	应用内缓存（Electron/Chromium 型 app）	各 app 目录下的 Cache/GPUCache/Code Cache 等，app 会重建	0
-updaters	应用自动更新残留	crx_cache / auto-updater 等更新下载残留	0
+updaters	应用自动更新残留	crx_cache / auto-updater 等更新下载残留；Upgrade/ 下超 1 天的历史更新包（含沙箱 App 容器内）	0
 browserold	浏览器旧版本目录	Chrome/Edge/Brave 只保留最新版本与正在运行的版本	0
 groupcontainers	Group Containers 内的缓存	~/Library/Group Containers/*/Library/Caches，仅当容器 App 未运行	0
 agentversions	AI agent 旧版本堆叠	Claude Code / Cursor Agent / Copilot 的 versions 保留 2 份与活跃软链指向的那份	0

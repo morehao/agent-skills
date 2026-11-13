@@ -78,7 +78,7 @@ bash skills/disk-cleanup/scripts/mac_cleanup.sh --history --limit 20
 | `systemlogs` | `/Library/Logs/DiagnosticReports` 与 `/private/var/log`，7 天前、单批 ≤5 条（sudo） | [macos-system.md](macos-system.md) |
 | `appcache` | Electron/Chromium 型 App 的 `Cache`/`GPUCache`/`Code Cache` 等 | [macos-system.md](macos-system.md) |
 | `updaters` | 自动更新下载残留（`crx_cache`、`auto-updater` 等） | [macos-system.md](macos-system.md) |
-| `browserold` | Chrome/Edge/Brave 旧版本目录，保留最新与正在运行的版本 | —（细则见 `--list`） |
+| `browserold` | Chrome/Edge/Brave 旧版本目录（`~/Library` 下两个根 + app bundle 里的 `*.framework/Versions`），保留最新与正在运行的版本 | —（细则见 `--list`） |
 | `groupcontainers` | `~/Library/Group Containers/*/Library/Caches`，仅容器 App 未运行时 | —（细则见 `--list`） |
 | `halfdownloads` | `~/Downloads` 下未完成的下载（`*.download`/`*.crdownload`/`*.part`） | —（细则见 `--list`） |
 | `installers` | `~/Downloads`、`~/Desktop` 下 >100 MB 且 30 天未动的 `.dmg/.pkg/.iso/.xip/.zip` | —（细则见 `--list`） |

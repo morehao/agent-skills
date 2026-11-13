@@ -8,6 +8,9 @@
 
 ### Added
 
+- **disk-cleanup**: `browserold` 的扫描面扩到 app bundle 的 `*.framework/Versions`——Chrome/Edge/Brave 升级会把旧框架留在 `/Applications` 里（本机 Chrome 767 MB + Edge 561 MB），原来只扫 `~/Library` 下的两个根，永远看不到；保留 `Current` 指向与运行中版本
+- **disk-cleanup**: `updaters` 新增 `Upgrade/` 下的历史更新包（含沙箱 App 的 `Containers/<id>/Data/Library/Application Support/Upgrade/`）——超 1 天未动的子项整删、保留目录本身（本机腾讯视频一个包 696 MB）
+- **disk-cleanup**: `varfolders` 新增 `C/clang/ModuleCache`（超 1 天整棵删，编译缓存可再生，本机 165 MB）
 - **disk-cleanup**: 预览产出**候选清单**（manifest）——`--clean --dry-run` 时删除漏斗进入 plan 模式（只做路径断言与保护判定，不删、不跑 lsof），把每条候选（编码 / 判定 / 类型 / 路径 / 保护原因 / sudo）写成 TSV；`--json` 新增 `manifest` 块（`path`/`count`/`by_decision`/`by_kind`/`truncated`/`write_failed`），`--manifest <路径>` 可指定落点（默认跟台账同目录，只读沙箱退到 `$TMPDIR`）。清单与真实执行同源，`sample_paths` 退为摘要。代价是预览要完整枚举候选（`caches` 约 2s → 4s，候选上万条的编码可到几十秒）
 - **disk-cleanup**: JSON 契约升到 **schema 3**（`DC_SCHEMA_VERSION` 一处定义，主 JSON、`--list --json`、`--history --json` 同步）；`check-disk-cleanup-codes.mjs` 改为从常量读版本，不再硬编码
 - **scripts**: 新增差分 oracle（`scripts/dev/mole-oracle.sh` + `mole-oracle.awk`）——把 Mole 的 `clean-list.txt` 与 disk-cleanup 的候选清单按路径 join，产出缺口 / 冲突 / 多出三份待审清单；只读、不调用 `mo`、不进技能包；配套夹具回归 `scripts/dev/tests/mole-oracle-test.sh`（22 条断言，不需要装 Mole）
