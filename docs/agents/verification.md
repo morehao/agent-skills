@@ -59,21 +59,40 @@ bash skills/disk-cleanup/scripts/tests/run.sh # 纯 bash 断言（假 HOME，不
 `SKILL.md` 里每个 `--flag` 在 `usage()` 里真实存在（反向检查，防文档教 agent 敲不存在的参数）、
 `--list` 文本的 `[需 sudo]` 与 TSV 的 sudo 列一致、references 的 `--only` 示例只用声明过的编码。
 
-`check-disk-cleanup-safety.mjs` 校验四条硬约束：
+`check-disk-cleanup-safety.mjs` 校验五条硬约束：
 `rm`/`find -delete` 只允许出现在 `lib/safety.sh` 的 `dc_funnel_rm`（单条）与 `dc_batch_flush`（批量）内（报文件:行）、
 禁 bash 4 语法（`mapfile`/`readarray`/`declare -A`/`${v,,}`/`${v^^}`/`<<<`/`&>>`）、
 `mac_cleanup.sh` 必须调用 `dc_env_assert`、`scripts/**/*.sh` 全量过 `/bin/bash -n`、
-以及「变量后紧跟中文」直接失败（bash 3.2 会把它当成变量名的一部分 → `unbound variable`）。
+以及「变量后紧跟中文」直接失败（bash 3.2 会把它当成变量名的一部分 → `unbound variable`）、
+禁止把删除委托给外部清理工具（`mo`/`mole` 的 `clean`/`uninstall`/`purge`/`optimize`——删除只能出自本仓库的漏斗，理由见[决策记录](decisions.md)）。
 
 `tests/run.sh` 覆盖内核不变量：路径断言拒绝清单、`HOME` 为空/相对时 `exit 2`、保护清单
 （hard 拦 / soft 拦 / `!pattern` 解 soft / hard 不可解 / 用户追加生效）、`dc_under` 的 `/Users/x` vs `/Users/xy`、
 `run_timeout` 返回 124 与耗时上界、`json_esc`、参数契约（`--clean` 缺 `--only/--skip/--all`、单独 `--dry-run`、未知编码、
-未知参数 → `exit 2`）、`codes.tsv` ↔ `--list --json`、reason/status 枚举闭合、dry-run 与 clean 的 `deletable_kb` 一致。
+未知参数 → `exit 2`）、`codes.tsv` ↔ `--list --json`、reason/status 枚举闭合、dry-run 与 clean 的 `deletable_kb` 一致、
+**候选清单契约**（`--json` 的 `manifest` 与 TSV 行数一致、7 列、编码/判定/类型枚举闭合、plan 模式零删除、`--manifest` 落点与拒绝条件、查询模式为 `null`）。
 所有删除类用例只在 `HOME=$(mktemp -d)` 的假树上跑，退出即清理。
 
 **CI**（`.github/workflows/commands.yml` 的 `contract` job）跑：命令契约 + 上面三条 + tech-design 文档门禁 + `scripts/**`、`skills/**` 全量 `bash -n`。
 
 改了编码 / 阈值 / 参数 / 保护清单，要同步改：`data/codes.tsv` 或 `data/protect.tsv` + `references/*.md`（`cleanup.md` 索引表必改）+ 必要时 `SKILL.md` 的流程（不要在 SKILL 里抄编码表）。
+
+## disk-cleanup 差分 oracle（研发期，可选，不进 CI）
+
+```bash
+bash scripts/dev/tests/mole-oracle-test.sh                  # 夹具回归（不需要装 Mole）
+scripts/dev/mole-oracle.sh --collect-ours --limit 60         # 现跑我们的预览再比
+scripts/dev/mole-oracle.sh --ours plan.tsv --out report.md   # 用已有清单
+```
+
+前置：**两端都在你自己的终端跑**。Mole 侧要写 `~/.config/mole/clean-list.txt`，沙箱里直接失败；
+我们这一侧虽然只读，但沙箱/TCC 下看不到 `~/.Trash`、`~/Library/Containers`、`~/Library/Group Containers`，
+读不到的目录等于「没有候选」，缺口一节会因此出现假缺口——报告会给这些行标 `⚠ 本进程读不到` 并单独计数，
+**别把假缺口当成覆盖盲区**。
+
+产出三类：**缺口**（Mole 会清、我们完全不碰）、**冲突**（我们标 `protected`、Mole 会清，安全相关）、**多出**（我们计划删、Mole 不碰）。三类都是**待审线索**，不是结论：Mole 认的不等于该删，它不认的也可能是它自己在保护。
+
+工具只读、不调用 `mo`、不进技能包；为什么只当研发期 oracle 而不是运行时依赖，见[决策记录](decisions.md)。
 
 ## 环境类检查（本地，不进 CI）
 

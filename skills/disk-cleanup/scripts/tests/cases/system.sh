@@ -64,7 +64,7 @@ dc_case_system_dryrun_plan() {
     local out="" rc=0
     out=$(run_timeout 300 bash "$DC_SCRIPT" --clean --dry-run --only "$ids" --json 2>/dev/null) || rc=$?
     dc_assert_eq 0 "$rc" "--clean --dry-run --only ${ids} 应 exit 0"
-    dc_system_json_has "$out" '"schema":2' 'dry-run 的 JSON 应带 schema 2'
+    dc_system_json_has "$out" '"schema":'"$DC_SCHEMA_VERSION" 'dry-run 的 JSON 应带当前 schema 版本'
     dc_system_json_has "$out" '"mode":"dry-run"' 'dry-run 的 mode 应为 dry-run'
     dc_system_json_has "$out" '"freed_kb":0' 'dry-run 的 freed_kb 应为 0'
 

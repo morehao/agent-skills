@@ -2,6 +2,27 @@
 
 本仓库集中管理个人 AI 编码工具扩展：`commands-opencode/`（opencode 斜杠指令）+ `skills/`（技能，opencode / dsh 共用）。dsh 的斜杠命令插件在独立仓 [morehao/dsh-commands](https://github.com/morehao/dsh-commands)（npm 安装；本仓只提供它依赖的技能）。所有说明用**简体中文**。
 
+## 决策原则：按终局设计，不做「最小改动」
+
+假设今天写下的东西会被维护三年。先想清楚**终局里它该长什么样**，再一次性做到位；为此**允许破坏兼容、允许大改、允许花成本**，不因为「改起来多」而降级方案，也不拿「最小改动」当默认答案。
+
+判断方案按顺序过五条，任一不过就否决：
+
+1. **归属**：终局里这段逻辑该由我们拥有吗？不该拥有的别写，删掉或交出去。
+2. **许可证**：搬进来的东西我们能长期承担吗？（本仓 MIT，GPL 代码与数据不可内联）
+3. **依赖**：三年后上游改契约、停维护、涨价，我们能不能自己修？
+4. **分发**：用户装得上吗？技能是文件，不能要求编译，也不能要求先装第三方 CLI。
+5. **可观测**：坏了能不能从输出定位，而不是靠猜。
+
+同时禁止这些「省钱」动作：
+
+- 加开关或兼容层，把没想清楚的设计盖住；
+- 为一个 2× 的性能或一个边角场景，引入不可控的运行时依赖；
+- 保留明知是错的抽象，只因为改起来麻烦；
+- 把「最小改动」写进方案——要么一次做到位，要么写明只做这一步的理由和下一步的时间点。
+
+破坏性变更必须配迁移路径与用户影响说明。会被反复讨论的问题（「为什么不直接调用 X」这类）把理由落进 `docs/`，见[决策记录](docs/agents/decisions.md)。
+
 ## 硬约束（改动前先过一遍）
 
 1. **两层：本仓是编辑源，`~/.agents/skills` 是运行时本源**。技能内容改动需用 `skills` CLI 发布到本源后生效（`npx -y skills add morehao/agent-skills --skill <name> ... -g -a universal -y`，见 [安装与维护](docs/installation.md)）；各 agent 目录只放指向本源（`AGENTS_SKILLS_DIR` 可覆盖）的软链，由 `./scripts/skills-fanout.sh` 维护。opencode 的**命令**没法搬，仍从本仓软链到其配置目录——命令改本仓即时生效，技能不然。不要编辑软链副本。接入语义见 [接入与生效语义](docs/agents/deployment.md)。
@@ -18,6 +39,7 @@
 | 技能定位与分工（给人看） | [技能说明](docs/skills.md) |
 | 目录、脚本与三个入口 | [仓库地图](docs/agents/repository-map.md) |
 | 各技能的硬规则与内部结构 | [技能内部规则](docs/agents/skill-internals.md) |
+| 某能力为何不引入外部依赖、历史取舍 | [决策记录](docs/agents/decisions.md) |
 | 软链 / profile / 热加载 / 工具链归属 | [接入与生效语义](docs/agents/deployment.md) |
 | 发版纪律与 `/git/release` 边界 | [发版纪律](docs/agents/release-discipline.md) |
 | 跑校验、门禁与退出码 | [校验与运行](docs/agents/verification.md) |

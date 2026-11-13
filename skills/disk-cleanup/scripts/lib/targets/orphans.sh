@@ -744,10 +744,16 @@ target_orphans() {
         say "   [预览] 将删除 ${n} 项（已校验：扫描根直接子项 + 本次候选）："
         while IFS= read -r s; do
             [[ -n "$s" ]] || continue
+            _plan_sudo=0
             if is_sudo_path "$s"; then
+                _plan_sudo=1
                 say "      [sudo] ${s}"
             else
                 say "      ${s}"
+            fi
+            if [[ "${DC_PLAN_ENABLED:-0}" == "1" ]]; then
+                DC_PLAN_CODE="orphans"
+                dc_plan_probe "$s" "$_plan_sudo" || true
             fi
         done < <(printf '%s\n' "$ORPHANS_DELETE_LIST")
         if [[ "$ORPHANS_NEED_SUDO" == "1" && "$SUDO_OK" != "1" ]]; then

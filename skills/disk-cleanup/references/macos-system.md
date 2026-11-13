@@ -10,11 +10,11 @@
 | `logs` | `~/Library/Logs` | 只删 7 天前的文件，以及因此变空的旧目录（删除同样经统一漏斗，不用 `find -delete`）；保留 `~/Library/Logs` 本身 | 否 | 基本无感 |
 | `systemlogs` | `/Library/Logs/DiagnosticReports`、`/private/var/log` | 只删 7 天前的崩溃报告与系统日志，单批不超过 5 条 | **是** | 无（系统会重建） |
 | `tmp` | `/private/tmp` | 只删 1 天前的陈旧内容 | **是** | 运行中程序的临时文件会重建 |
-| `varfolders` | 当前用户 `/var/folders` 容器 | `T`/`C` 清 7 天以上；`X` 清 `*code_sign_clone*` 与 7 天前的顶层条目；`T/go-build*` 清 1 天前的顶层目录 | 否 | 无 |
+| `varfolders` | 当前用户 `/var/folders` 容器 | `T`/`C` 清 7 天以上；`X` 清 `*code_sign_clone*` 与 7 天前的顶层条目；`T/go-build*` 与 `C/clang/ModuleCache` 清 1 天前的顶层目录（编译缓存，整棵可再生） | 否 | 无 |
 | `snapshots` | Time Machine 本地快照 | 存在快照时 `tmutil thinlocalsnapshots / 999999999999 4` | **是** | 回滚粒度变粗，系统会重建 |
 | `trash` | `~/.Trash` | 清空（含隐藏项，`-print0` 遍历） | 否 | **不可恢复** |
 | `appcache` | `~/Library/Application Support/*/{Cache,GPUCache,Code Cache,CachedData,CachedExtensionVSIXs,Service Worker/CacheStorage,…}` | 整目录删，<10 MB 不入清单 | 否 | app 首次启动重建缓存；不动配置/登录态 |
-| `updaters` | `crx_cache`、`auto-updater`、`app-recovery-cache`、`UpdateCache` | 整目录删，<10 MB 不入清单 | 否 | 重新下载更新包 |
+| `updaters` | `crx_cache`、`auto-updater`、`app-recovery-cache`、`UpdateCache`；`Upgrade/` 下的历史更新包（含沙箱 App 的 `Containers/<id>/Data/Library/Application Support/Upgrade/`） | 前者整目录删、<10 MB 不入清单；`Upgrade/` 只删超 1 天未动的子项、保留目录本身 | 否 | 重新下载更新包 |
 
 ## `systemlogs`：系统日志为什么单开一个编码
 

@@ -6,8 +6,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- **disk-cleanup**: `browserold` 的扫描面扩到 app bundle 的 `*.framework/Versions`——Chrome/Edge/Brave 升级会把旧框架留在 `/Applications` 里（本机 Chrome 767 MB + Edge 561 MB），原来只扫 `~/Library` 下的两个根，永远看不到；保留 `Current` 指向与运行中版本
+- **disk-cleanup**: `updaters` 新增 `Upgrade/` 下的历史更新包（含沙箱 App 的 `Containers/<id>/Data/Library/Application Support/Upgrade/`）——超 1 天未动的子项整删、保留目录本身（本机腾讯视频一个包 696 MB）
+- **disk-cleanup**: `varfolders` 新增 `C/clang/ModuleCache`（超 1 天整棵删，编译缓存可再生，本机 165 MB）
+- **disk-cleanup**: 预览产出**候选清单**（manifest）——`--clean --dry-run` 时删除漏斗进入 plan 模式（只做路径断言与保护判定，不删、不跑 lsof），把每条候选（编码 / 判定 / 类型 / 路径 / 保护原因 / sudo）写成 TSV；`--json` 新增 `manifest` 块（`path`/`count`/`by_decision`/`by_kind`/`truncated`/`write_failed`），`--manifest <路径>` 可指定落点（默认跟台账同目录，只读沙箱退到 `$TMPDIR`）。清单与真实执行同源，`sample_paths` 退为摘要。代价是预览要完整枚举候选（`caches` 约 2s → 4s，候选上万条的编码可到几十秒）
+- **disk-cleanup**: JSON 契约升到 **schema 3**（`DC_SCHEMA_VERSION` 一处定义，主 JSON、`--list --json`、`--history --json` 同步）；`check-disk-cleanup-codes.mjs` 改为从常量读版本，不再硬编码
+- **scripts**: 新增差分 oracle（`scripts/dev/mole-oracle.sh` + `mole-oracle.awk`）——把 Mole 的 `clean-list.txt` 与 disk-cleanup 的候选清单按路径 join，产出缺口 / 冲突 / 多出三份待审清单；只读、不调用 `mo`、不进技能包；配套夹具回归 `scripts/dev/tests/mole-oracle-test.sh`（22 条断言，不需要装 Mole）
+- **disk-cleanup**: 安全门禁新增第 ⑥ 条——禁止把删除委托给外部清理工具（`mo`/`mole` 的 `clean`/`uninstall`/`purge`/`optimize`），删除只能出自本仓库的漏斗
+- **docs**: 新增[决策记录](docs/agents/decisions.md)；首条记录「不把 Mole CLI 接成 disk-cleanup 的运行时依赖」、被判掉的备选与后续改造顺序
+
 ### Changed
 
+- **docs**: `AGENTS.md` 新增「按终局设计，不做最小改动」的决策原则（归属 / 许可证 / 依赖 / 分发 / 可观测 五条判据），要求破坏性变更配迁移路径、会被反复讨论的理由落进 `docs/`
 - **scripts/docs**: 移除 `scripts/skills-install.sh`，技能发布不再由本仓脚本代跑；文档与安装脚本提示统一改为直接给 `skills` CLI 命令（`npx -y skills add ...`），agent 只告知用户可用 `skills` CLI 自行维护本地技能
 - **docs**: 移除「技能改动必须由维护者手动同步、agent 不得发布」的约定；保留「编辑源 → 本源 → 软链」的两层链路与 `skills-install.sh`，发布动作不再由仓库约定限制
 - **tech-design**: 配图从「有就好」升级为**配图下限**——轻量档有结构类章节即须有图、标准 ≥2、完整 ≥3；工作流改为「先填视图清单、先出骨架图再写正文」，交付报告带图清单
@@ -18,8 +30,11 @@
 - **project-insight**: `verify-references.mjs` 支持零引用文档直接通过（打印「无引用（允许）」），新增 `--stats` 密度自查（只报告不阻断）；新增 `tests/references-smoke.sh` 回归
 - **project-insight**: 同步 SKILL.md、11 个 references / 8 个类型规格与仓库文档（`docs/skills.md`、`docs/agents/*`），清除 #57 回退遗留的 `check-doc.mjs`、决策卡等失效描述
 
+- **disk-cleanup**: 批量删除失败时**逐条记台账**（`action=failed`，含路径与原因）；以前只汇总一个 `failed` 计数，事后查不到是哪几个路径
+- **disk-cleanup**: `/var/folders` 的空目录清理单独计数——「已删 N」只算候选，「清空目录 M」与「跳过 K」分开写，回执终于能和候选清单对上；删不动的是系统进程沙箱目录（owner 是当前用户但被 TCC 护着），记为 `skipped-empty` 而不是失败，避免每次清理都 `exit 1`
 ### Fixed
 
+- **disk-cleanup**: `/var/folders` 老化清理不再碰 `AppTranslocation`——那是 macOS 给「从下载目录直接运行」的 App 做的隔离副本，里面是**正在运行的 app 本体**（本机 Obsidian 就在里面，`du` 还会报 `Result too large`）。删了会让运行中的 app 当场崩；`dc_delete_aged` 与同口径的 `subset_kb` 都加了 prune，并补了回归断言
 - **disk-cleanup**: 删除改为**批量出口**——`dc_batch_add` 逐条过同一套闸（断言 / 保护清单 / 在用）后攒批，`dc_batch_flush` 每满 `DC_RM_BATCH_MAX`（默认 256）一次 `rm -rf -- p1 p2 …`；清 `~/Library/Caches` 这类几千个路径的场景不再按路径各起 3~4 个进程，避免顶满 macOS 默认 `kern.maxprocperuid=4000` 后 `fork: Resource temporarily unavailable`、脚本半路 `exit 128`
 - **disk-cleanup**: 超时看门狗从「`sleep <secs>` 一觉睡到底」改为轮询 + 退避（1/2/4/…/30s），被监控进程一结束就退出，不再每次调用遗留一个孤儿 `sleep` 进程
 - **disk-cleanup**: `check-disk-cleanup-safety.mjs` 的「单漏斗」规则同步放行 `dc_batch_flush`（仍然只允许 `lib/safety.sh` 内的这两个函数出现 `rm`），新增批量删除回归用例（40 条路径只触发 1 次 `rm`）

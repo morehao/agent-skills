@@ -157,7 +157,7 @@ dc_dev_group_clean() {
     while IFS= read -r p; do
         [[ -n "$p" ]] || continue
         [[ -e "$p" ]] || continue
-        [[ "${DC_DEV_FIX_PERM:-0}" == "1" ]] && dc_dev_chmod_u_w "$p"
+        [[ "${DC_DEV_FIX_PERM:-0}" == "1" && "${DC_PLAN_MODE:-0}" != "1" ]] && dc_dev_chmod_u_w "$p"
         dc_delete_one "$p" >/dev/null 2>&1 || true
     done <<EOF
 $DC_DEV_PLAN
@@ -320,6 +320,14 @@ $HOME/Library/pnpm/package-manager-store"
 clean_node() {
     local ok=0 rc=0 extra=""
     dc_dev_group_clean || ok=1
+    if [[ "${DC_PLAN_MODE:-0}" == "1" ]]; then
+        if command -v pnpm >/dev/null 2>&1; then
+            dc_plan_command "pnpm store prune（只回收未引用包）"
+        elif [[ -d "$HOME/Library/pnpm/store" ]] && command -v corepack >/dev/null 2>&1; then
+            dc_plan_command "corepack pnpm store prune（只回收未引用包）"
+        fi
+        return 0
+    fi
     # pnpm store：只回收未被引用的包，不删实体目录
     # 有 pnpm 就直接用；只有 corepack + 已存在 store 时才走 shim（避免顺手下载 pnpm）
     if command -v pnpm >/dev/null 2>&1; then
@@ -417,6 +425,10 @@ target_homebrew() {
 
 clean_homebrew() {
     local rc1=0 rc2=0
+    if [[ "${DC_PLAN_MODE:-0}" == "1" ]]; then
+        dc_plan_command "brew cleanup --prune=all && brew autoremove"
+        return 0
+    fi
     say "  正在运行 brew cleanup --prune=all（超时 ${DC_TIMEOUT_BREW}s）..."
     run_timeout "$DC_TIMEOUT_BREW" env HOMEBREW_NO_AUTO_UPDATE=1 brew cleanup --prune=all >&2 || rc1=$?
     say "  正在运行 brew autoremove（超时 ${DC_TIMEOUT_BREW}s）..."
@@ -495,6 +507,10 @@ $HOME/Library/Developer/CoreSimulator/Caches"
 clean_xcode_ios() {
     local ok=0 rc=0
     dc_dev_group_clean || ok=1
+    if [[ "${DC_PLAN_MODE:-0}" == "1" ]]; then
+        [[ -n "${DC_DEV_SIMCTL:-}" ]] && dc_plan_command "xcrun simctl delete unavailable（不可用模拟器）"
+        return 0
+    fi
     STEP_NOTE="$(dc_deleted_summary)"
     if [[ -n "$DC_DEV_SIMCTL" ]]; then
         say "  正在运行 xcrun simctl delete unavailable（超时 ${DC_DEV_SIMCTL_TIMEOUT}s）..."
@@ -558,6 +574,10 @@ target_docker() {
 
 clean_docker() {
     local rc=0
+    if [[ "${DC_PLAN_MODE:-0}" == "1" ]]; then
+        [[ "${DC_DOCKER_UNREACHABLE:-0}" == "1" ]] || dc_plan_command "docker system prune -a --force（不删卷）"
+        return 0
+    fi
     if [[ "${DC_DOCKER_UNREACHABLE:-0}" == "1" ]]; then
         STEP_NOTE="Docker 守护进程不可达，未执行（可回收量未知）；不会缩小 Docker.raw"
         return 1

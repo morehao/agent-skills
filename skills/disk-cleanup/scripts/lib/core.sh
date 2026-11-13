@@ -4,6 +4,9 @@
 [[ -n "${_DC_CORE_LOADED:-}" ]] && return 0
 _DC_CORE_LOADED=1
 
+# JSON 契约版本：一处定义，三处输出（主 JSON / --list / --history）共用
+DC_SCHEMA_VERSION=3
+
 # say：--json 时进度信息走 stderr，保证 stdout 只有 JSON
 say() {
     if [[ "${JSON:-0}" == "1" ]]; then
@@ -49,7 +52,9 @@ du_kb_strict() {
 subset_kb() {
     local p="$1" d="$2" kb
     [[ -e "$p" ]] || { printf '0'; return; }
-    kb=$(run_timeout "$DC_TIMEOUT_FIND" find "$p" \( -type f -o -type l \) -mtime +"$d" -exec du -k {} + 2>/dev/null \
+    # 与 dc_delete_aged 同一口径：跳过 AppTranslocation（运行中 App 的隔离副本）
+    kb=$(run_timeout "$DC_TIMEOUT_FIND" find "$p" \( -path '*/AppTranslocation' -prune \) -o \
+        \( -type f -o -type l \) -mtime +"$d" -exec du -k {} + 2>/dev/null \
         | awk '{s+=$1} END{printf "%d", s+0}')
     printf '%s' "${kb:-0}"
 }
@@ -259,7 +264,7 @@ list_items() {
 
 list_items_json() {
     local i sep="" sudo
-    printf '{"schema":2,"codes":['
+    printf '{"schema":%s,"codes":[' "${DC_SCHEMA_VERSION}"
     for ((i = 0; i < DC_CODE_COUNT; i++)); do
         sudo=false
         [[ "${DC_CODE_SUDOS[$i]}" == "1" ]] && sudo=true

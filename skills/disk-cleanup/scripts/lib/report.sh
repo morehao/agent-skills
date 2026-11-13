@@ -186,19 +186,31 @@ run() {
     if [[ "$DRY_RUN" == "1" ]]; then
         say "   [预览] ${desc}"
         say "      ${PLAN_CMD:-（内部实现，无独立命令）}"
-        # 预览阶段就把「会被保护清单拦下」的条目标出来：样本最多 5 条，代价可忽略
-        if [[ -n "${STEP_SAMPLE:-}" && "${DC_PROTECT_COUNT:-0}" -gt 0 ]]; then
-            _hit=0
-            while IFS= read -r _p; do
-                [[ -n "$_p" ]] || continue
-                if dc_protected_reason "$_p" >/dev/null; then _hit=$((_hit + 1)); fi
-            done <<EOF
-$STEP_SAMPLE
-EOF
-            if [[ "$_hit" -gt 0 ]]; then
-                say "      注意：样本中有 ${_hit} 条命中保护清单，执行时会被跳过"
-                STEP_NOTE="${STEP_NOTE:+${STEP_NOTE}；}样本 ${_hit} 条受保护"
+        # 预览不再只看样例：走一遍同一条删除路径，漏斗在 plan 模式下只记录不删，
+        # 因此「清单里的路径」就是「真跑时会交给漏斗的路径」，不会漂移。
+        local plan_before="${DC_PLAN_COUNT:-0}" prot_before="${DC_PLAN_PROTECTED:-0}"
+        local plan_n plan_p
+        DC_PLAN_CODE="$id"
+        DC_PLAN_MODE=1
+        dc_counters_reset
+        if [[ "$JSON" == "1" ]]; then
+            "$@" >&2 || true
+        else
+            "$@" || true
+        fi
+        DC_PLAN_MODE=0
+        plan_n=$(( ${DC_PLAN_COUNT:-0} - plan_before ))
+        plan_p=$(( ${DC_PLAN_PROTECTED:-0} - prot_before ))
+        if [[ "$plan_n" -gt 0 ]]; then
+            if [[ "$plan_p" -gt 0 ]]; then
+                say "      清单：${plan_n} 项（受保护 ${plan_p} 项）"
+                STEP_NOTE="清单 ${plan_n} 项（保护 ${plan_p}）"
+            else
+                say "      清单：${plan_n} 项"
+                STEP_NOTE="清单 ${plan_n} 项"
             fi
+        elif [[ -z "${STEP_NOTE:-}" ]]; then
+            STEP_NOTE="没有可删的路径"
         fi
         STEP_REASON="${STEP_REASON:-ok}"
         dc_audit_action "$id" "plan" "$STEP_DEL_KB" "ok" "${PLAN_CMD:-}"
@@ -229,21 +241,21 @@ EOF
     fi
 }
 
-# dc_json_emit：schema 2 输出（stdout 只有这一段）
+# dc_json_emit：schema 3 输出（stdout 只有这一段）
 dc_json_emit() {
     local mode="query" sep="" it codes scope_json
     [[ "$CLEAN" == "1" ]] && mode="clean"
     [[ "$CLEAN" == "1" && "$DRY_RUN" == "1" ]] && mode="dry-run"
     codes=$(build_codes_json)
-    printf '{"schema":2,"mode":"%s","exit_code":%s,"failed_count":%s,' \
-        "$mode" "$FINAL_EXIT" "$FAILED_COUNT"
+    printf '{"schema":%s,"mode":"%s","exit_code":%s,"failed_count":%s,' \
+        "${DC_SCHEMA_VERSION:-3}" "$mode" "$FINAL_EXIT" "$FAILED_COUNT"
     printf '"disk":{"free_before_kb":%s,"free_after_kb":%s,"freed_kb":%s,"estimated_freed_kb":%s,"df_delta_kb":%s},' \
         "$DISK_FREE_BEFORE_KB" "$DISK_FREE_AFTER_KB" "$FREED_KB" "$ESTIMATED_FREED_KB" "$DF_DELTA_KB"
     scope_json=$(printf '{"active":%s,"only":"%s","skip":"%s"}' \
         "$( [[ "${SCOPE_ACTIVE:-0}" == "1" ]] && printf true || printf false )" \
         "$(json_esc "${ONLY_NORM:-}")" "$(json_esc "${SKIP_NORM:-}")")
-    printf '"scope":%s,"codes":[%s],"reports":[%s],"protected":[%s],"items":[' \
-        "$scope_json" "$codes" "$REPORT_JSON" "$(dc_protected_json)"
+    printf '"scope":%s,"manifest":%s,"codes":[%s],"reports":[%s],"protected":[%s],"items":[' \
+        "$scope_json" "$(dc_plan_json)" "$codes" "$REPORT_JSON" "$(dc_protected_json)"
     if [[ ${#JSON_ITEMS[@]} -gt 0 ]]; then
         for it in "${JSON_ITEMS[@]}"; do printf '%s%s' "$sep" "$it"; sep=","; done
     fi

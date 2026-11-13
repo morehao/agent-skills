@@ -9,13 +9,13 @@
 | 无参数 | **只查询**：统计并打印各编码占用，不删任何东西 | 第 1 步测量 |
 | `--list` | 打印编码、一句话说明、是否需 sudo，末尾附场景组 | 核对勾选与编码 |
 | `--groups` | 只列场景组（组名 → 编码） | 用户说「只清 iOS / 只清 docker」时先看成映射 |
-| `--list --json` | 同上，机器可读：`{"schema":2,"codes":[{"id","label","desc","sudo"}]}` | 生成勾选项、核对编码是否存在 |
+| `--list --json` | 同上，机器可读：`{"schema":3,"codes":[{"id","label","desc","sudo"}]}` | 生成勾选项、核对编码是否存在 |
 | `--top [N]` | 只读：`$HOME` 下最大的 N 个目录 + >100 MB 文件（默认 10，`-xdev` 全量遍历，慢） | 用户问「什么最占地方」 |
 | `--history [--limit N]` | 回放台账，默认最近 50 条；字段见 [safety.md](safety.md) | 用户问「上次删了什么」 |
 | `--clean --only <ids>` | 只执行勾选项；其余每步打印 `[跳过]（未勾选）` | 用户勾选后 |
 | `--clean --skip <ids>` | 执行「全部减排除项」；必须显式出现，且与 `--only` 同给时先取 `--only` 再减 | 少见的反向选择 |
 | `--clean --all` | 全清，必须显式写；**只允许用户在本人终端用** | 用户明确要求且在自己终端跑 |
-| `--clean --dry-run --only <ids>` | 走同一代码路径，只打印每步计划与预计可删量，不删 | 执行前复核 |
+| `--clean --dry-run --only <ids>` | 走同一代码路径，只打印每步计划与预计可删量，不删；同时产出**候选清单**（逐条路径，见下） | 执行前复核 |
 | `--orphans-list` | 只读：列出全部疑似卸载残留（A/B 两档各默认只展示最大的 15 项） | 用户问卸载残留 |
 | `--clean --only orphans --orphans-delete <路径>` | 只删点名路径（可重复传），须过路径校验与候选校验 | 用户挑完具体残留 |
 
@@ -44,6 +44,7 @@ bash skills/disk-cleanup/scripts/mac_cleanup.sh --history --limit 20
 | `--dry-run` | 与 `--clean` 同用才有意义，单独使用 `exit 2` |
 | `--all` | 显式全清；`--clean` 既无 `--only/--skip` 又无 `--all` 时 `exit 2` |
 | `--json` | stdout 只输出一个 JSON，进度与外部命令输出走 stderr |
+| `--manifest <路径>` | 预览时把候选清单写到这里（默认跟台账同目录）；**只在 `--clean --dry-run` 下有效**，单独用或配 `--clean` 不带 `--dry-run` 都 `exit 2` |
 | `--limit <N>` | `--history` 条数，默认 50；须非负整数，否则 `exit 2` |
 | `--top [N]` / `--top=N` | 默认 10 |
 | `--orphans-list` | 列出全部残留候选（不加时为每档只展示 15 项） |
@@ -77,7 +78,7 @@ bash skills/disk-cleanup/scripts/mac_cleanup.sh --history --limit 20
 | `systemlogs` | `/Library/Logs/DiagnosticReports` 与 `/private/var/log`，7 天前、单批 ≤5 条（sudo） | [macos-system.md](macos-system.md) |
 | `appcache` | Electron/Chromium 型 App 的 `Cache`/`GPUCache`/`Code Cache` 等 | [macos-system.md](macos-system.md) |
 | `updaters` | 自动更新下载残留（`crx_cache`、`auto-updater` 等） | [macos-system.md](macos-system.md) |
-| `browserold` | Chrome/Edge/Brave 旧版本目录，保留最新与正在运行的版本 | —（细则见 `--list`） |
+| `browserold` | Chrome/Edge/Brave 旧版本目录（`~/Library` 下两个根 + app bundle 里的 `*.framework/Versions`），保留最新与正在运行的版本 | —（细则见 `--list`） |
 | `groupcontainers` | `~/Library/Group Containers/*/Library/Caches`，仅容器 App 未运行时 | —（细则见 `--list`） |
 | `halfdownloads` | `~/Downloads` 下未完成的下载（`*.download`/`*.crdownload`/`*.part`） | —（细则见 `--list`） |
 | `installers` | `~/Downloads`、`~/Desktop` 下 >100 MB 且 30 天未动的 `.dmg/.pkg/.iso/.xip/.zip` | —（细则见 `--list`） |
@@ -131,32 +132,37 @@ bash skills/disk-cleanup/scripts/mac_cleanup.sh --history --limit 20
 |---|---|
 | `0` | 正常；含「未勾选任何项」「已勾选的 sudo 项被跳过」（后者在 `items[].status=skipped-sudo`，不影响退出码） |
 | `1` | 有 `partial`/`failed` 项；或 `--orphans-delete` 的路径没过预校验（不带尾斜杠、不含 `..`/`.`、存在、父目录是扫描根、不是扫描根本身、在本次候选里） |
-| `2` | 用法或校验错误：`--dry-run` 单独用、`--clean` 缺 `--only/--skip/--all`、**未知编码**、未知参数、`--limit` 或 `*-age-days` 非非负整数、`--only`/`--skip`/`--orphans-delete` 缺值、HOME 断言失败、编码表不可读、用户 protect 文件存在但读不到。此时**没有 JSON** |
+| `2` | 用法或校验错误：`--dry-run` 单独用、`--clean` 缺 `--only/--skip/--all`、**未知编码**、未知参数、`--limit` 或 `*-age-days` 非非负整数、`--only`/`--skip`/`--orphans-delete` 缺值、`--manifest` 没配 `--clean --dry-run`、HOME 断言失败、编码表不可读、用户 protect 文件存在但读不到。此时**没有 JSON** |
 
-## JSON 契约（schema 2）
+## JSON 契约（schema 3）
 
 stdout 是**单个** JSON 对象；`--json` 下所有进度与外部命令输出走 stderr，可直接 parse。
 
 ```json
 {
-  "schema": 2,
+  "schema": 3,
   "mode": "query | clean | dry-run",
   "exit_code": 0,
   "failed_count": 0,
   "disk": {"free_before_kb": 0, "free_after_kb": 0, "freed_kb": 0,
            "estimated_freed_kb": 0, "df_delta_kb": 0},
+  "scope": {"active": true, "only": "caches", "skip": ""},
+  "manifest": {"path": "/Users/x/Library/Logs/disk-cleanup/manifests/plan-….tsv",
+               "count": 1569, "truncated": false, "write_failed": false,
+               "by_decision": {"delete": 1194, "protected": 375, "unverified": 0},
+               "by_kind": {"dir": 8, "file": 1561, "command": 0}},
   "codes": [{"id": "caches", "label": "…", "status": "done",
              "total_kb": 0, "deletable_kb": 0, "items": 2}],
+  "reports": [{"id": "cores", "label": "…", "kb": -1, "note": "读不到"}],
+  "protected": [{"path": "…", "reason": "spotlight-index"}],
   "items": [{"id": "caches", "label": "…", "status": "dry-run", "reason": "ok",
              "total_kb": 0, "deletable_kb": 0,
-             "sample_paths": ["…"], "path": "…", "note": "…"},
+             "sample_paths": ["…"], "path": "…", "note": "清单 1569 项（保护 375）"},
             {"id": "orphans", "status": "reported", "reason": "ok", "total_kb": 0,
              "deletable_kb": 0, "confidence": "high", "a_count": 2, "b_count": 210,
              "b_total_kb": 98132, "unknown_size": 79, "age_days": 30,
              "candidates": [{"path": "…", "kb": 0, "age_days": 3, "tier": "a",
                              "confidence": "high", "sudo": false, "size_unknown": false}]}],
-  "protected": [{"path": "…", "reason": "spotlight-index"}],
-  "reports": [{"id": "cores", "label": "…", "kb": -1, "note": "读不到"}],
   "audit": {"run_id": "20261112T170000-12345",
             "log": "/Users/x/Library/Logs/disk-cleanup/operations.log"}
 }
@@ -166,15 +172,22 @@ stdout 是**单个** JSON 对象；`--json` 下所有进度与外部命令输出
 - `disk.freed_kb`：仅 `clean` 且非 dry-run 时等于 `estimated_freed_kb`，其余恒为 `0`。
 - `disk.estimated_freed_kb`：`status=done` 的项 `deletable_kb` 之和；`partial`/`failed` 不计（实际删了多少无法确认）。
 - `disk.df_delta_kb`：前后 `df` 差值，**始终**给出，只是旁证（含系统自身回收、其它进程写入等噪声）。
+- `scope`：本次范围（`active` / `only` / `skip`），`--only` 与 `--skip` 均为归一化后的逗号串。
+- **`manifest`：只有 `--clean --dry-run` 有值，其余为 `null`。** `path` 是 TSV 清单路径（`""` 表示目录不可写、清单没落盘，此时只有计数可看），`count` 是数据行数，`by_decision`/`by_kind` 是同一份数据的聚合；`truncated=true` 表示候选超过上限（`DC_PLAN_MAX`，默认 10 万条）已截断，`write_failed=true` 表示写到一半失败。
+- 清单列固定为 `code  decision  kind  path  reason  size_kb  sudo`，表头以 `#` 开头（解析方跳过）。`decision` ∈ `delete`（计划删）/`protected`（保护清单拦下）/`unverified`（路径断言不过）；`kind` ∈ `dir`/`file`/`command`——`command` 表示该编码由外部命令执行（`brew cleanup`、`docker system prune`、`tmutil`、`simctl`、`pnpm store prune`），此时 `path` 列放命令本身。
+- 清单来自**同一条删除漏斗**：预览时漏斗只记录不删，所以「清单里的路径」就是「真跑时会交给漏斗的路径」，不会漂移。`size_kb` 固定 `-1`（不重复测量，大小看 `codes[].deletable_kb`）。删空后清掉的空目录由删除结果决定，**不在清单里**。
+- 预览会把候选完整枚举一遍，因此比查询慢：`caches` 约 4s，候选上万条的编码（如 `/var/folders`）可到几十秒。这是「可逐条核对」的代价，不是卡死；不想等就先用 `--only` 缩小范围。
 - `codes[]`：按编码聚合，同一编码多步时 `total_kb`/`deletable_kb` 求和、`items` 为出现次数、`status` 取最严重（`failed` > `partial` > `done` > `dry-run` > `reported` > `queried` > `skipped-sudo` > `skipped-unselected`）。
 - `items[]`：每步一条，`status` ∈ 上述枚举；`reason` 见 [safety.md](safety.md)；`total_kb`/`deletable_kb` 是 KB 整数。
-- `items[].sample_paths`：该步的样例路径（≤5 条，多数编码会给），用于核对计划，**不是完整清单**。
-- `items[].path` / `items[].note`：可选，出现时是本次动作的路径与补充说明（如「已删 3 / 保护 1 / 失败 0」）。
-- `protected[]`：本次命中保护清单的路径（`{path, reason}`）；没有命中时是空数组。命中不进失败计数、不影响退出码。
+- `items[].sample_paths`：该步的样例路径（≤5 条），只用来快速感知，**不是完整清单**——要逐条核对读 `manifest.path`。
+- `items[].path` / `items[].note`：可选，出现时是本次动作的路径与补充说明（如「清单 1569 项（保护 375）」）。
+- `protected[]`：本次命中保护清单的路径（`{path, reason}`）；没有命中时是空数组。预览时也会列（预览记录的是「会被拦下」）。命中不进失败计数、不影响退出码。
 - `reports[]`：只报告段的机器可读视图（`cores`、`apple_intelligence`、`vm`、`diagnostics`、`uuidtext`、`updates`、`applications`、`icloud`、`thirdparty_snapshots`、`node` 的 pnpm store、`docker` 可回收空间），**`kb=-1` 表示读不到，不是 0**；不计入可删量、不影响退出码。
 - `items[]` 的 `orphans` 条目另有：`confidence`（`high`/`low`）、`a_count`/`b_count`、`b_total_kb`、`unknown_size`、`age_days`，以及 `candidates[]`——每条 `{path, kb, age_days, tier: a|b, confidence, sudo, size_unknown}`（`size_unknown=true` 表示 `kb` 读不到，别当 0）。`total_kb`/`deletable_kb` 只算 A 档。
 - `exit_code` 与进程退出码一致；`failed_count` 是 `partial`+`failed` 项数，`exit_code=1` 时至少为 1。
 - `audit.log` 为台账路径；日志目录不可写时为空字符串（台账缺省不影响本次执行）。
+
+`schema 3` 相对 2 的变化：新增 `manifest`；`--list --json` 与 `--history --json` 结构未变，但版本号统一到 3（`DC_SCHEMA_VERSION` 一处定义）。
 
 `--history --json` 是另一套结构（`entries[]`），字段见 [safety.md](safety.md)。
 
@@ -189,7 +202,8 @@ stdout 是**单个** JSON 对象；`--json` 下所有进度与外部命令输出
 | `--top N` | 能，`-xdev` 全量遍历 `$HOME`，100 GB+ 要几分钟；N 放小 | agent |
 | `--history` / `--history --json` | 能，只读台账 | agent |
 | `--orphans-list` | 能，只读扫描 | agent |
-| `--clean --dry-run --only …` | 能，只打印计划、不删 | agent |
+| `--clean --dry-run --only …` | 能，只打印计划、不删；产出候选清单时会完整枚举，比查询慢（`caches` 秒级到十秒级） | agent |
+| `--clean --dry-run … --manifest <路径>` | 能；清单默认写台账目录，只读沙箱里自动退到 `$TMPDIR/disk-cleanup-<uid>/manifests/`，也可显式指到工作区内 | agent |
 | `--clean --only <非 sudo 编码>` | **取决于沙箱**：目标在可写范围内能跑；`workspace-write` 沙箱里 `~/Library`、`/private/var` 通常被拒（`reason=denied-sandbox`） | 可写沙箱内 agent；否则用户终端 |
 | `--clean --only tmp,snapshots,systemlogs`（含 sudo 编码） | 不能：无 TTY，`sudo -v` 必失败，脚本会跳过这些步并打印命令 | 用户终端 |
 | `--clean --only orphans --orphans-delete <路径>` | `$HOME` 下的同「非 sudo 编码」；`/Library` 下的需 sudo | `$HOME` 下 agent（可写时）；`/Library` 下用户终端 |

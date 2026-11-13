@@ -28,6 +28,7 @@
 - `opencode-install.sh` — opencode 接入：技能委托 `skills-fanout.sh --agents opencode`，命令软链到 `<config>/command/`。选项：`--skills-only` / `--commands-only` / `--check` / `--dry-run` / `-h`；`OPENCODE_CONFIG`、`AGENTS_SKILLS_DIR` 可覆盖。
 - `dsh-install.sh` — dsh 接入：技能委托 `skills-fanout.sh --agents dsh`（建 `$DSH_HOME/skills` 软链），再装 npm 上的 `@morehao/dsh-commands`。选项：`--profile <name>` / `--skills-only`（只建软链、跳过插件）/ `--plugin-link <插件仓路径>`（插件仓开发调试走 `link:`）/ `-h`。
 - `check-disk-cleanup-codes.mjs` — disk-cleanup 文档一致性校验：以 `skills/disk-cleanup/scripts/mac_cleanup.sh --list --json` 为单一事实源，校验四类——编码集合（`references/cleanup.md` 入口编码索引表、`SKILL.md` 勾选表、`docs/agents/skill-internals.md` 编码清单，漏写/多写都判失败）、阈值 token（`references/*.md` 全目录联合）、`--help` 参数全覆盖（`references/*.md` 或 `SKILL.md`）、`SAFE_CACHE_DIRS`/`ORPHAN_ROOTS` 路径都写进 `references/*.md`；退出码 0 一致 / 1 漂移 / 2 环境或解析错误。
+- `dev/mole-oracle.sh` + `dev/mole-oracle.awk` — **差分 oracle**（研发期）：把 Mole 的 `clean-list.txt` 与我们的候选清单按路径 join，出「缺口 / 冲突 / 多出」三份待审清单；`dev/tests/mole-oracle-test.sh` 是夹具回归。只读、不调用 `mo`、不进技能包（理由见[决策记录](decisions.md)）。
 - `check-opencode-commands.mjs` — 命令契约校验：frontmatter 合法字段、`**<branch> 分支**` 对应 `skills/<skill>/references/<branch>.md`、`$ARGUMENTS` 独立成行、两份 README 表格与命令文件一一对应。可选 `--dsh <插件仓路径>` 比对另一仓 `COMMANDS` 表的 branch/skill（不一致判失败，description 差异只提示）。
 
 ## 三个入口，一份实现

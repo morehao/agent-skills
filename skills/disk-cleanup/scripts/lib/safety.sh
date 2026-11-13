@@ -6,6 +6,8 @@ _DC_SAFETY_LOADED=1
 
 DC_DEL_OK=0
 DC_DEL_FAILS=0
+DC_DEL_EMPTY=0
+DC_DEL_EMPTY_SKIP=0
 DC_DEL_PROTECTED=0
 DC_DEL_INUSE=0
 DC_DEL_TIMEOUT=0
@@ -17,7 +19,7 @@ DC_RM_BATCH_MAX=${DC_RM_BATCH_MAX:-256}
 DC_TIMEOUT_BATCH=${DC_TIMEOUT_BATCH:-$DC_TIMEOUT_RM}
 
 dc_counters_reset() {
-    DC_DEL_OK=0; DC_DEL_FAILS=0; DC_DEL_PROTECTED=0
+    DC_DEL_OK=0; DC_DEL_FAILS=0; DC_DEL_EMPTY=0; DC_DEL_EMPTY_SKIP=0; DC_DEL_PROTECTED=0
     DC_DEL_INUSE=0; DC_DEL_TIMEOUT=0; DC_LAST_REASON=""
 }
 
@@ -154,6 +156,35 @@ dc_protected_reason() {
     return 1
 }
 
+# dc_protected_hit <path>：命中保护清单时返回 0，并把原因写进 DC_LAST_PROTECT_REASON。
+# 与 dc_protected_reason 的区别：**不起子 shell**，用于上万条候选的热路径；
+# 并且记住最近一次命中的父目录——路径按目录成批出现，命中一棵子树后子项直接继承。
+DC_LAST_PROTECT_REASON=""
+DC_PROTECT_LAST_PARENT=""
+dc_protected_hit() {
+    local p="${1:-}" i pat
+    DC_LAST_PROTECT_REASON=""
+    [[ ${DC_PROTECT_COUNT:-0} -gt 0 ]] || return 1
+    # 父目录已命中 ⇒ 子项必然命中（保护是路径前缀语义）
+    if [[ -n "$DC_PROTECT_LAST_PARENT" ]] && dc_under "$p" "$DC_PROTECT_LAST_PARENT"; then
+        DC_LAST_PROTECT_REASON="${DC_PROTECT_LAST_REASON:-protected}"
+        return 0
+    fi
+    for ((i = 0; i < DC_PROTECT_COUNT; i++)); do
+        [[ "${DC_PROTECT_SCOPES[$i]}" == "off" ]] && continue
+        pat="${DC_PROTECT_PATTERNS[$i]}"
+        [[ -n "$pat" ]] || continue
+        case "$p" in
+            $pat|$pat/*)
+                DC_LAST_PROTECT_REASON="${DC_PROTECT_REASONS[$i]}"
+                DC_PROTECT_LAST_PARENT="$p"
+                DC_PROTECT_LAST_REASON="$DC_LAST_PROTECT_REASON"
+                return 0 ;;
+        esac
+    done
+    return 1
+}
+
 # dc_classify_failure <父目录>：rm 失败后判定原因（区分只读/沙箱/TCC/其它）
 dc_classify_failure() {
     local parent="${1:-}"
@@ -167,17 +198,42 @@ dc_classify_failure() {
     esac
 }
 
+# dc_plan_probe <path> <0|1 sudo>：plan 模式下的「假删除」。
+# 只做路径断言与保护清单判定，命中/拒绝都记进清单；不碰文件系统、不做 lsof
+# （在用是执行期条件，预览时既不准确也不值得为几万个文件各起一次 lsof）。
+# 返回 0 = 计划删除 / 2 = 被拦下（unverified|protected）
+dc_plan_probe() {
+    local p="${1:-}" use_sudo="${2:-0}" kind="file"
+    [[ -d "$p" ]] && kind="dir"
+    if ! dc_path_assert "$p"; then
+        dc_plan_record "${DC_PLAN_CODE:-unknown}" "unverified" "$kind" "$p" "${DC_LAST_REASON:-io-error}" -1 "$use_sudo"
+        return 2
+    fi
+    if dc_protected_hit "$p"; then
+        [[ ${#DC_PROTECTED_HITS[@]} -lt 50 ]] && DC_PROTECTED_HITS+=("$p|$DC_LAST_PROTECT_REASON")
+        dc_plan_record "${DC_PLAN_CODE:-unknown}" "protected" "$kind" "$p" "$DC_LAST_PROTECT_REASON" -1 "$use_sudo"
+        return 2
+    fi
+    dc_plan_record "${DC_PLAN_CODE:-unknown}" "delete" "$kind" "$p" "" -1 "$use_sudo"
+    return 0
+}
+
 # dc_funnel_rm <path> <0|1 sudo>：唯一的删除出口。
 # 返回 0 已删 / 2 跳过（protected|in-use|denied）/ 3 失败
 dc_funnel_rm() {
     local p="$1" use_sudo="${2:-0}" reason rc=0 parent
+    if [[ "${DC_PLAN_MODE:-0}" == "1" ]]; then
+        dc_plan_probe "$p" "$use_sudo"
+        return $?
+    fi
     DC_LAST_REASON=""
     if ! dc_path_assert "$p"; then
         DC_LAST_REASON="${DC_LAST_REASON:-io-error}"
         DC_DEL_FAILS=$((DC_DEL_FAILS + 1))
         return 3
     fi
-    if reason=$(dc_protected_reason "$p"); then
+    if dc_protected_hit "$p"; then
+        reason="$DC_LAST_PROTECT_REASON"
         DC_LAST_REASON="protected"
         DC_DEL_PROTECTED=$((DC_DEL_PROTECTED + 1))
         [[ ${#DC_PROTECTED_HITS[@]} -lt 50 ]] && DC_PROTECTED_HITS+=("$p|$reason")
@@ -202,10 +258,12 @@ dc_funnel_rm() {
     if [[ "$rc" -eq 124 ]]; then
         DC_DEL_TIMEOUT=$((DC_DEL_TIMEOUT + 1))
         DC_LAST_REASON="timeout"
+        dc_audit_failure "$p" 0 "timeout"
         return 3
     fi
     DC_DEL_FAILS=$((DC_DEL_FAILS + 1))
     DC_LAST_REASON=$(dc_classify_failure "$parent")
+    dc_audit_failure "$p" 0 "$DC_LAST_REASON"
     return 3
 }
 
@@ -246,6 +304,7 @@ dc_batch_flush() {
                 DC_DEL_FAILS=$((DC_DEL_FAILS + 1))
                 DC_LAST_REASON=$(dc_classify_failure "$parent")
             fi
+            dc_audit_failure "$p" 0 "${DC_LAST_REASON:-io-error}"
             dc_audit_path "$p" 0 "${DC_LAST_REASON:-io-error}"
         done
     fi
@@ -257,12 +316,17 @@ dc_batch_flush() {
 dc_batch_add() {
     local p="${1:-}" use_sudo="${2:-0}" reason
     [[ -n "$p" ]] || return 1
+    if [[ "${DC_PLAN_MODE:-0}" == "1" ]]; then
+        dc_plan_probe "$p" "$use_sudo" || return 1
+        return 0
+    fi
     if ! dc_path_assert "$p"; then
         DC_LAST_REASON="${DC_LAST_REASON:-io-error}"
         DC_DEL_FAILS=$((DC_DEL_FAILS + 1))
         return 1
     fi
-    if reason=$(dc_protected_reason "$p"); then
+    if dc_protected_hit "$p"; then
+        reason="$DC_LAST_PROTECT_REASON"
         DC_LAST_REASON="protected"
         DC_DEL_PROTECTED=$((DC_DEL_PROTECTED + 1))
         [[ ${#DC_PROTECTED_HITS[@]} -lt 50 ]] && DC_PROTECTED_HITS+=("$p|$reason")
@@ -297,16 +361,36 @@ dc_delete_aged() {
     [[ -e "$dir" ]] || { STEP_NOTE="路径不存在"; return 0; }
     existed=1
     dc_batch_reset
+    # AppTranslocation 是 macOS 给「从下载目录直接运行」的 App 做的隔离副本，
+    # 里面是**正在运行的 app 本体**（du 甚至会报 Result too large）。它不是临时垃圾，
+    # 删了会让运行中的 app 当场崩；系统在 app 退出后会自己回收。
     while IFS= read -r -d '' p; do
         dc_batch_add "$p" "$use_sudo" >/dev/null 2>&1 || true
-    done < <(find "$dir" -mindepth 1 \( -type f -o -type l \) -mtime +"$days" -print0 2>/dev/null)
+    done < <(find "$dir" -mindepth 1 \( -path '*/AppTranslocation' -prune \) -o \
+        \( -type f -o -type l \) -mtime +"$days" -print0 2>/dev/null)
     dc_batch_flush "$use_sudo"
-    # 空目录：不含新数据，删掉安全（不递归进非空目录）
+    # plan 模式到此为止：删空的目录由删除结果决定，预览阶段无法预知，不进清单
+    [[ "${DC_PLAN_MODE:-0}" == "1" ]] && return 0
+    # 空目录：不含新数据，删掉安全（不递归进非空目录）。
+    # 只清**当前用户**的空目录：/var/folders 里混着 WebKit、Safari 等系统进程的沙箱目录，
+    # 删别人的目录必然 EACCES，会把每一次清理都刷成 exit 1（本机实测一次 197 条）。
+    # 单独计数：它们是删除的**结果**而不是候选，混进「已删 N」会让回执和清单对不上。
+    local ok_before="$DC_DEL_OK" fail_before="$DC_DEL_FAILS" to_before="$DC_DEL_TIMEOUT" self_user action_before="${DC_FAIL_ACTION:-failed}"
+    DC_FAIL_ACTION="skipped-empty"
+    self_user=$(id -un 2>/dev/null || printf '')
     while IFS= read -r -d '' p; do
         [[ -d "$p" ]] || continue
         dc_batch_add "$p" "$use_sudo" >/dev/null 2>&1 || true
-    done < <(find "$dir" -mindepth 1 -type d -empty -print0 2>/dev/null)
+    done < <(find "$dir" -mindepth 1 -type d -empty ${self_user:+-user "$self_user"} -print0 2>/dev/null)
     dc_batch_flush "$use_sudo"
+    # 删不掉的多是系统进程的沙箱目录（TCC 护着，owner 却是当前用户），本来就删不动：
+    # 记成「跳过」而不是失败——否则每次清理都 exit 1，人就会开始无视失败。
+    DC_DEL_EMPTY=$((DC_DEL_EMPTY + DC_DEL_OK - ok_before))
+    DC_DEL_EMPTY_SKIP=$((DC_DEL_EMPTY_SKIP + DC_DEL_FAILS - fail_before + DC_DEL_TIMEOUT - to_before))
+    DC_DEL_OK="$ok_before"
+    DC_DEL_FAILS="$fail_before"
+    DC_DEL_TIMEOUT="$to_before"
+    DC_FAIL_ACTION="$action_before"
     [[ "$existed" -eq 1 ]] || { STEP_NOTE="路径不存在"; return 0; }
     STEP_NOTE="已删 ${DC_DEL_OK} / 保护 ${DC_DEL_PROTECTED} / 在用 ${DC_DEL_INUSE} / 失败 ${DC_DEL_FAILS}${DC_DEL_TIMEOUT:+/超时 ${DC_DEL_TIMEOUT}}"
     [[ "$DC_DEL_FAILS" -eq 0 && "$DC_DEL_TIMEOUT" -eq 0 ]]
@@ -316,6 +400,10 @@ dc_delete_aged() {
 dc_delete_whole() {
     local p="$1" use_sudo="${2:-0}" size_kb=0 rc=0
     [[ -e "$p" ]] || { STEP_NOTE="路径不存在"; return 0; }
+    if [[ "${DC_PLAN_MODE:-0}" == "1" ]]; then
+        dc_funnel_rm "$p" "$use_sudo"
+        return 0
+    fi
     size_kb=$(du_kb "$p")
     DC_AUDIT_PATHS=1
     dc_funnel_rm "$p" "$use_sudo" || rc=$?
@@ -347,6 +435,8 @@ dc_delete_paths_stdin() {
 # dc_deleted_summary：给文本回执的一行
 dc_deleted_summary() {
     printf '已删 %s' "$DC_DEL_OK"
+    [[ "${DC_DEL_EMPTY:-0}" -gt 0 ]] && printf ' + 清空目录 %s' "$DC_DEL_EMPTY"
+    [[ "${DC_DEL_EMPTY_SKIP:-0}" -gt 0 ]] && printf '（另有 %s 个系统目录删不动，已跳过）' "$DC_DEL_EMPTY_SKIP"
     [[ "$DC_DEL_PROTECTED" -gt 0 ]] && printf ' / 保护 %s' "$DC_DEL_PROTECTED"
     [[ "$DC_DEL_INUSE" -gt 0 ]] && printf ' / 在用 %s' "$DC_DEL_INUSE"
     [[ "$DC_DEL_FAILS" -gt 0 ]] && printf ' / 失败 %s' "$DC_DEL_FAILS"

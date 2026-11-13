@@ -242,6 +242,9 @@ clean_varfolders() {
     # T/go-build*：同样是顶层目录，超 ${VF_GO_AGE_DAYS} 天整棵删
     dc_delete_paths_stdin < <(run_timeout "$DC_TIMEOUT_FIND" find "$VF_DIR/T" -mindepth 1 -maxdepth 1 \
         -type d -name 'go-build*' -mtime +"$VF_GO_AGE_DAYS" -print0 2>/dev/null)
+    # C/clang/ModuleCache：编译模块缓存，整棵可再生（Xcode/clang 会重建）；同一档年龄
+    dc_delete_paths_stdin < <(run_timeout "$DC_TIMEOUT_FIND" find "$VF_DIR/C/clang" -mindepth 1 -maxdepth 1 \
+        -type d -name 'ModuleCache' -mtime +"$VF_GO_AGE_DAYS" -print0 2>/dev/null)
     STEP_NOTE="$(dc_deleted_summary)"
     [[ "$DC_DEL_FAILS" -eq 0 && "$DC_DEL_TIMEOUT" -eq 0 ]]
 }
@@ -258,18 +261,19 @@ target_varfolders() {
     # 测量与删除谓词一致：T/C 按 mtime 求文件大小；X 与 go-build 按「会被整删的顶层条目」du 求和
     del=$(( $(subset_kb "$VF_DIR/T" "$VF_AGE_DAYS") + $(subset_kb "$VF_DIR/C" "$VF_AGE_DAYS") \
         + $(sys_top_kb "$VF_DIR/X" "(" -name '*code_sign_clone*' -o -mtime +"$VF_AGE_DAYS" ")") \
-        + $(sys_top_kb "$VF_DIR/T" -type d -name 'go-build*' -mtime +"$VF_GO_AGE_DAYS") ))
+        + $(sys_top_kb "$VF_DIR/T" -type d -name 'go-build*' -mtime +"$VF_GO_AGE_DAYS") \
+        + $(sys_top_kb "$VF_DIR/C/clang" -type d -name 'ModuleCache' -mtime +"$VF_GO_AGE_DAYS") ))
     denied=$(denied_count "$VF_DIR")
     whole=$(du_kb /var/folders)
     say "  当前用户容器目录: ${VF_DIR}（uid $(id -u 2>/dev/null)）"
-    say "  目录总量: $(human "$total") / 本次可删（T/C/X 超 ${VF_AGE_DAYS} 天 + go-build 超 ${VF_GO_AGE_DAYS} 天，顶层条目实测）: $(human "$del")"
+    say "  目录总量: $(human "$total") / 本次可删（T/C/X 超 ${VF_AGE_DAYS} 天 + go-build/clang ModuleCache 超 ${VF_GO_AGE_DAYS} 天，顶层条目实测）: $(human "$del")"
     say "  参考：/var/folders 全量占用 $(human "$whole")（含他人沙箱，仅当前用户部分可读、可清）"
     [[ "$denied" -gt 0 ]] && say "  ⚠️ ${denied} 个条目因权限未计入"
     STEP_TOTAL_KB="$total"
     STEP_DEL_KB="$del"
     STEP_PATH="$VF_DIR"
     STEP_SAMPLE=$(sys_sample_aged "$VF_DIR/T" "$VF_AGE_DAYS" 5)
-    PLAN_CMD="T/C 删超 ${VF_AGE_DAYS} 天的文件与空目录；X 删 *code_sign_clone* 与超 ${VF_AGE_DAYS} 天的顶层条目；T/go-build* 删超 ${VF_GO_AGE_DAYS} 天的整棵目录（全部逐条走删除漏斗）"
+    PLAN_CMD="T/C 删超 ${VF_AGE_DAYS} 天的文件与空目录；X 删 *code_sign_clone* 与超 ${VF_AGE_DAYS} 天的顶层条目；T/go-build* 与 C/clang/ModuleCache 删超 ${VF_GO_AGE_DAYS} 天的整棵目录（全部逐条走删除漏斗）"
     run varfolders "清理当前用户 /var/folders 的过期残留" clean_varfolders
 }
 
@@ -303,6 +307,10 @@ clean_snapshots() {
         else
             STEP_NOTE="无 Apple 本地快照，未执行 thinlocalsnapshots；第三方 ${SNAP_THIRD_N} 个需在对应 App 内删除"
         fi
+        return 0
+    fi
+    if [[ "${DC_PLAN_MODE:-0}" == "1" ]]; then
+        dc_plan_command "sudo tmutil thinlocalsnapshots / 999999999999 4（Apple 本地快照 ${SNAP_APPLE_N} 个）"
         return 0
     fi
     run_timeout "$DC_TIMEOUT_SNAPSHOT" sudo -n tmutil thinlocalsnapshots / 999999999999 4 || rc=$?
@@ -496,6 +504,9 @@ target_appcache() {
 UPD_LIST=""
 UPD_TOP=""
 UPD_TOTAL_KB=0
+UPD_PKG_N=0
+# 更新包（Upgrade/ 里的历史安装包）：下载中的包 mtime 一直是新的，隔天没动就是废包，删了下次更新会重下
+UPD_AGE_DAYS=${UPD_AGE_DAYS:-1}
 
 clean_updaters() {
     local tgt
@@ -530,16 +541,32 @@ target_updaters() {
     done < <(run_timeout "$DC_TIMEOUT_FIND" find "$APP_SUPPORT" -maxdepth 4 -type d \
         \( -name crx_cache -o -name auto-updater -o -name app-recovery-cache -o -name UpdateCache \) \
         -prune -print 2>/dev/null)
-    say "  本次可删合计: $(human "$UPD_TOTAL_KB")（>10MB 的更新残留目录，共 ${n} 个）"
+    # 更新包目录（Upgrade/）：删其中超过 ${UPD_AGE_DAYS} 天未动的子项，保留 Upgrade 本身。
+    # 沙箱 App 把下载的安装包放在 Containers/<id>/Data/Library/Application Support/Upgrade/，
+    # 这个位置不在任何既有编码的扫描面里（本机腾讯视频一个包 729 MB）。
+    while IFS= read -r -d '' updir; do
+        while IFS= read -r -d '' pkg; do
+            [[ -n "$pkg" ]] || continue
+            sz=$(du_kb "$pkg")
+            UPD_TOTAL_KB=$((UPD_TOTAL_KB + sz))
+            UPD_LIST="${UPD_LIST}${pkg}"$'\n'
+            UPD_TOP="${UPD_TOP}${sz}	${pkg#"$HOME"/}"$'\n'
+            UPD_PKG_N=$((UPD_PKG_N + 1))
+        done < <(run_timeout "$DC_TIMEOUT_FIND" find "$updir" -mindepth 1 -maxdepth 1 \
+            -mtime +"$UPD_AGE_DAYS" -print0 2>/dev/null)
+    done < <(run_timeout "$DC_TIMEOUT_FIND" find "$APP_SUPPORT" "$HOME/Library/Containers" \
+        -maxdepth 6 -type d -name Upgrade -print0 2>/dev/null)
+
+    say "  本次可删合计: $(human "$UPD_TOTAL_KB")（更新残留目录 ${n} 个 + 超 ${UPD_AGE_DAYS} 天的更新包 ${UPD_PKG_N} 个）"
     printf '%s' "$UPD_TOP" | sort -rn | head -8 | while IFS=$'\t' read -r kb nm; do
         [[ -n "${nm:-}" ]] && say "    - $(human "$kb")  ${nm}"
     done
-    say "  注：crx_cache / auto-updater / app-recovery-cache 是更新下载残留，删后下次更新会重新下载。"
+    say "  注：crx_cache / auto-updater / app-recovery-cache 是更新下载残留，Upgrade/ 下是历史安装包；删后下次更新会重新下载。"
     STEP_TOTAL_KB="$UPD_TOTAL_KB"
     STEP_DEL_KB="$UPD_TOTAL_KB"
     STEP_PATH="$APP_SUPPORT"
     STEP_SAMPLE=$(printf '%s' "$UPD_LIST" | head -5)
-    PLAN_CMD="整删上列 ${n} 个 >10MB 的 crx_cache / auto-updater / app-recovery-cache / UpdateCache 目录（逐条走删除漏斗）"
+    PLAN_CMD="整删上列 ${n} 个 >10MB 的 crx_cache / auto-updater / app-recovery-cache / UpdateCache 目录，以及 Upgrade/ 下超 ${UPD_AGE_DAYS} 天的历史更新包 ${UPD_PKG_N} 个（逐条走删除漏斗）"
     run updaters "清理应用自动更新下载残留" clean_updaters
 }
 
