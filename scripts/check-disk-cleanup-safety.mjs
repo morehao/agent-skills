@@ -25,7 +25,11 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPTS_DIR = join(repoRoot, "skills/disk-cleanup/scripts");
 const ENTRY = join(SCRIPTS_DIR, "mac_cleanup.sh");
 const FUNNEL_FILE = join(SCRIPTS_DIR, "lib/safety.sh");
-const FUNNEL_FN = "dc_funnel_rm";
+// 删除只允许出自两个函数（同文件、同一套闸）：
+//   dc_funnel_rm   单条入口（断言/保护/在用 → rm → 失败归类）
+//   dc_batch_flush 批量入口（路径已逐条过完三道检查，一次 rm 删一批）
+const FUNNEL_FNS = ["dc_funnel_rm", "dc_batch_flush"];
+const FUNNEL_LABEL = "dc_funnel_rm() / dc_batch_flush()";
 const BASH = "/bin/bash";
 
 const problems = [];
@@ -159,13 +163,13 @@ for (const file of files) {
 
     // ① rm / find -delete：只允许 safety.sh 的 dc_funnel_rm 内；tests/ 不参与本项
     if (!rel(file).includes("/tests/")) {
-      const inFunnel = isFunnelFile && curFn === FUNNEL_FN;
+      const inFunnel = isFunnelFile && FUNNEL_FNS.includes(curFn);
       if (RM_RE.test(code)) {
         if (!inFunnel) {
           fail(
             file,
             ln,
-            `出现 rm（只允许 ${rel(FUNNEL_FILE)} 的 ${FUNNEL_FN}() 内；删除必须走漏斗）` +
+            `出现 rm（只允许 ${rel(FUNNEL_FILE)} 的 ${FUNNEL_LABEL} 内；删除必须走漏斗）` +
               (curFn ? `｜当前在 ${curFn}()` : "｜当前不在任何函数内"),
           );
         } else {
@@ -176,7 +180,7 @@ for (const file of files) {
         fail(
           file,
           ln,
-          `出现 find -delete（删除必须走 ${FUNNEL_FN}()；find 只用来 -print/-print0 收集路径）` +
+          `出现 find -delete（删除必须走 ${FUNNEL_LABEL}；find 只用来 -print/-print0 收集路径）` +
             (curFn ? `｜当前在 ${curFn}()` : ""),
         );
       }
@@ -242,13 +246,13 @@ if (problems.length > 0) {
   for (const p of problems) console.error(`[disk-cleanup-safety] ${p}`);
   console.error(`\n[disk-cleanup-safety] 共 ${problems.length} 处违规`);
   console.error(
-    "提示：删除只走 lib/safety.sh 的 dc_funnel_rm；脚本按 bash 3.2 写；变量后紧跟中文要写 ${var}。",
+    "提示：删除只走 lib/safety.sh 的 dc_funnel_rm / dc_batch_flush；脚本按 bash 3.2 写；变量后紧跟中文要写 ${var}。",
   );
   process.exit(1);
 }
 
 console.log(
   `[disk-cleanup-safety] ok：${files.length} 个脚本过 ${BASH} -n（其中 ${runtimeFiles.length} 个运行期脚本）；` +
-    `rm 仅出现在 ${FUNNEL_FN}()（${funnelHits} 处）；` +
+    `rm 仅出现在 ${FUNNEL_LABEL}（${funnelHits} 处）；` +
     `bash4 语法 ${bash4Checked} 处；HOME 断言已调用；变量+中文 ${cjkChecked} 处`,
 );

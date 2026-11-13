@@ -12,6 +12,9 @@ DC_DEL_TIMEOUT=0
 DC_LAST_REASON=""
 DC_PROBE_UNKNOWN=0
 DC_TIMEOUT_RM=600
+# 批量删除：每批一次 rm，把「每个路径 3~4 个进程」压成「每批 3~4 个进程」
+DC_RM_BATCH_MAX=${DC_RM_BATCH_MAX:-256}
+DC_TIMEOUT_BATCH=${DC_TIMEOUT_BATCH:-$DC_TIMEOUT_RM}
 
 dc_counters_reset() {
     DC_DEL_OK=0; DC_DEL_FAILS=0; DC_DEL_PROTECTED=0
@@ -206,6 +209,76 @@ dc_funnel_rm() {
     return 3
 }
 
+# ---------------- 批量删除（同一漏斗，少起进程） ----------------
+# 逐条 dc_funnel_rm 时，每个路径要付 rm + 看门狗子 shell + sleep 共 3~4 个进程；
+# 清缓存这种几千个文件的场景会顶满 macOS 默认 4000 的进程上限，把脚本自己 fork 死。
+# 这里先做与单条完全一致的三道检查（断言 / 保护清单 / 在用），通过后攒成一批整删；
+# 整批失败才回退逐条定位原因——失败路径才会多付进程，成功路径不再付。
+DC_BATCH_PATHS=()
+
+dc_batch_reset() {
+    DC_BATCH_PATHS=()
+}
+
+# dc_batch_flush <0|1 sudo>：执行当前批次（不再检查，未过三道的路径不该进批）
+dc_batch_flush() {
+    local use_sudo="${1:-0}" n=${#DC_BATCH_PATHS[@]} rc=0 p parent
+    [[ "$n" -gt 0 ]] || return 0
+    if [[ "$use_sudo" == "1" ]]; then
+        run_timeout "$DC_TIMEOUT_BATCH" sudo -n rm -rf -- "${DC_BATCH_PATHS[@]}" 2>/dev/null || rc=$?
+    else
+        run_timeout "$DC_TIMEOUT_BATCH" rm -rf -- "${DC_BATCH_PATHS[@]}" 2>/dev/null || rc=$?
+    fi
+    if [[ "$rc" -eq 0 ]]; then
+        DC_DEL_OK=$((DC_DEL_OK + n))
+    else
+        # 回退逐条：只对「还活着」的路径判原因，已删掉的照常计成功
+        for p in "${DC_BATCH_PATHS[@]}"; do
+            if [[ ! -e "$p" && ! -L "$p" ]]; then
+                DC_DEL_OK=$((DC_DEL_OK + 1))
+                continue
+            fi
+            if [[ "$rc" -eq 124 ]]; then
+                DC_DEL_TIMEOUT=$((DC_DEL_TIMEOUT + 1))
+                DC_LAST_REASON="timeout"
+            else
+                parent=$(dirname -- "$p" 2>/dev/null)
+                DC_DEL_FAILS=$((DC_DEL_FAILS + 1))
+                DC_LAST_REASON=$(dc_classify_failure "$parent")
+            fi
+            dc_audit_path "$p" 0 "${DC_LAST_REASON:-io-error}"
+        done
+    fi
+    DC_BATCH_PATHS=()
+    return 0
+}
+
+# dc_batch_add <path> <0|1 sudo>：0 已入批 / 1 被拦下（已计入对应计数器）
+dc_batch_add() {
+    local p="${1:-}" use_sudo="${2:-0}" reason
+    [[ -n "$p" ]] || return 1
+    if ! dc_path_assert "$p"; then
+        DC_LAST_REASON="${DC_LAST_REASON:-io-error}"
+        DC_DEL_FAILS=$((DC_DEL_FAILS + 1))
+        return 1
+    fi
+    if reason=$(dc_protected_reason "$p"); then
+        DC_LAST_REASON="protected"
+        DC_DEL_PROTECTED=$((DC_DEL_PROTECTED + 1))
+        [[ ${#DC_PROTECTED_HITS[@]} -lt 50 ]] && DC_PROTECTED_HITS+=("$p|$reason")
+        dc_audit_path "$p" 0 "$reason"
+        return 1
+    fi
+    if [[ -f "$p" ]] && is_path_in_use "$p"; then
+        DC_LAST_REASON="in-use"
+        DC_DEL_INUSE=$((DC_DEL_INUSE + 1))
+        return 1
+    fi
+    DC_BATCH_PATHS+=("$p")
+    [[ ${#DC_BATCH_PATHS[@]} -ge "$DC_RM_BATCH_MAX" ]] && dc_batch_flush "$use_sudo"
+    return 0
+}
+
 # dc_delete_one <path> [sudo]：删单条；返回 0 成功 / 1 跳过（不算失败）/ 2 失败
 dc_delete_one() {
     local p="$1" use_sudo="${2:-0}" rc=0
@@ -223,14 +296,17 @@ dc_delete_aged() {
     local dir="$1" days="$2" use_sudo="${3:-0}" p existed=0
     [[ -e "$dir" ]] || { STEP_NOTE="路径不存在"; return 0; }
     existed=1
+    dc_batch_reset
     while IFS= read -r -d '' p; do
-        dc_delete_one "$p" "$use_sudo" >/dev/null 2>&1 || true
+        dc_batch_add "$p" "$use_sudo" >/dev/null 2>&1 || true
     done < <(find "$dir" -mindepth 1 \( -type f -o -type l \) -mtime +"$days" -print0 2>/dev/null)
+    dc_batch_flush "$use_sudo"
     # 空目录：不含新数据，删掉安全（不递归进非空目录）
     while IFS= read -r -d '' p; do
         [[ -d "$p" ]] || continue
-        dc_delete_one "$p" "$use_sudo" >/dev/null 2>&1 || true
+        dc_batch_add "$p" "$use_sudo" >/dev/null 2>&1 || true
     done < <(find "$dir" -mindepth 1 -type d -empty -print0 2>/dev/null)
+    dc_batch_flush "$use_sudo"
     [[ "$existed" -eq 1 ]] || { STEP_NOTE="路径不存在"; return 0; }
     STEP_NOTE="已删 ${DC_DEL_OK} / 保护 ${DC_DEL_PROTECTED} / 在用 ${DC_DEL_INUSE} / 失败 ${DC_DEL_FAILS}${DC_DEL_TIMEOUT:+/超时 ${DC_DEL_TIMEOUT}}"
     [[ "$DC_DEL_FAILS" -eq 0 && "$DC_DEL_TIMEOUT" -eq 0 ]]
@@ -256,12 +332,14 @@ dc_delete_whole() {
     return 1
 }
 
-# dc_delete_paths_stdin [sudo]：从 stdin 读 NUL 分隔路径逐条走漏斗
+# dc_delete_paths_stdin [sudo]：从 stdin 读 NUL 分隔路径，过三道检查后分批走漏斗
 dc_delete_paths_stdin() {
     local use_sudo="${1:-0}" p
+    dc_batch_reset
     while IFS= read -r -d '' p; do
-        dc_delete_one "$p" "$use_sudo" >/dev/null 2>&1 || true
+        dc_batch_add "$p" "$use_sudo" >/dev/null 2>&1 || true
     done
+    dc_batch_flush "$use_sudo"
     STEP_NOTE="已删 ${DC_DEL_OK} / 保护 ${DC_DEL_PROTECTED} / 在用 ${DC_DEL_INUSE} / 失败 ${DC_DEL_FAILS}"
     [[ "$DC_DEL_FAILS" -eq 0 && "$DC_DEL_TIMEOUT" -eq 0 ]]
 }

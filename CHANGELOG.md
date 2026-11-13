@@ -18,6 +18,12 @@
 - **project-insight**: `verify-references.mjs` 支持零引用文档直接通过（打印「无引用（允许）」），新增 `--stats` 密度自查（只报告不阻断）；新增 `tests/references-smoke.sh` 回归
 - **project-insight**: 同步 SKILL.md、11 个 references / 8 个类型规格与仓库文档（`docs/skills.md`、`docs/agents/*`），清除 #57 回退遗留的 `check-doc.mjs`、决策卡等失效描述
 
+### Fixed
+
+- **disk-cleanup**: 删除改为**批量出口**——`dc_batch_add` 逐条过同一套闸（断言 / 保护清单 / 在用）后攒批，`dc_batch_flush` 每满 `DC_RM_BATCH_MAX`（默认 256）一次 `rm -rf -- p1 p2 …`；清 `~/Library/Caches` 这类几千个路径的场景不再按路径各起 3~4 个进程，避免顶满 macOS 默认 `kern.maxprocperuid=4000` 后 `fork: Resource temporarily unavailable`、脚本半路 `exit 128`
+- **disk-cleanup**: 超时看门狗从「`sleep <secs>` 一觉睡到底」改为轮询 + 退避（1/2/4/…/30s），被监控进程一结束就退出，不再每次调用遗留一个孤儿 `sleep` 进程
+- **disk-cleanup**: `check-disk-cleanup-safety.mjs` 的「单漏斗」规则同步放行 `dc_batch_flush`（仍然只允许 `lib/safety.sh` 内的这两个函数出现 `rm`），新增批量删除回归用例（40 条路径只触发 1 次 `rm`）
+
 ## [v0.2.0] - 2026-10-23
 
 ### Features

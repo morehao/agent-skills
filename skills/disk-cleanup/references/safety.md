@@ -4,15 +4,24 @@
 
 ## 删除漏斗是唯一出口
 
-所有删除只经一个函数，其余都是它的包装：
+所有删除只经 `lib/safety.sh` 的同一个删除内核，其余都是它的包装：
 
 ```
 dc_delete_one <路径> [sudo]        ← 单条，返回 0 成功 / 1 跳过（不算失败）/ 2 失败
 dc_delete_aged <目录> <天数>        ← 只删过期文件，再清因此变空的目录
 dc_delete_whole <路径>              ← 整目录
 dc_delete_paths_stdin               ← 从 stdin 读 NUL 分隔路径
-        └─ 全部落到 dc_funnel_rm <路径> <0|1>
+        └─ 单条 → dc_funnel_rm <路径> <0|1>        （断言 → 保护 → 在用 → rm）
+        └─ 多条 → dc_batch_add ×N + dc_batch_flush（同一套闸，攒批一次 rm）
 ```
+
+**为什么要批量**：逐条 `rm` 时，每个路径要付 3~4 个进程（`rm` + 看门狗子 shell + `sleep`）。
+清 `~/Library/Caches` 这种几千个文件的场景会瞬间堆出几千个进程，顶满 macOS 默认
+`kern.maxprocperuid=4000`，脚本自己被 `fork: Resource temporarily unavailable` 打死（表现为
+半路退出、`exit 128`、台账只写了一条 `start`）。所以多条删除先逐条过闸攒进 `DC_BATCH_PATHS`，
+满 `DC_RM_BATCH_MAX`（默认 256）就一次 `rm -rf -- p1 p2 …` 删掉；整批失败才回退逐条定位原因，
+**成功路径不再付进程**。`dc_batch_flush` 是唯一允许出现 `rm` 的第二个函数，
+`scripts/check-disk-cleanup-safety.mjs` 只放行这两个名字。
 
 `dc_funnel_rm` 按固定顺序过闸，任何一闸不过就不删：
 
@@ -22,7 +31,7 @@ dc_delete_paths_stdin               ← 从 stdin 读 NUL 分隔路径
 4. **执行**——`rm -rf -- <路径>` 或 `sudo -n rm -rf -- <路径>`，统一套 600 秒超时；
 5. **失败归类**——对父目录做真实写测试（`mktemp -d` 再 `rmdir`），据此区分 `denied-readonly` / `denied-sandbox` / `not-found` / `io-error`；超时记 `timeout`。
 
-脚本里除这个函数之外不应出现 `rm`。`cleanup-opencode.sh` 删备份/快照目录时也 `source` 同一套 lib、走 `dc_delete_one`，所以「整个技能只有一个删除出口」是事实，不是口号。你在任务里也**不要**绕过它去补刀——那等于绕过下面所有闸门。
+脚本里除 `dc_funnel_rm`（单条）与 `dc_batch_flush`（批量）之外不应出现 `rm`；批量入口的 1~3 道闸逐条在 `dc_batch_add` 里过完才允许入批，闸门条件与单条完全一致。`cleanup-opencode.sh` 删备份/快照目录时也 `source` 同一套 lib、走 `dc_delete_one`，所以「整个技能只有一个删除出口」是事实，不是口号。你在任务里也**不要**绕过它去补刀——那等于绕过下面所有闸门。
 
 ## 路径断言与 HOME 断言
 
