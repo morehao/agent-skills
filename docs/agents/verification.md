@@ -77,6 +77,20 @@ bash skills/disk-cleanup/scripts/tests/run.sh # 纯 bash 断言（假 HOME，不
 
 改了编码 / 阈值 / 参数 / 保护清单，要同步改：`data/codes.tsv` 或 `data/protect.tsv` + `references/*.md`（`cleanup.md` 索引表必改）+ 必要时 `SKILL.md` 的流程（不要在 SKILL 里抄编码表）。
 
+## disk-cleanup 差分 oracle（研发期，可选，不进 CI）
+
+```bash
+bash scripts/dev/tests/mole-oracle-test.sh                  # 夹具回归（不需要装 Mole）
+scripts/dev/mole-oracle.sh --collect-ours --limit 60         # 现跑我们的预览再比
+scripts/dev/mole-oracle.sh --ours plan.tsv --out report.md   # 用已有清单
+```
+
+前置：先在你自己的终端跑一次 `mo clean --dry-run`——Mole 必须写 `~/.config/mole/clean-list.txt`，沙箱里会失败。
+
+产出三类：**缺口**（Mole 会清、我们完全不碰）、**冲突**（我们标 `protected`、Mole 会清，安全相关）、**多出**（我们计划删、Mole 不碰）。三类都是**待审线索**，不是结论：Mole 认的不等于该删，它不认的也可能是它自己在保护。
+
+工具只读、不调用 `mo`、不进技能包；为什么只当研发期 oracle 而不是运行时依赖，见[决策记录](decisions.md)。
+
 ## 环境类检查（本地，不进 CI）
 
 本源内容与各 agent 软链都依赖本机 `$HOME`，CI 跑不了。改动接入相关代码后本地自查：

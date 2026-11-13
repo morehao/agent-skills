@@ -24,7 +24,7 @@
 **终局改造清单**（按顺序做，允许破坏 schema 兼容）：
 
 1. **候选清单成为一等输出**：除汇总 JSON 外提供完整候选清单（路径 + 编码 + 判定 + 原因 + 是否受保护），dry-run 就能逐条核对。这也是和任何外部工具做对照的前提。现有 `sample_paths` 保留，作为摘要不被误当全集。**（2026-11-13 已落地：schema 3 + `manifest` 块 + `--manifest <路径>` + 漏斗 plan 模式；契约见 `references/cleanup.md`，门禁见 `check-disk-cleanup-safety.mjs` 第 ⑥ 条。）**
-2. **差分 oracle**：研发期脚本按路径 join「Mole 的候选清单」与「我们的候选清单」，产出两份待审清单——「Mole 认、我们不认」（覆盖缺口）与「我们认、Mole 不认」（激进项）。只在维护者机器上跑，**不进技能分发包、不作为安装依赖**。
+2. **差分 oracle**：研发期脚本按路径 join「Mole 的候选清单」与「我们的候选清单」，产出三份待审清单——缺口（Mole 会清、我们完全不碰）、冲突（我们标 protected、Mole 会清）、多出（我们计划删、Mole 不碰）。只在维护者机器上跑，**不进技能分发包、不作为安装依赖**。**（2026-11-13 已落地：`scripts/dev/mole-oracle.sh` + `mole-oracle.awk` + 夹具回归 `scripts/dev/tests/mole-oracle-test.sh`；前置是用户在自己终端跑 `mo clean --dry-run`，因为 Mole 必须写 `~/.config/mole`。）**
 3. **漏斗补强**：把 Mole 已验的三类「在用」判定内建进来——活用户缓存、SQLite 库被占用、编译模型缓存。判据由我们自己的测试锁住，不引用其实现。
 4. **边界写死**：`SKILL.md` 与[技能说明](../skills.md) 标明两个工具的受众，以及**台账与白名单互不相认**，避免同一台机器上被当成一套。
 

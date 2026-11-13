@@ -10,6 +10,7 @@
 
 - **disk-cleanup**: 预览产出**候选清单**（manifest）——`--clean --dry-run` 时删除漏斗进入 plan 模式（只做路径断言与保护判定，不删、不跑 lsof），把每条候选（编码 / 判定 / 类型 / 路径 / 保护原因 / sudo）写成 TSV；`--json` 新增 `manifest` 块（`path`/`count`/`by_decision`/`by_kind`/`truncated`/`write_failed`），`--manifest <路径>` 可指定落点（默认跟台账同目录，只读沙箱退到 `$TMPDIR`）。清单与真实执行同源，`sample_paths` 退为摘要。代价是预览要完整枚举候选（`caches` 约 2s → 4s，候选上万条的编码可到几十秒）
 - **disk-cleanup**: JSON 契约升到 **schema 3**（`DC_SCHEMA_VERSION` 一处定义，主 JSON、`--list --json`、`--history --json` 同步）；`check-disk-cleanup-codes.mjs` 改为从常量读版本，不再硬编码
+- **scripts**: 新增差分 oracle（`scripts/dev/mole-oracle.sh` + `mole-oracle.awk`）——把 Mole 的 `clean-list.txt` 与 disk-cleanup 的候选清单按路径 join，产出缺口 / 冲突 / 多出三份待审清单；只读、不调用 `mo`、不进技能包；配套夹具回归 `scripts/dev/tests/mole-oracle-test.sh`（22 条断言，不需要装 Mole）
 - **disk-cleanup**: 安全门禁新增第 ⑥ 条——禁止把删除委托给外部清理工具（`mo`/`mole` 的 `clean`/`uninstall`/`purge`/`optimize`），删除只能出自本仓库的漏斗
 - **docs**: 新增[决策记录](docs/agents/decisions.md)；首条记录「不把 Mole CLI 接成 disk-cleanup 的运行时依赖」、被判掉的备选与后续改造顺序
 
