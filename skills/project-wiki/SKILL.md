@@ -1,6 +1,6 @@
 ---
 name: project-wiki
-description: 为开源项目生成面向广泛读者的 Wiki 文档（Markdown）：散文为主 + 架构图 + 表格，代码密度极低，读者不打开源码也能读懂。当用户要求"给这个项目写份文档/wiki/说明""生成项目文档给团队看""把这套代码整理成可读的介绍""写个新人上手指南"时使用；**已有 wiki 需要随上游版本更新**（发新版后同步文档）时同样适用——更新模式以版本基线为 diff 两端，只改受影响的页，未受影响的页可证明仍成立、不重写。定位上与 project-insight 明确分工——需要逐条可点开验证的源码引用、要深挖设计权衡与实现细节时用 project-insight；本文档的读者是不读源码的人。Also applies when the user asks to "write a wiki / docs / overview / README-style guide for a repo", "generate readable project documentation", "update an existing wiki after a release", or "explain this codebase to the team".
+description: 为开源项目生成面向广泛读者的 Wiki 文档（Markdown）：散文为主 + 架构图 + 表格，代码密度极低，读者不打开源码也能读懂。当用户要求"给这个项目写份文档/wiki/说明""生成项目文档给团队看""把这套代码整理成可读的介绍""写个新人上手指南"，或已有 wiki 需随上游版本同步更新时使用；英文场景如 "write a wiki / overview for a repo"。需要逐条可点开验证的源码引用、深挖设计权衡与实现细节用 project-insight；写技术方案/设计文档用 tech-design。本文档面向不读源码的人。
 ---
 
 # 项目 Wiki 文档

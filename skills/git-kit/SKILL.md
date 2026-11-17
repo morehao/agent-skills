@@ -1,6 +1,6 @@
 ---
 name: git-kit
-description: Git 工作流辅助工具包。当用户要求生成 commit message、提交/推送代码变更、基于中文描述创建/切换分支、面向目标仓库创建/更新 PR/MR、按编号合并 PR/MR 并回主干更新、给分支打版本标签并推送、在已合并的稳定分支上打 tag 并默认创建 GitHub/GitLab Release（pr-merge 之后的发布段）、将当前 git 仓库瘦身为浅克隆、或拉取并分类 GitHub star 仓库时使用该 skill（含"写个commit信息""提交一下""开个分支做XX""提个PR""把PR合并掉""打个tag""发版""发个版本""把仓库瘦身""分类我的star"等模糊表述）。
+description: Git 工作流工具包。当用户要生成 commit message、提交/推送变更、按中文描述建/切分支、创建/更新 PR/MR、合并 PR/MR、打 tag 或发版（含创建 GitHub/GitLab Release）、切到最新 tag、瘦身 git 仓库为浅克隆、或拉取并分类 star 仓库时使用（如"写个commit信息""提交一下""开个分支做XX""提个PR""把PR合并掉""打个tag""发版""把仓库瘦身""分类我的star"等模糊表述）。
 ---
 
 # Git Kit
