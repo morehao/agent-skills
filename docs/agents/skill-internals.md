@@ -72,6 +72,19 @@ references：`templates.md`（**叙事链 9 问与顺序依赖** + 三档骨架�
 
 配图 **Mermaid 与 SVG 均为一等公民**，按图的职责选（结构/映射/对比/回边状态机 → SVG，走 `diagram-design` 产出；时序/线性小图/ER → Mermaid；节点 ≥12 或含分层/泳道/边界即改用 SVG），同一张图不做双份。**先图后文**：动笔前先填视图清单（章节 → 图 → 工具 → 承载关切 → 导读/落着）；下限为轻量档有结构类章节即须有图、标准 ≥2、完整 ≥3，由门禁 `TD-NO-DIAGRAM`（按章节）与 `TD-DIAGRAM-MIN`（档位下限）卡住，确不适用写 `图豁免：<理由>`。`scripts/check-mermaid.mjs` / `audit-svg-topology.mjs` / `render-svg-preview.mjs` 均为 project-insight 引擎的薄壳（单一真源）；SVG 结构图新画或重排后必须核对边拓扑（「看着对、边连错」是这类图最常见的隐性错误）——审计对无 class 的 `diagram-design` 产物会自动改走几何推断（含文本的矩形=节点、带 marker 且贴节点的线=连线），输出标「推断模式」；**`[EDGE-UNPARSED]` 或非 0 退出码一律视为未通过**，不要再当成「空跑即通过」；成稿含图必须校验，`[MERMAID-ERROR]` 与审计非 0 不静默放过。
 
+## tech-design-research
+
+`tech-design` 的**编排增强**（不重写 tech-design，真源仍是它）。定位：调研驱动的技术设计文档，典型是练习经典系统设计题（短链/秒杀/IM/Feed…）并对照同类开源实现。
+
+流程：**定课题/档位/输出落点 → 开工确认（选项式）→ 开源调研（前置）→ 带参照系写第一版 → 按终局做取舍 → 评审门禁闭环 → 命名收尾**。**开工确认用选项问、每项都给推荐、别替用户拍板**：基调（**默认终局**，决定 `domain_id` 等不可逆结构）、档位（**默认完整**）、评审深度、交付动作（只分析/直接改）、取舍拍板权；不回答按默认值并在报告点明。**调研是默认行为**（默认选主流代表），用户点名了某开源项目则额外追加调研。**本技能不做任何 git 操作、不做技能发布**。三段增强：
+
+- **开源调研前置**（`references/oss-research.md`）：**在写第一版之前**做——先读 README 出「业界 vs 本方案」横向表定缺口，再 `git clone --depth 1` 到 `/tmp` 读源码取证（唯一键/主键真实定义、ID 生成、跳转状态与缓存头、统计同步异步与去重、GeoIP 位置、URL 校验）；横向表作为第一版输入，用完清理。每条借鉴回指「写进哪节/哪个决策/采纳与否」，不抄 AGPL/GPL 代码，不硬凑低星 Go 仓当标杆。台账落 `.dsh/docs/notes/`。
+- **终局取舍**：不可逆结构决定（唯一键、分片键、状态机枚举、契约字段）即使当期用不上也按终局定死并写「不改的代价」（如唯一键带 `domain_id`）；业界成熟方案优先，拍脑袋的换成业界方案并注明出处。
+- **输出落点与命名规则**（`references/delivery.md`）：落点**先探测环境（找 `.obsidian`）再给选项让用户选一次**——用户指定优先，否则 Obsidian 存在时把库内最贴合的具体路径列进选项（推荐排第一）、并留库内其它目录/自定义路径；命名**规则**是 `<主题>-<类型>.md`（连字符、类型词用「系统设计/技术方案」，不用「设计文档」，不无分隔符连写），改名同步 wikilink，批量改前备份。
+- **闭环验收**（`references/review-loop.md`）：门禁 `--strict` 到 0 error/0 warn、Mermaid 与 SVG 校验通过、独立上下文 1–2 个 lens 收成单一 `VERDICT`，改完**重跑门禁**。lens 定义以 tech-design 的 `review-gate.md` 为真源，本文只补「带开源调研」这一路的特别检查。
+
+与相邻技能边界（**窄触发，避免与 tech-design 误触**）：本技能与 `tech-design` 功能重叠（是其超集），故入口收窄——**仅当用户明确表达「调研/参考开源/对标业界/符合主流」时才进本技能**，否则一律 `tech-design`；tech-design 的 description 里也加了反向指路。只解读单个项目源码 → `project-insight`；只要独立图表 → `diagram-design`。
+
 ## diagram-design（外部，不 vendor）
 
 图的生产者，来自上游 [`cathrynlavery/diagram-design`](https://github.com/cathrynlavery/diagram-design)，本仓不做任何改动、也不纳入 `skills/` 与安装脚本。内部结构（45 个 `type-*.md` + `primitives-core.md` + `style-guide.md` + 213 个示例 HTML）由上游维护，本仓只记三条验收口径：导出带 `--system-fonts`（否则 `[SVG-EXTERNAL]`）、产物无 `node/edge` 钩子（审计自动切几何推断，`[EDGE-UNPARSED]` 即未通过）、无 `:root`/`prefers-color-scheme`（深色看 HTML，不看预览图）。
