@@ -8,6 +8,9 @@
 
 ### Added
 
+- **tech-design-research**: 新增技能——调研驱动的技术设计文档（`tech-design` 的编排增强）。**调研前置**：先读 README 出「业界 vs 本方案」横向表、再 `git clone --depth 1` 读源码取证，横向表作为第一版的输入（不是写完再补）。再补三段：**按终局做取舍**（不可逆结构决定如唯一键 `domain_id` 即使当期不用也定死）；**输出落点与命名规则**（先探测环境、给选项让用户选一次，Obsidian 优先且库内具体路径写进选项；命名 `<主题>-<类型>.md`）；**评审门禁闭环到 0 error/0 warn**（lens 以 tech-design 的 review-gate 为真源）。含 `references/oss-research.md`、`review-loop.md`、`delivery.md`
+- **tech-design-research / tech-design**: 明确两者触发边界（窄触发）——本技能是 tech-design 的超集，入口收窄为**仅当用户明确表达调研/参考开源/对标业界/符合主流时才触发**，否则走 tech-design；tech-design 的 description 加反向指路，避免「设计XX系统」这类说法把不需要调研的普通方案误拉进 research
+- **tech-design-research**: 新增「开工确认」段——基调（**默认终局**）、档位（**默认完整**）、评审深度、交付动作、取舍拍板权，**每项都给推荐**（首项标「（推荐）」），用选项一次问清、不答按默认值并写进报告。**调研是默认行为**（默认选主流代表），用户点名某开源项目则额外追加调研（不替代默认）。明确**本技能不做 git 操作、不做技能发布**。评审段另加「评审做到哪一档」选项（完整/标准/只跑机械门禁），亦带推荐
 - **disk-cleanup**: `browserold` 的扫描面扩到 app bundle 的 `*.framework/Versions`——Chrome/Edge/Brave 升级会把旧框架留在 `/Applications` 里（本机 Chrome 767 MB + Edge 561 MB），原来只扫 `~/Library` 下的两个根，永远看不到；保留 `Current` 指向与运行中版本
 - **disk-cleanup**: `updaters` 新增 `Upgrade/` 下的历史更新包（含沙箱 App 的 `Containers/<id>/Data/Library/Application Support/Upgrade/`）——超 1 天未动的子项整删、保留目录本身（本机腾讯视频一个包 696 MB）
 - **disk-cleanup**: `varfolders` 新增 `C/clang/ModuleCache`（超 1 天整棵删，编译缓存可再生，本机 165 MB）
