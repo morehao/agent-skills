@@ -361,6 +361,44 @@ function runDiff(repoReal, sources) {
   return unresolvedCount === 0 && staleCount === 0;
 }
 
+// —— 脚注/展示引用并存软提示（只打印，不影响退出码）——
+// 脚注引用：正文里的 `[^id]`（id 以字母/下划线/中文/数字开头，可含 -），排除脚注定义行 `[^id]: ...`。
+// 展示引用：CITATION_RE 匹配的 `[path:line]()`。
+// 同一文件中两者同时出现即提示出处机制应二选一。跳过围栏代码块（``` / ~~~）。
+const FOOTNOTE_REF_RE = /\[\^[\w\u4e00-\u9fa5-]+\]/g;
+const FOOTNOTE_DEF_RE = /^\s*\[\^[\w\u4e00-\u9fa5-]+\]:/;
+
+function hasFootnoteRefInBody(text) {
+  let inFence = false;
+  for (const line of text.split('\n')) {
+    if (/^\s*(```|~~~)/.test(line)) { inFence = !inFence; continue; }
+    if (inFence) continue;
+    if (FOOTNOTE_DEF_RE.test(line)) continue;
+    FOOTNOTE_REF_RE.lastIndex = 0;
+    if (FOOTNOTE_REF_RE.test(line)) return true;
+  }
+  return false;
+}
+
+function hasDisplayCitationInBody(text) {
+  let inFence = false;
+  for (const line of text.split('\n')) {
+    if (/^\s*(```|~~~)/.test(line)) { inFence = !inFence; continue; }
+    if (inFence) continue;
+    CITATION_RE.lastIndex = 0;
+    if (CITATION_RE.test(line)) return true;
+  }
+  return false;
+}
+
+function reportFootnoteMixed(src) {
+  const hasFn = hasFootnoteRefInBody(src.text);
+  const hasDisplay = hasDisplayCitationInBody(src.text);
+  if (hasFn && hasDisplay) {
+    console.log(`[FOOTNOTE-MIXED] ${src.name} —— 同时存在脚注引用与展示引用（path:line），出处机制应二选一（脚注 或 章末依据行），不得并存`);
+  }
+}
+
 // —— 引用密度自查（--stats）：只报告，不校验、不阻断 ——
 function stripNonBody(text) {
   // 去掉围栏代码块与 HTML 注释（锚点指纹属元数据，不计入正文密度），保留行号结构。
@@ -454,6 +492,7 @@ async function main() {
   }
 
   for (const src of sources) {
+    reportFootnoteMixed(src);
     const citations = parseCitations(src.text);
     totalCitations += citations.length;
     if (citations.length === 0) {
