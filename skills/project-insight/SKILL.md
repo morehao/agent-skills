@@ -1,6 +1,6 @@
 ---
 name: project-insight
-description: 开源项目深度解读：以技术解构和设计判断为主，代码引用按需使用（不是每个论断都要给出处），但凡给出的引用都可点开验证。当用户要求"分析、解读、洞察、深读、总结某个开源项目"、问"这个项目怎么实现的、值得学什么"时使用。输入通常是本地源码绝对路径，也可接受远端地址（自动按稳定 tag / 稳定分支选定基线后克隆，而非默认分支）。Also applies when the user asks to "analyze / examine / break down / deep-dive an open-source project", "how is this implemented", or "what's worth learning from this repo".
+description: 开源项目深度解读：以技术解构与设计权衡为主，代码引用按需、凡引用必可点开验证，产出偏「为什么这样设计、值得学什么」。当用户要求「分析、解读、洞察、深读某个开源项目」或问「这个项目怎么实现的、值得学什么」时使用；输入通常是本地源码绝对路径，也接受远端地址（自动按稳定 tag / 稳定分支选基线后克隆），英文场景如 "analyze / deep-dive an open-source project"。需要为不读源码的读者写 Wiki/新人指南用 project-wiki，写方案文档用 tech-design。
 ---
 
 # 开源项目洞察
