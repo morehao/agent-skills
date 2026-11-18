@@ -11,7 +11,7 @@
 //   note   作者侧口径，或程序判不了、只有人能判的事           → **任何模式下都是 0**，但默认打印（不静默）
 //
 // 它只做「机械那半」：占位符、空壳章节、缺状态块、无备选、追溯缺列、DDL 与正文两说、
-// 按章节缺图与档位最小图集。「这条 Rule 是否真可执行」「边界是否合理」这类语义判断归
+// 按章节缺图与档位最小图集、挑战点缺失或超量。「这条 Rule 是否真可执行」「边界是否合理」这类语义判断归
 // references/review-gate.md 的评审者，不在这里猜——假阳性会让门禁被弃用。
 //
 // 行号对齐（BMAD lint_spine 的做法）：扫描前把 fenced code block 换成**等量空行**，
@@ -52,14 +52,16 @@ const RULES = [
   ['TD-OPTION', 'error', '缺备选章节，或备选里没有「不做/维持现状/否决」'],
   ['TD-TRACE', 'error', '缺决策↔需求追溯表，或某行缺承接需求/验证手段'],
   ['TD-TRACE-UPSTREAM', 'warn', '承接需求编号在上游文档里找不到'],
+  ['TD-TRACE-CHALLENGE', 'error', '追溯表缺「挑战点」列、某行挑战点为空/无法核对，或挑战点没有决策承接'],
   ['TD-TIER', 'note', '未指定 --tier 时按结构推断的档位（轻量只跳过追溯表；图按章节与最小图集照查）'],
-  ['TD-TIER-STRUCTURE', 'warn', '--tier full 却缺完整档必备章节（摘要/部署/安全/可观测/成本）'],
+  ['TD-TIER-STRUCTURE', 'warn', '--tier full 却缺完整档必备章节（摘要/部署/安全/可观测/成本；可写「章节豁免：<理由>」收口）'],
   ['TD-GOAL-ANTI', 'warn', '目标与非目标缺少「反目标」（做成了也算失败的情形）'],
+  ['TD-CHALLENGE', 'warn', '缺「挑战点」章节（可写「挑战点豁免：<理由>」显式收口），或超过 3 条 / 标准档及以上未编号'],
   ['TD-DDL-MISMATCH', 'warn', '附录 DDL 与正文字段表不一致（列名/类型/可空/默认值/索引）'],
   ['TD-MARKER', 'note', '[待核实]/[待澄清]/[假设] 的收口提醒'],
   ['TD-MARKER-UNCOLLECTED', 'warn', '有未定记号，但没有开放问题/假设与约束章节'],
-  ['TD-SILENT-LIST', 'warn', '标准档及以上缺少「方案沉默清单」'],
-  ['TD-KNOWN-GAP', 'warn', '标准档及以上缺少「已知未覆盖」章节'],
+  ['TD-SILENT-LIST', 'warn', '标准档及以上缺少「方案沉默清单」（可写「章节豁免：<理由>」收口）'],
+  ['TD-KNOWN-GAP', 'warn', '标准档及以上缺少「已知未覆盖」章节（可写「章节豁免：<理由>」收口）'],
 ];
 
 // ———————————————————————————— 参数 ————————————————————————————
@@ -254,7 +256,10 @@ const OPTION_HEAD_RE = /备选|选型对比|方案对比/;
 const OPTION_KEYWORD_RE = /不做|不实施|不引入|不采用|不选|维持现状|保持现状|保持当前|维持当前|沿用现状|保留现状|现状不动|否决|放弃/;
 const TRACE_HEAD_RE = /决策/;
 const TRACE_NEED_COL_RE = /承接需求|需求|目标/;
+const TRACE_CHALLENGE_COL_RE = /挑战点|难点/;
 const TRACE_VERIFY_COL_RE = /验证/;
+const STANDARD_PRACTICE_RE = /标准做法|标准答案|常规做法|^(无|不适用|—|-|\/)$/;
+const CHALLENGE_ID_RE = /\bC\d{1,2}\b/gi;
 
 function checkStatusBlock(scanLines, offset) {
   const idx = scanLines.findIndex((l) => /^>\s*\**\s*状态\s*[:：]/.test(l));
@@ -301,7 +306,7 @@ function checkShellSections(rawLines, headings, offset) {
     } else if (body.length === 0) {
       report('warn', 'TD-SECTION-EMPTY', offset + headings[k].line + 1,
         `章节「${headings[k].text}」没有正文`);
-    } else if (body.length < 2 && headings[k].level >= 2) {
+    } else if (body.length < 2 && headings[k].level >= 2 && !CHALLENGE_HEAD_RE.test(headings[k].text)) {
       thin.push({ line: headings[k].line + 1, text: headings[k].text });
     }
   }
@@ -420,16 +425,112 @@ function checkGoalAnti(scanLines, headings, offset) {
   }
 }
 
-/** 标准档及以上的两个易漏章节：方案沉默清单、已知未覆盖 */
-function checkTierSections(headings, tier) {
-  if (tier === 'light') return;
-  if (!headings.some((h) => /沉默清单/.test(h.text))) {
-    report('warn', 'TD-SILENT-LIST', 1,
-      '标准档及以上缺少「方案沉默清单」——方案没提、线上一定会遇到、遇到就出事的输入/状态');
+/** 显式豁免：写「章节豁免：<理由>」即收口（理由必须写实，占位符与「无/略」这类敷衍不算）。
+ *  一条豁免可覆盖多个类目，类目名在括号前用顿号分隔——「章节豁免：成本、部署（纯文档变更）」两节都收；
+ *  括号里的理由不参与类目匹配（否则理由提到「监控」会误豁免可观测性）。 */
+const SECTION_EXEMPT_RE = /^[\s>]*(?:[-*+]\s+)?(?:\*\*)?章节豁免\s*[:：]\s*(?:\*\*)?\s*(.+)/;
+const EXEMPT_ALIASES = {
+  摘要: /摘要|TL;?DR/i,
+  部署与资源拓扑: /部署|资源拓扑/,
+  安全设计: /安全/,
+  可观测性设计: /可观测|监控|告警/,
+  成本分析: /成本/,
+  方案沉默清单: /沉默清单/,
+  已知未覆盖: /未覆盖/,
+};
+/** 理由要写实：拒绝占位符、空白与「无/略/不适用」这类敷衍；去格式字符后至少 6 个字符 */
+function plausibleReason(reason) {
+  const r = (reason || '').trim();
+  if (!r || /^[<＜]/.test(r)) return false;
+  if (/^(无|略|暂无|没有|不适用|n\/a)[。.!！]?$/i.test(r)) return false;
+  return r.replace(/[`*_\s（）()]/g, '').length >= 6;
+}
+function exemptionText(scanLines) {
+  const parts = [];
+  for (const line of scanLines) {
+    const m = line.normalize('NFKC').match(SECTION_EXEMPT_RE);
+    if (!m) continue;
+    if (!plausibleReason(m[1])) continue;
+    parts.push(m[1]);
   }
-  if (!headings.some((h) => /已知未覆盖|未覆盖/.test(h.text))) {
+  return parts.join('\n');
+}
+function isSectionExempt(exemptText, key) {
+  const re = EXEMPT_ALIASES[key];
+  if (!re || !exemptText) return false;
+  return exemptText.split('\n').some((line) => re.test(line.split(/[（(]/)[0]));
+}
+
+// 「挑战点」是收敛器：1–3 个真难点，其余是标准做法。门禁只查「有没有 / 是否超量 / 是否有编号」；
+// 难点是否成立、是否命中四信号，归 quality-bar 表一与 review-gate 第 2 段第 0 步判断。
+const CHALLENGE_HEAD_RE = /挑战点|难点|核心挑战|关键挑战|设计挑战|主要挑战/;
+const CHALLENGE_EXEMPT_RE = /^[\s>]*(?:[-*+]\s+)?(?:\*\*)?挑战点豁免\s*[:：]\s*(?:\*\*)?\s*(.*)$/;
+const TOP_BULLET_RE = /^(?:[-*+]|\d+[.)、])\s+\S/;
+/** 行首 C 编号：子标题 / 顶格列表 / 表格首格 / 行首；正文中间提到的「C4 模型」不算声明 */
+const CHALLENGE_ID_LINE_RE = /^(?:#{2,6}\s+|[-*+]\s+|\d+[.)]\s+|\|\s*)?[>*_\s]*(C\d{1,2})\b/;
+
+/** 全文是否存在「挑战点豁免：<理由>」；理由敷衍不算 */
+function challengeExempt(scanLines) {
+  for (const line of scanLines) {
+    const m = line.normalize('NFKC').match(CHALLENGE_EXEMPT_RE);
+    if (m && plausibleReason(m[1])) return true;
+  }
+  return false;
+}
+
+/** 从「挑战点」一节抽出 C 编号；只认行首声明（子标题 / 顶格列表 / 表格首格），fence 已置空 */
+function challengeIds(scanLines, headings) {
+  const idx = headings.findIndex((h) => h.level >= 2 && CHALLENGE_HEAD_RE.test(h.text));
+  if (idx < 0) return new Set();
+  const ids = new Set();
+  for (const m of headings[idx].text.normalize('NFKC').matchAll(/\bC\d{1,2}\b/gi)) ids.add(m[0].toUpperCase());
+  const [from, to] = sectionRange(headings, idx, scanLines.length);
+  for (let i = from; i < to; i += 1) {
+    const m = scanLines[i].normalize('NFKC').match(CHALLENGE_ID_LINE_RE);
+    if (m) ids.add(m[1].toUpperCase());
+  }
+  return ids;
+}
+
+function checkChallenge(scanLines, headings, offset, tier) {
+  const idx = headings.findIndex((h) => h.level >= 2 && CHALLENGE_HEAD_RE.test(h.text));
+  if (idx < 0) {
+    if (challengeExempt(scanLines)) return;
+    const hint = tier === 'light'
+      ? '轻量档也要写一句：这个改动难在哪（命中四信号之一）、其余为什么是标准做法。一句都写不出，按「小需求停止规则」直接给改动清单，不要写这份文档'
+      : '标准档及以上必须列出 1–3 个真难点（约束冲突 / 数量级跨越 / 所有权不清 / 失败不可逆），其余标「按标准做法」；确认没有设计取舍就别写方案';
+    report('warn', 'TD-CHALLENGE', 1, `缺「挑战点」章节——${hint}`);
+    return;
+  }
+  const ids = challengeIds(scanLines, headings);
+  let count = ids.size;
+  if (!count) {
+    const [from, to] = sectionRange(headings, idx, scanLines.length);
+    for (let i = from; i < to; i += 1) {
+      const line = scanLines[i];
+      if (/其余|标准做法/.test(line)) break;
+      if (TOP_BULLET_RE.test(line)) count += 1;
+    }
+  }
+  if (count > 3) {
+    report('warn', 'TD-CHALLENGE', offset + headings[idx].line + 1,
+      `「挑战点」列了 ${count} 条，超过 3 条——第 4 条起基本是标准做法或该拆下一版；收敛到 1–3 个，其余标「按标准做法」并给依据`);
+  }
+  if (tier !== 'light' && ids.size === 0) {
+    report('warn', 'TD-CHALLENGE', offset + headings[idx].line + 1,
+      '「挑战点」没有编号（C1…Cn）——标准档及以上要编号，追溯表才能核对「挑战点 → 决策」承接');
+  }
+}
+
+function checkTierSections(headings, tier, exemptText) {
+  if (tier === 'light') return;
+  if (!headings.some((h) => /沉默清单/.test(h.text)) && !isSectionExempt(exemptText, '方案沉默清单')) {
+    report('warn', 'TD-SILENT-LIST', 1,
+      '标准档及以上缺少「方案沉默清单」——方案没提、线上一定会遇到、遇到就出事的输入/状态（确无新输入面可写 `章节豁免：<理由>`）');
+  }
+  if (!headings.some((h) => /已知未覆盖|未覆盖/.test(h.text)) && !isSectionExempt(exemptText, '已知未覆盖')) {
     report('warn', 'TD-KNOWN-GAP', 1,
-      '标准档及以上缺少「已知未覆盖」——明确知道本期不解决的缺口');
+      '标准档及以上缺少「已知未覆盖」——明确知道本期不解决的缺口（确无缺口可写 `章节豁免：<理由>`）');
   }
 }
 
@@ -441,12 +542,14 @@ const FULL_SECTIONS = [
   { key: '可观测性设计', re: /可观测|监控|告警/ },
   { key: '成本分析', re: /成本/ },
 ];
-function checkTierStructure(headings, tier, explicit) {
+function checkTierStructure(headings, tier, explicit, exemptText) {
   if (tier !== 'full' || !explicit) return;
-  const missing = FULL_SECTIONS.filter((s) => !headings.some((h) => s.re.test(h.text))).map((s) => s.key);
+  const missing = FULL_SECTIONS
+    .filter((s) => !headings.some((h) => s.re.test(h.text)) && !isSectionExempt(exemptText, s.key))
+    .map((s) => s.key);
   if (!missing.length) return;
   report('warn', 'TD-TIER-STRUCTURE', 1,
-    `--tier full 但缺少完整档必备章节：${missing.join('、')}（章节可重命名，但语义要有承载；确不需要请显式豁免并写理由）`);
+    `--tier full 但缺少完整档必备章节：${missing.join('、')}（章节可重命名，但语义要有承载；确不需要写「章节豁免：<理由>」显式收口）`);
 }
 
 /** 空话风控：出现即返工的那几句 */
@@ -477,23 +580,51 @@ function checkOptions(scanLines, headings, offset) {
   }
 }
 
-function checkTrace(scanLines, offset, tier, upstreamTokens) {
+/** 追溯表判定：必须同时有「决策」列（可带 ID/编号 或括号说明）与「承接需求/目标」列，
+ *  避免把「决策目标 | 负责人」这类前置表当成追溯表；所有候选表都查，不只第一张。 */
+const TRACE_DECISION_COL_RE = /^决策(\s*(ID|编号))?(\s*[（(][^）)]*[）)])?$/i;
+function isTraceTable(t) {
+  const header = t.header.map((h) => h.normalize('NFKC').trim());
+  return header.some((h) => TRACE_DECISION_COL_RE.test(h)) && header.some((h) => TRACE_NEED_COL_RE.test(h));
+}
+
+function checkTrace(scanLines, offset, tier, upstreamTokens, declaredChallenges, challengeIsExempt) {
   if (tier === 'light') return;
-  const tables = findTables(scanLines);
-  const trace = tables.find((t) => {
-    const joined = t.header.join(' ');
-    return TRACE_HEAD_RE.test(joined) && TRACE_NEED_COL_RE.test(joined);
-  });
-  if (!trace) {
+  const traces = findTables(scanLines).filter(isTraceTable);
+  if (!traces.length) {
     report('error', 'TD-TRACE', offset + 1,
-      '缺少「决策 ↔ 需求」追溯表（决策 ID / 承接需求 / 备选 / 验证手段 / 状态 / 置信度），见 references/templates.md');
+      '缺少「决策 ↔ 需求」追溯表（决策 ID / 决策 / 挑战点 / 承接需求 / 备选 / 验证手段 / 状态 / 置信度），见 references/templates.md');
     return;
   }
-  const verifyCol = trace.header.findIndex((h) => TRACE_VERIFY_COL_RE.test(h));
+  const referenced = new Set();
+  let hasChallengeCol = false;
+  for (const trace of traces) {
+    if (checkOneTrace(offset, trace, upstreamTokens, declaredChallenges, challengeIsExempt, referenced)) {
+      hasChallengeCol = true;
+    }
+  }
+  if (!challengeIsExempt && declaredChallenges.size && hasChallengeCol) {
+    for (const id of declaredChallenges) {
+      if (!referenced.has(id)) {
+        report('error', 'TD-TRACE-CHALLENGE', offset + traces[0].start + 1,
+          `挑战点 ${id} 没有任何决策承接——孤儿挑战点：补一个决策，或删掉它 / 收进「已知未覆盖」`);
+      }
+    }
+  }
+}
+
+function checkOneTrace(offset, trace, upstreamTokens, declaredChallenges, challengeIsExempt, referenced) {
+  const header = trace.header.map((h) => h.normalize('NFKC').trim());
+  const challengeCol = header.findIndex((h) => TRACE_CHALLENGE_COL_RE.test(h));
+  if (!challengeIsExempt && challengeCol < 0) {
+    report('error', 'TD-TRACE-CHALLENGE', offset + trace.start + 1,
+      '追溯表缺「挑战点」列——每个决策要能回指它服务哪个挑战点（C1/C2…），纯标准做法的决策写「标准做法」；没有这一列，「两成设计」和「八成抄作业」就分不开');
+  }
+  const verifyCol = header.findIndex((h) => TRACE_VERIFY_COL_RE.test(h));
   if (verifyCol < 0) {
     report('error', 'TD-TRACE', offset + trace.start + 1, '追溯表缺「验证手段」列：决策没有验证手段等于没有验收');
   }
-  const needCol = trace.header.findIndex((h) => TRACE_NEED_COL_RE.test(h));
+  const needCol = header.findIndex((h) => TRACE_NEED_COL_RE.test(h));
   for (const row of trace.rows) {
     if (row.cells.every((c) => !c)) continue;
     if (needCol >= 0 && !row.cells[needCol]) {
@@ -501,6 +632,28 @@ function checkTrace(scanLines, offset, tier, upstreamTokens) {
     }
     if (verifyCol >= 0 && !row.cells[verifyCol]) {
       report('error', 'TD-TRACE', offset + row.line + 1, '该决策行「验证手段」为空——决策无法验收');
+    }
+    if (!challengeIsExempt && challengeCol >= 0 && declaredChallenges.size) {
+      const cell = (row.cells[challengeCol] || '').normalize('NFKC').trim();
+      if (!cell) {
+        report('error', 'TD-TRACE-CHALLENGE', offset + row.line + 1,
+          '该决策行「挑战点」为空——写它服务的 C 编号，或标「标准做法」');
+      } else {
+        const ids = [...cell.matchAll(/\bC\d{1,2}\b/gi)].map((m) => m[0].toUpperCase());
+        if (ids.length) {
+          for (const id of ids) {
+            if (!declaredChallenges.has(id)) {
+              report('error', 'TD-TRACE-CHALLENGE', offset + row.line + 1,
+                `「挑战点」列写了 ${id}，但「挑战点」一节没有这个编号——编号漂移，回指不到具体难点`);
+            } else {
+              referenced.add(id);
+            }
+          }
+        } else if (!STANDARD_PRACTICE_RE.test(cell)) {
+          report('error', 'TD-TRACE-CHALLENGE', offset + row.line + 1,
+            '「挑战点」列要写 C 编号（对应「挑战点」一节）或「标准做法」——自由文本无法核对承接关系');
+        }
+      }
     }
     if (upstreamTokens.size && needCol >= 0) {
       const refs = (row.cells[needCol] || '').match(/[A-Z]{1,4}-\d+/g) || [];
@@ -512,8 +665,8 @@ function checkTrace(scanLines, offset, tier, upstreamTokens) {
       }
     }
   }
+  return challengeCol >= 0;
 }
-
 /** 归一化 DDL/正文里的类型文本：去反引号、压空格、大写 */
 function normType(s) {
   return (s || '').replace(/[`*]/g, '').replace(/\s+/g, ' ').trim().toUpperCase();
@@ -851,6 +1004,7 @@ for (const target of targets) {
     report('note', 'TD-TIER', 1,
       `未指定 --tier，按结构推断为「${tier}」；档位只影响机械检查范围（light 只跳过追溯表，图按章节与最小图集照查），语义义务按所选档位由评审 gate 覆盖`);
   }
+  const exemptText = exemptionText(scan);
 
   checkStatusBlock(scan, offset);
   checkPlaceholders(scan, offset);
@@ -862,12 +1016,16 @@ for (const target of targets) {
   checkVague(scan, offset);
   checkGoalNumbers(scan, offset);
   checkGoalAnti(scan, headings, offset);
+  checkChallenge(scan, headings, offset, tier);
   checkEmptyPhrases(scan, offset);
   checkNumbers(scan, offset);
   checkOptions(scan, headings, offset);
-  checkTrace(scan, offset, tier, upstreamTokens);
-  checkTierStructure(headings, tier, explicitTier);
-  checkTierSections(headings, tier);
+  const declaredChallenges = challengeIds(scan, headings);
+  const hasChallengeSection = headings.some((h) => h.level >= 2 && CHALLENGE_HEAD_RE.test(h.text));
+  const challengeIsExempt = !hasChallengeSection && challengeExempt(scan);
+  checkTrace(scan, offset, tier, upstreamTokens, declaredChallenges, challengeIsExempt);
+  checkTierStructure(headings, tier, explicitTier, exemptText);
+  checkTierSections(headings, tier, exemptText);
   checkDdl(scan, body, headings, offset);
   checkMarkers(scan, offset);
 }

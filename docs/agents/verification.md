@@ -30,13 +30,23 @@ node skills/tech-design/scripts/tests/check-design-doc-test.mjs
 
 退出码：`0` 全部断言通过 / `1` 有断言失败。
 
-这个测试守的是门禁脚本本身：合规文档必须通过、**故意违规必须被拦住**（缺状态块、残留 `TBD`、`N/A` 空壳章节、备选无「不做」、缺追溯表、DDL 与正文两说、**按章节缺图与档位最小图集**）、`--strict` 只提升 warn、`note` 在任何模式下都不阻断、`--tier light` 只免追溯表（图照查）。夹具在 `skills/tech-design/scripts/tests/fixtures/`，其中 `good-full.md`（含 Mermaid 时序/ER 与同目录 `architecture.svg`）同时是「高质量完整档」的可参照样例。
+这个测试守的是门禁脚本本身：合规文档必须通过、**故意违规必须被拦住**（缺状态块、残留 `TBD`、`N/A` 空壳章节、备选无「不做」、缺追溯表、DDL 与正文两说、缺挑战点或挑战点超量、追溯表缺「挑战点」列/孤儿挑战点/多表漏查、**按章节缺图与档位最小图集**）；`章节豁免：<理由>` 能显式收口且抄占位符不算、`--strict` 只提升 warn、`note` 在任何模式下都不阻断、`--tier light` 只免追溯表（图照查）。夹具在 `skills/tech-design/scripts/tests/fixtures/`，其中 `good-full.md`（含 Mermaid 时序/ER 与同目录 `architecture.svg`）同时是「高质量完整档」的可参照样例。
 
 改了 `check-design-doc.mjs` 的规则或严重度，必须同步改夹具与断言——夹具不跟着改，等于把门禁调松而不自知。
 
 规则与严重度的**唯一清单**用 `node skills/tech-design/scripts/check-design-doc.mjs --list-rules` 查；文档里不抄枚举，回归测试会断言清单与源码里 `report()` 发出的码一一对应。
 
-`skills/tech-design/scripts/tests/behavior/baseline.md` 是**人工行为回归**（要跑模型，不进 CI）：技能新增或大改后按其中 B1–B5 场景复跑，把新出现的偷懒话术追加到 `references/anti-rationalization.md`。
+`skills/tech-design/scripts/tests/behavior/baseline.md` 是**人工行为回归**（要跑模型，不进 CI）：技能新增或大改后按其中 B1–B6 场景复跑，把新出现的偷懒话术追加到 `references/anti-rationalization.md`。
+
+### 门禁规则准入（所有脚本通用）
+
+新规则按同一套门槛进，防止「加规则」成为质量问题的默认答案：
+
+1. **先 warn 一版**：至少经过一次真实交付；**error 只给「文档自相矛盾」**（缺列/空值/引用不存在的编号/孤儿关系），且必须能在 10 分钟内修完。判不了「写得好不好」的事不进 error。
+2. **三类夹具**：正例（应通过）、负例（应拦住）、边界（嵌套/表格/fence/全角/诱饵表/多表）缺一不可；只测「正规模板形态」等于没测。
+3. **不做语义代理**：门禁只判确定性结构，不判「难点是否成立 / 方案好不好」；语义判断归 review gate。
+4. **规模红线**：单脚本规则数接近 30 条时停止扩张——误报与维护成本线性上升、收益递减；质量改进转投 rubric 与 lens。
+5. **升级要留痕**：warn→error 必须在 CHANGELOG 写 `### Breaking` + 迁移步骤，并同步下游技能（如 tech-design-research）。
 
 ## disk-cleanup：编码契约 / 删除安全 / 回归测试
 
