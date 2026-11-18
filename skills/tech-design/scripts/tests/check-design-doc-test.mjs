@@ -216,6 +216,109 @@ const edgeStandard = join(fixtures, 'edge-standard.md');
   ok('标准档低于最小图集报 TD-DIAGRAM-MIN', stdCodes.includes('TD-DIAGRAM-MIN'), std.out);
 }
 
+// ⑬ 挑战点：缺失与超量都要报（收敛器是硬要求，不是可选章节）
+{
+  const miss = run([join(fixtures, 'challenge-missing.md'), '--tier', 'light', '--json']);
+  let missCodes = [];
+  try { missCodes = JSON.parse(miss.out).findings.map((f) => f.code); } catch { /* 断言会失败 */ }
+  ok('缺「挑战点」章节被检出', missCodes.includes('TD-CHALLENGE'), miss.out);
+
+  const over = run([join(fixtures, 'challenge-overflow.md'), '--tier', 'light', '--json']);
+  let overFindings = [];
+  try { overFindings = JSON.parse(over.out).findings.filter((f) => f.code === 'TD-CHALLENGE'); } catch { /* 断言会失败 */ }
+  ok('挑战点超过 3 条被检出', overFindings.length === 1 && /超过 3 条/.test(overFindings[0].msg), over.out);
+}
+
+// ⑭ 章节豁免：与「图豁免」同一约定——写理由才算收口，抄占位符不算
+{
+  const r = run([join(fixtures, 'section-exempt.md'), '--tier', 'full', '--json']);
+  let codes = [];
+  try { codes = JSON.parse(r.out).findings.map((f) => f.code); } catch { /* 断言会失败 */ }
+  ok('「章节豁免：<理由>」能收口完整档必备章节', !codes.includes('TD-TIER-STRUCTURE'), r.out);
+  ok('「章节豁免：<理由>」能收口沉默清单 / 已知未覆盖',
+    !codes.includes('TD-SILENT-LIST') && !codes.includes('TD-KNOWN-GAP'), r.out);
+
+  const ph = run([join(fixtures, 'section-exempt-placeholder.md'), '--tier', 'full', '--json']);
+  let phCodes = [];
+  try { phCodes = JSON.parse(ph.out).findings.map((f) => f.code); } catch { /* 断言会失败 */ }
+  ok('豁免理由原样抄占位符不算收口', phCodes.includes('TD-TIER-STRUCTURE'), ph.out);
+}
+
+// ⑮ 追溯表「挑战点」列：强制列 + 双向核对（引用未声明 / 空 / 孤儿挑战点）
+{
+  const miss = run([join(fixtures, 'trace-challenge-missing.md'), '--tier', 'standard', '--json']);
+  let missFindings = [];
+  try { missFindings = JSON.parse(miss.out).findings.filter((f) => f.code === 'TD-TRACE-CHALLENGE'); } catch { /* 断言会失败 */ }
+  ok('追溯表缺「挑战点」列被检出', missFindings.length === 1 && /缺「挑战点」列/.test(missFindings[0].msg), miss.out);
+
+  const bad = run([join(fixtures, 'trace-challenge-bad.md'), '--tier', 'standard', '--json']);
+  let badMsgs = [];
+  try {
+    badMsgs = JSON.parse(bad.out).findings.filter((f) => f.code === 'TD-TRACE-CHALLENGE').map((f) => f.msg);
+  } catch { /* 断言会失败 */ }
+  const joined = badMsgs.join('\n');
+  ok('追溯表引用未声明的挑战点编号被检出', /C3/.test(joined) && /没有这个编号/.test(joined), bad.out);
+  ok('追溯表挑战点列为空被检出', /为空/.test(joined), bad.out);
+  ok('孤儿挑战点（无决策承接）被检出', /孤儿挑战点/.test(joined), bad.out);
+}
+
+// ⑯ 挑战点：豁免 / 嵌套不误报 / 编号超量
+{
+  const ex = run([join(fixtures, 'challenge-exempt.md'), '--tier', 'light', '--json']);
+  let codes = [];
+  try { codes = JSON.parse(ex.out).findings.map((f) => f.code); } catch { /* 断言会失败 */ }
+  ok('「挑战点豁免：<理由>」可收口缺失章节', !codes.includes('TD-CHALLENGE'), ex.out);
+
+  const nested = run([join(fixtures, 'challenge-nested.md'), '--tier', 'light', '--json']);
+  let nf = [];
+  try { nf = JSON.parse(nested.out).findings.filter((f) => f.code === 'TD-CHALLENGE'); } catch { /* 断言会失败 */ }
+  ok('嵌套子项与「其余按标准做法」清单不算超量', nf.length === 0, nested.out);
+
+  const ids = run([join(fixtures, 'challenge-overflow-ids.md'), '--tier', 'light', '--json']);
+  let idf = [];
+  try { idf = JSON.parse(ids.out).findings.filter((f) => f.code === 'TD-CHALLENGE'); } catch { /* 断言会失败 */ }
+  ok('C 编号写法的挑战点超量被检出', idf.length === 1 && /超过 3 条/.test(idf[0].msg), ids.out);
+}
+
+// ⑰ 追溯表边界：正文 / fence 里的 C4 不算声明、多表都查、未编号只 warn
+{
+  const edge = run([join(fixtures, 'trace-challenge-edge.md'), '--tier', 'standard', '--json']);
+  let codes = [];
+  try { codes = JSON.parse(edge.out).findings.map((f) => f.code); } catch { /* 断言会失败 */ }
+  ok('正文「C4 模型」与 fence 内 C4 不误判为挑战点',
+    !codes.includes('TD-TRACE-CHALLENGE') && !codes.includes('TD-CHALLENGE'), edge.out);
+
+  const second = run([join(fixtures, 'trace-challenge-second.md'), '--tier', 'standard', '--json']);
+  let sm = [];
+  try { sm = JSON.parse(second.out).findings.filter((f) => f.code === 'TD-TRACE-CHALLENGE').map((f) => f.msg); } catch { /* 断言会失败 */ }
+  ok('第二张追溯表的空挑战点也被检出', sm.some((m) => /为空/.test(m)), second.out);
+
+  const un = run([join(fixtures, 'challenge-unnumbered.md'), '--tier', 'standard', '--json']);
+  let ucodes = [];
+  let um = [];
+  try {
+    const p = JSON.parse(un.out).findings;
+    ucodes = p.map((f) => f.code);
+    um = p.filter((f) => f.code === 'TD-CHALLENGE').map((f) => f.msg);
+  } catch { /* 断言会失败 */ }
+  ok('挑战点未编号是 warn 且不触发追溯表 error',
+    um.some((m) => /没有编号/.test(m)) && !ucodes.includes('TD-TRACE-CHALLENGE'), un.out);
+}
+
+// ⑱ 章节豁免：类目不因理由文本越界，敷衍理由不算收口
+{
+  const scope = run([join(fixtures, 'section-exempt-scope.md'), '--tier', 'full', '--json']);
+  let tf = [];
+  try { tf = JSON.parse(scope.out).findings.filter((f) => f.code === 'TD-TIER-STRUCTURE').map((f) => f.msg); } catch { /* 断言会失败 */ }
+  ok('豁免理由里的「监控」不会连带豁免可观测性',
+    tf.length === 1 && /可观测性设计/.test(tf[0]) && !/安全设计/.test(tf[0]), scope.out);
+
+  const lazy = run([join(fixtures, 'section-exempt-lazy.md'), '--tier', 'full', '--json']);
+  let lf = [];
+  try { lf = JSON.parse(lazy.out).findings.filter((f) => f.code === 'TD-TIER-STRUCTURE').map((f) => f.msg); } catch { /* 断言会失败 */ }
+  ok('「章节豁免：成本分析 无」不算有效收口', lf.some((m) => /成本分析/.test(m)), lazy.out);
+}
+
 // ———————————————————————————— 汇总 ————————————————————————————
 
 if (failures) {
