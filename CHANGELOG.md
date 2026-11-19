@@ -4,6 +4,12 @@
 
 本文件只记**本仓**变更，跟随里程碑 tag（`vX.Y.Z`，无 npm 制品）；未打 tag 的改动直接看 `git log`。
 
+## [Unreleased]
+
+### Changed
+
+- **resume-griller**: 答案水位**领域化**——新增 `references/domains.md`（领域判定三信号、电商/直播/教育/IoT/LLM/支付六个领域的风险与必答机制、通用 vs 领域对照），每条示范答案至少带一个领域后果；新增 `references/orchestration.md`（多 agent 只按领域拆、不按题拆）；SKILL 收料步与答案步同步
+
 ## [v0.6.3] - 2026-11-19
 
 ### Changed
