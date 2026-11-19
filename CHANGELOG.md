@@ -4,6 +4,12 @@
 
 本文件只记**本仓**变更，跟随里程碑 tag（`vX.Y.Z`，无 npm 制品）；未打 tag 的改动直接看 `git log`。
 
+## [v0.6.1] - 2026-11-19
+
+### Changed
+
+- **tech-design**: 「配图下限」补回逐节义务的指向说明——SKILL 正文只剩张数下限后，明确「标准档有数据模型章节须给简版 ER 图、跨方交互须给时序图；完整档系统上下文须有图」按 `references/templates.md` 各档骨架与 `references/quality-bar.md` 表一 #13/#14 执行。只加指向不搬条文，避免与 templates/quality-bar 形成重复真源；不改门禁
+
 ## [Unreleased]
 
 ### Breaking
