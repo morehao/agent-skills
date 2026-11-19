@@ -13,7 +13,7 @@ git clone git@github.com:morehao/agent-skills.git && cd agent-skills
 
 # ① 发布技能到本源（改完本仓、push 之后都要跑）
 npx -y skills add morehao/agent-skills --skill git-kit --skill handoff --skill disk-cleanup \
-  --skill project-insight --skill project-wiki --skill tech-design --skill resume-interview -g -a universal -y
+  --skill project-insight --skill project-wiki --skill tech-design --skill resume-griller -g -a universal -y
 
 # ② 分发软链：本源 -> opencode / dsh 的技能目录
 ./scripts/skills-fanout.sh
@@ -35,7 +35,7 @@ node scripts/check-opencode-commands.mjs
 ## 目录
 
 - `commands-opencode/` — opencode 斜杠指令（`git/*.md` + `handoff.md` + `cleanup.md`）
-- `skills/` — 技能：git-kit、handoff、project-insight、project-wiki、tech-design、tech-design-research、resume-interview、disk-cleanup
+- `skills/` — 技能：git-kit、handoff、project-insight、project-wiki、tech-design、tech-design-research、resume-griller、disk-cleanup
 - `docs/` — 安装、技能、git-kit 工作流
 - `scripts/` — 分发（`skills-fanout.sh`）+ opencode / dsh 接入 + 命令契约校验（技能发布用 `skills` CLI，见下）
 
@@ -68,7 +68,7 @@ node scripts/check-opencode-commands.mjs
 | [`project-wiki`](skills/project-wiki/SKILL.md) | 面向不读源码的读者写 Wiki：散文 + 图 + 表，代码密度极低 |
 | [`tech-design`](skills/tech-design/SKILL.md) | 技术方案：先定 1–3 个挑战点，再用档位 × 场景 × 专题三轴组织，取证先于动笔；含既有文档评审模式 |
 | [`tech-design-research`](skills/tech-design-research/SKILL.md) | 调研驱动的技术方案：先对标开源实现取证，再用 tech-design 骨架写第一版 |
-| [`resume-interview`](skills/resume-interview/SKILL.md) | 应聘者简历 → 面试官手册：题源取证、四级答案锚点、评分与面评草稿 |
+| [`resume-griller`](skills/resume-griller/SKILL.md) | 应聘者简历 → 面试官手册：题源取证、四级答案锚点、评分与面评草稿 |
 | [`disk-cleanup`](skills/disk-cleanup/SKILL.md) | 磁盘空间回收与本地数据瘦身：先查询、用户勾选后只删所选，用户数据只报告 |
 
 > 配图另用**外部技能** [`diagram-design`](https://github.com/cathrynlavery/diagram-design)（45 种图型，HTML + 内联 SVG）：本仓不 vendor、不改它，按上游方式自行安装。

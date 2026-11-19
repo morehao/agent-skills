@@ -3,7 +3,7 @@
  * check-interview-doc.mjs 回归测试。
  *
  * 断言四类：合规文档必须通过（含合规变体）、故意违规必须被拦住、软项按严重度分档、note 永不阻断。
- * 跑法：node skills/resume-interview/scripts/tests/check-interview-doc-test.mjs
+ * 跑法：node skills/resume-griller/scripts/tests/check-interview-doc-test.mjs
  * 退出码：0 全通过 / 1 有断言失败。
  */
 
@@ -96,7 +96,7 @@ expect(
 );
 
 console.log('\n结构缺失');
-expect('缺元数据块', GOOD.replace(/<!-- resume-interview[\s\S]*?-->\n\n/, ''), [], 1, ['RI-META']);
+expect('缺元数据块', GOOD.replace(/<!-- resume-griller[\s\S]*?-->\n\n/, ''), [], 1, ['RI-META']);
 expect('元数据缺 minutes', GOOD.replace('minutes: 60', 'minutes: 未定'), [], 1, ['RI-META']);
 expect('元数据 level 非法', GOOD.replace('level: 中级', 'level: 资深'), [], 1, ['RI-META']);
 expect('缺「面试后」段落', GOOD.split('## 面试后')[0], [], 1, ['RI-SECTION']);

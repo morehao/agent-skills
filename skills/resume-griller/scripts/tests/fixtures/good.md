@@ -1,4 +1,4 @@
-<!-- resume-interview
+<!-- resume-griller
 candidate: 张三
 role: 后端工程师
 level: 中级

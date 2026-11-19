@@ -101,9 +101,9 @@
 
 **重新评估的触发条件**：笔记公开为团队规范、或由多人共同维护时，再讨论是否建立自动化同步。
 
-## 2026-11-19 · resume-interview 自建，不把外部简历面试技能接成依赖
+## 2026-11-19 · resume-griller 自建，不把外部简历面试技能接成依赖
 
-**结论**：本仓自建 `resume-interview`（面试官视角、Markdown 产物、零运行时依赖），不安装、不 vendor 外部同类技能。
+**结论**：本仓自建 `resume-griller`（面试官视角、Markdown 产物、零运行时依赖），不安装、不 vendor 外部同类技能。
 
 **背景**：2026-11-19 调研发现生态里有直接对口物：[resume-grill](https://github.com/JinChengZ18/resume-grill)（MIT，1 star，本月仍在更新）、[interview-skills](https://github.com/jennifer88huang/interview-skills)（408 stars，**无 LICENSE**）、[anthropics/knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins) 的 `interview-prep`（通用能力项模板，不读简历）与 `hiring-screener`（HR 漏斗，产出不是面试题）。
 
@@ -120,6 +120,8 @@
 **按五条判据的理由**：归属——「什么问题值得问、听到什么算过」是面试方法论，该由我们拥有；许可证——自建 MIT，不搬任何第三方代码；依赖——纯 Markdown + 一个零依赖 Node 门禁，不要求 PDF 库（读不出就让用户粘文本）；分发——技能是文件，装得上；可观测——`RI-*` 规则码 + `--strict` + 52 条断言，坏了能定位到行。
 
 **与外部实现的有意差异**：答案键允许缺口（`〔待补充：…〕`）但不允许虚构；每题必须回指简历原文并给位置；评分锚点与判定规则写死，面试后要改标准必须在手册里写明改了什么、为什么。**（2026-11-19 已落地：`SKILL.md` + 3 份 references + 门禁与回归测试，CI `contract` job。）**
+
+**命名**：技能名定为 `resume-griller`（用户选定）。它与生态里的 `resume-grill` 只差一个字母，容易撞车；选择保留的理由是「拷打」在本土面试语境里是高频说法，可用 description 的触发短语「拷打候选人」接住搜索，同时用「求职者改简历 / 模拟面试对练不走本技能」把考生场景挡在外面。**代价**：名字偏「找茬」气质，与「题源取证 + 按锚点评分」的中性立场不一致，介绍时要主动解释。
 
 **重新评估的触发条件**：
 

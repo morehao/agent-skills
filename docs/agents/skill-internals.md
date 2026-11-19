@@ -86,7 +86,7 @@ references：`templates.md`（**叙事链 10 问与顺序依赖** + 三档骨架
 
 与相邻技能边界（**窄触发，避免与 tech-design 误触**）：本技能与 `tech-design` 功能重叠（是其超集），故入口收窄——**仅当用户明确表达「调研/参考开源/对标业界/符合主流」时才进本技能**，否则一律 `tech-design`；tech-design 的 description 里也加了反向指路。只解读单个项目源码 → `project-insight`；只要独立图表 → `diagram-design`。
 
-## resume-interview
+## resume-griller
 
 面试官侧：简历 → 面试手册（Markdown）。`SKILL.md` = 六条铁律 + 0→5 工作流；细节在 `references/`（`question-design.md` 选题来源与深度阶梯、`answer-and-scoring.md` 四级锚点与判定、`handbook-format.md` 骨架与门禁契约）。
 

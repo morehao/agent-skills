@@ -22,10 +22,10 @@ node scripts/check-opencode-commands.mjs --dsh ../dsh-commands   # 顺带比对�
 
 新增/修改命令的完整步骤见 [安装与维护](../installation.md) 的「新增或修改命令」。
 
-## resume-interview 手册门禁回归
+## resume-griller 手册门禁回归
 
 ```bash
-node skills/resume-interview/scripts/tests/check-interview-doc-test.mjs
+node skills/resume-griller/scripts/tests/check-interview-doc-test.mjs
 ```
 
 退出码：`0` 全部断言通过 / `1` 有断言失败。
@@ -34,12 +34,12 @@ node skills/resume-interview/scripts/tests/check-interview-doc-test.mjs
 
 `meta.level` 是 ★ 的判据：初级/中级须标 3，高级/架构须标 4，缺省时跳过这项校验。
 
-规则与严重度的唯一清单用 `node skills/resume-interview/scripts/check-interview-doc.mjs --list-rules` 查；改规则要同步 `references/handbook-format.md` 的结构约束表与 `scripts/tests/fixtures/good.md`。
+规则与严重度的唯一清单用 `node skills/resume-griller/scripts/check-interview-doc.mjs --list-rules` 查；改规则要同步 `references/handbook-format.md` 的结构约束表与 `scripts/tests/fixtures/good.md`。
 
-## resume-interview 题源核验回归
+## resume-griller 题源核验回归
 
 ```bash
-node skills/resume-interview/scripts/tests/verify-sources-test.mjs
+node skills/resume-griller/scripts/tests/verify-sources-test.mjs
 ```
 
 退出码：`0` 全部断言通过 / `1` 有断言失败。守的是：逐字命中通过；改数字、编造句子必须 `SRC-MISS`；`「前段 ... 后段」` 按段核验；插入一个噪声字只报 `SRC-NEAR`；题源没有引文判失败；缺 `--resume` 与文件不存在都 `exit 2`。

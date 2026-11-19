@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * resume-interview 手册结构门禁。
+ * resume-griller 手册结构门禁。
  *
  * 用法：
  *   node check-interview-doc.mjs <手册.md>...
@@ -103,7 +103,7 @@ function markCodeLines(lines) {
 }
 
 function splitFrontMatter(lines) {
-  if (lines.length === 0 || !/^<!--\s*resume-interview\s*$/.test(lines[0].trim())) {
+  if (lines.length === 0 || !/^<!--\s*resume-griller\s*$/.test(lines[0].trim())) {
     return { meta: null, metaEndLine: 0 };
   }
   const meta = new Map();
@@ -175,7 +175,7 @@ function parseAnchors(text) {
 function checkMeta(findings, file, lines) {
   const { meta } = splitFrontMatter(lines);
   if (!meta) {
-    findings.add('RI-META', file, 1, '缺元数据块（`<!-- resume-interview` … `-->`）');
+    findings.add('RI-META', file, 1, '缺元数据块（`<!-- resume-griller` … `-->`）');
     return { minutes: null, level: null, metaEndLine: 0 };
   }
   for (const key of ['candidate', 'minutes', 'date']) {

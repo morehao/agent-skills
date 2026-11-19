@@ -1,9 +1,9 @@
 ---
-name: resume-interview
-description: 从候选人简历生成面试官手册：把简历里的工作技能与项目经验拆成可核验的事实链，按项目出深挖问题，每题带「要听的点」（4 级锚点、★及格线）、口语化示范答案、危险信号与追问时机，最后给评分表与面评草稿。触发：「根据简历出面试题」「分析这份简历」「准备面试」「面试手册」「从简历出题」，或直接把简历文件丢过来要面试材料。求职者改简历/写简历、模拟面试对练、只有 JD 没有简历的通用题库都不走本技能。
+name: resume-griller
+description: 从候选人简历生成面试官手册：把简历里的工作技能与项目经验拆成可核验的事实链，按项目出深挖问题，每题带「要听的点」（4 级锚点、★及格线）、口语化示范答案、危险信号与追问时机，最后给评分表与面评草稿。触发：「根据简历出面试题」「分析这份简历」「准备面试」「面试手册」「从简历出题」「拷打候选人」，或直接把简历文件丢过来要面试材料。求职者改简历/写简历、模拟面试对练、只有 JD 没有简历的通用题库都不走本技能。
 ---
 
-# Resume Interview（简历 → 面试问题与答案键）
+# Resume Griller（简历拷打 → 面试问题与答案键）
 
 一份手册只回答三件事：**简历上写了什么**（可核验的事实）、**哪些地方必须当面问穿**（选题）、**听到什么才算过**（答案键与锚点）。其它内容一律删掉。
 
@@ -61,8 +61,8 @@ description: 从候选人简历生成面试官手册：把简历里的工作技�
 ### 5 门禁与交付
 
 ```bash
-node skills/resume-interview/scripts/check-interview-doc.mjs <手册.md> --strict
-node skills/resume-interview/scripts/verify-sources.mjs <手册.md> --resume <slug>.resume.txt
+node skills/resume-griller/scripts/check-interview-doc.mjs <手册.md> --strict
+node skills/resume-griller/scripts/verify-sources.mjs <手册.md> --resume <slug>.resume.txt
 ```
 
 `0 error / 0 warn`、且题源核验 0 条 `SRC-MISS` 才交付；`--list-rules` 查规则与严重度。门禁会核对 ★ 与 `level` 是否一致、时间表与每题时长是否对得上、围栏里的示例是否被误当题目——这三处都踩过坑。改文档而不是改门禁——门禁只判结构自洽，题目好不好归自检清单（[选题设计](references/question-design.md) 末节）。

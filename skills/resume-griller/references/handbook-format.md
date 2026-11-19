@@ -29,7 +29,7 @@
 元数据块必须在文件最前，字段 `key: value`，缺 `candidate` / `minutes` / `date` 判 error。
 
 ```markdown
-<!-- resume-interview
+<!-- resume-griller
 candidate: 张三
 role: 后端工程师
 level: 中级
@@ -161,10 +161,10 @@ resume: 张三-后端-2026.pdf
 ## 门禁用法
 
 ```bash
-node skills/resume-interview/scripts/check-interview-doc.mjs <手册.md>...          # 0 = 无 error
-node skills/resume-interview/scripts/check-interview-doc.mjs <手册.md> --strict   # warn 也阻断
-node skills/resume-interview/scripts/check-interview-doc.mjs --list-rules         # 规则清单
-node skills/resume-interview/scripts/verify-sources.mjs <手册.md> --resume <简历清洗稿.txt>  # 题源是否真在原文
+node skills/resume-griller/scripts/check-interview-doc.mjs <手册.md>...          # 0 = 无 error
+node skills/resume-griller/scripts/check-interview-doc.mjs <手册.md> --strict   # warn 也阻断
+node skills/resume-griller/scripts/check-interview-doc.mjs --list-rules         # 规则清单
+node skills/resume-griller/scripts/verify-sources.mjs <手册.md> --resume <简历清洗稿.txt>  # 题源是否真在原文
 ```
 
 退出码：`0` 通过（可含 warn/note，`--strict` 下仅 note）/ `1` 有 error / `2` 用法错误或文件读不到。

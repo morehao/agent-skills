@@ -3,7 +3,7 @@
  * verify-sources.mjs 回归测试。
  *
  * 断言：逐字命中通过、编造/篡改必须失败、省略写法按段核验、噪声只报近似、用法错误退出 2。
- * 跑法：node skills/resume-interview/scripts/tests/verify-sources-test.mjs
+ * 跑法：node skills/resume-griller/scripts/tests/verify-sources-test.mjs
  */
 
 import { spawnSync } from 'node:child_process';
