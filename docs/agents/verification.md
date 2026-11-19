@@ -22,6 +22,18 @@ node scripts/check-opencode-commands.mjs --dsh ../dsh-commands   # 顺带比对�
 
 新增/修改命令的完整步骤见 [安装与维护](../installation.md) 的「新增或修改命令」。
 
+## resume-interview 手册门禁回归
+
+```bash
+node skills/resume-interview/scripts/tests/check-interview-doc-test.mjs
+```
+
+退出码：`0` 全部断言通过 / `1` 有断言失败。
+
+守的是：合规手册在默认与 `--strict` 下都通过；故意违规必须被拦住（缺元数据、缺段、无题源、题源无引用、缺 ★、题目超时、覆盖表引用不存在的题号、未收口 TODO、题号重复）；软项按严重度处理（四档不全 / 答案过短 / 缺危险信号是 warn，仅 `--strict` 阻断；缺追问与占位符是 note，任何模式都不阻断）。
+
+规则与严重度的唯一清单用 `node skills/resume-interview/scripts/check-interview-doc.mjs --list-rules` 查；改规则要同步 `references/handbook-format.md` 的结构约束表与 `scripts/tests/fixtures/good.md`。
+
 ## tech-design 文档门禁回归
 
 ```bash

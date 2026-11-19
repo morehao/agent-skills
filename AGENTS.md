@@ -58,7 +58,7 @@
 
 - `commands-opencode/` — git 斜杠指令 + `handoff.md` + `cleanup.md`，都是**委托壳**：只加载对应技能并按意图执行，不含逻辑。
 - `scripts/` — `skills-fanout.sh`（本源 → 各 agent 软链）、`opencode-install.sh` / `dsh-install.sh`（各工具接入）、`check-opencode-commands.mjs`（命令契约校验）。技能发布用 `skills` CLI（本仓不再提供 `skills-install.sh`）。
-- `skills/` — git-kit、handoff、project-insight、project-wiki、tech-design、tech-design-research、disk-cleanup，逐个详见 [技能内部规则](docs/agents/skill-internals.md)。配图技能 `diagram-design` 是**外部依赖**（上游 cathrynlavery/diagram-design，本仓不 vendor、不改），按上游方式自装。
+- `skills/` — git-kit、handoff、project-insight、project-wiki、tech-design、tech-design-research、resume-interview、disk-cleanup，逐个详见 [技能内部规则](docs/agents/skill-internals.md)。配图技能 `diagram-design` 是**外部依赖**（上游 cathrynlavery/diagram-design，本仓不 vendor、不改），按上游方式自装。
 - `docs/` — 给人看的解释性文档；`docs/agents/` 是 agent 的按需加载细则。
 
 ## 常用命令
