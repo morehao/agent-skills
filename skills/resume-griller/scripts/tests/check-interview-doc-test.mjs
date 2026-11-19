@@ -86,6 +86,22 @@ console.log('合规文档与合规变体');
   check('围栏里的 ## 不截断段落', r.status === 0, r.out.split('\n').pop());
 }
 
+{
+  const r = run(`---\ntags: [面试]\nstatus: 待面\n---\n\n${GOOD}`, ['--strict']);
+  check('YAML frontmatter 不影响元数据识别', r.status === 0, r.out.split('\n').pop());
+}
+{
+  const moved = GOOD.replace('### Q3 P99', '## 备用题\n\n### Q3 P99');
+  const r = run(moved, ['--strict']);
+  check('备用题段落里的题也算题目', r.status === 0, r.out.split('\n').pop());
+}
+{
+  const headingOnly = GOOD.replace(/^- 优先级：.*$/gm, '').replace(/^- 时长：.*$/gm, '').replace(/^- 时间表：.*$/m, '')
+    .replace(/^### (Q\d) (.*)$/gm, (m, id, title) => `### ${id}【必问 · 5′】${title}`);
+  const r = run(headingOnly);
+  check('标题里写优先级与时长也认', r.status === 0 && !r.out.includes('[RI-TIME-FIELD]') && !r.out.includes('[RI-PRIORITY]'));
+}
+
 console.log('\n围栏与解析边界');
 expect(
   '题目只写在围栏里不算题目',
@@ -164,6 +180,14 @@ expect(
 expect('覆盖行无题号也无豁免', GOOD.replace('| 团队管理 | 覆盖豁免：简历无带人经历，不编题 |', '| 团队管理 | — |'), [], 0, ['RI-COVERAGE-BARE']);
 expect('覆盖核对无数据行', GOOD.replace(/\| 简历里的技能[\s\S]*?(?=## 面试后)/, '只有一句话，没有表。\n\n'), [], 1, ['RI-COVERAGE']);
 expect('缺维度评分表只记 warn', GOOD.replace(/^\| 维度 \|.*$/gm, ''), [], 0, ['RI-DIM']);
+{
+  const compact = GOOD.replace(
+    /\| 维度 \| 4 \| 3 \| 2 \| 1 \| 权重 \|[\s\S]*?\n\n/,
+    '| 维度 | 权重 | 得分 |\n|---|---:|---:|\n| 技术深度 | 30% |  |\n\n- 锚点：4 独立判断；3 做法 + 理由；2 只能复述；1 概念错误。\n\n',
+  );
+  const r = run(compact, ['--strict']);
+  check('紧凑维度表 + 锚点行也合规', r.status === 0, r.out.split('\n').pop());
+}
 expect('缺判定规则只记 warn', GOOD.replace(/^- 判定：.*$/m, ''), [], 0, ['RI-VERDICT']);
 
 console.log('\n未收口记号与占位符');

@@ -102,14 +102,23 @@ function markCodeLines(lines) {
   return mask;
 }
 
-function splitFrontMatter(lines) {
-  if (lines.length === 0 || !/^<!--\s*resume-griller\s*$/.test(lines[0].trim())) {
-    return { meta: null, metaEndLine: 0 };
+function findMeta(lines) {
+  let i = 0;
+  // 允许 YAML frontmatter（Obsidian 的 tags/status），它不属于本技能的元数据块。
+  if (/^---\s*$/.test(lines[0] ?? '')) {
+    for (let j = 1; j < lines.length; j += 1) {
+      if (/^---\s*$/.test(lines[j])) {
+        i = j + 1;
+        break;
+      }
+    }
   }
+  while (i < lines.length && lines[i].trim() === '') i += 1;
+  if (!/^<!--\s*resume-griller\s*$/.test(lines[i] ?? '')) return { meta: null, metaEndLine: 0 };
   const meta = new Map();
-  for (let i = 1; i < lines.length; i += 1) {
-    if (/^-->\s*$/.test(lines[i].trim())) return { meta, metaEndLine: i + 1 };
-    const match = /^([A-Za-z][\w-]*)\s*[:：]\s*(.*)$/.exec(lines[i].trim());
+  for (let j = i + 1; j < lines.length; j += 1) {
+    if (/^-->\s*$/.test(lines[j].trim())) return { meta, metaEndLine: j + 1 };
+    const match = /^([A-Za-z][\w-]*)\s*[:：]\s*(.*)$/.exec(lines[j].trim());
     if (match) meta.set(match[1].toLowerCase(), match[2].trim());
   }
   return { meta, metaEndLine: 0 };
@@ -162,6 +171,16 @@ function parseQuestions(lines, section, codeMask) {
   return hits;
 }
 
+/** 题目可以分布在「面试」与「备用题」两个段落。 */
+function collectQuestions(lines, sections, codeMask) {
+  const out = [];
+  for (const name of ['面试', '备用题']) {
+    const section = sectionByName(sections, name);
+    if (section) out.push(...parseQuestions(lines, section, codeMask));
+  }
+  return out.sort((a, b) => a.num - b.num || a.line - b.line);
+}
+
 /** 锚点必须按行写：`- ★ 3：…` / `- 4：…`，允许顶格或缩进。 */
 function parseAnchors(text) {
   const anchors = [];
@@ -173,7 +192,7 @@ function parseAnchors(text) {
 }
 
 function checkMeta(findings, file, lines) {
-  const { meta } = splitFrontMatter(lines);
+  const { meta, metaEndLine } = findMeta(lines);
   if (!meta) {
     findings.add('RI-META', file, 1, '缺元数据块（`<!-- resume-griller` … `-->`）');
     return { minutes: null, level: null, metaEndLine: 0 };
@@ -195,7 +214,7 @@ function checkMeta(findings, file, lines) {
   return {
     minutes: Number.isFinite(minutes) && minutes > 0 && minutes <= 480 ? minutes : null,
     level: LEVELS.includes(level) ? level : null,
-    metaEndLine: splitFrontMatter(lines).metaEndLine,
+    metaEndLine,
   };
 }
 
@@ -232,13 +251,15 @@ function checkQuestions(findings, file, questions, minutes, level) {
     if (!q.fields.get('考点')) findings.add('RI-POINT', file, q.line, `${id} 缺 \`考点\``);
 
     const timeField = q.fields.get('时长');
-    const minutesMatch = timeField ? /(\d+(?:\.\d+)?)\s*分/.exec(timeField.value) : null;
-    if (!timeField || !minutesMatch) {
-      findings.add('RI-TIME-FIELD', file, q.line, `${id} 缺可解析的 \`时长：N 分钟\``);
+    const headingMinutes = /(\d+)\s*[′'分]/.exec(q.title)?.[1];
+    const timeSource = timeField ? timeField.value : headingMinutes ? `${headingMinutes} 分钟` : '';
+    const minutesMatch = timeSource ? /(\d+(?:\.\d+)?)\s*分/.exec(timeSource) : null;
+    if (!minutesMatch) {
+      findings.add('RI-TIME-FIELD', file, q.line, `${id} 缺可解析的时长（字段或标题里的「9′」）`);
     } else {
       durations.set(q.num, Number(minutesMatch[1]));
       total += Number(minutesMatch[1]);
-      const tag = (q.fields.get('优先级')?.value ?? '').trim();
+      const tag = (q.fields.get('优先级')?.value ?? '').trim() || /【\s*(必问|选问|备用)/.exec(q.title)?.[1] || '';
       if (!tag.startsWith('备用')) planned += Number(minutesMatch[1]);
     }
 
@@ -273,9 +294,10 @@ function checkQuestions(findings, file, questions, minutes, level) {
     }
 
     const priority = q.fields.get('优先级');
-    const priorityText = priority ? priority.value.trim() : '';
+    const headingPriority = /【\s*(必问|选问|备用)/.exec(q.title)?.[1] ?? '';
+    const priorityText = (priority ? priority.value.trim() : '') || headingPriority;
     if (!priorityText) {
-      findings.add('RI-PRIORITY', file, q.line, `${id} 缺 \`优先级：必问 / 选问\``);
+      findings.add('RI-PRIORITY', file, q.line, `${id} 缺优先级（字段或标题里的【必问/选问/备用】）`);
     } else if (!PRIORITIES.some((p) => priorityText.startsWith(p))) {
       findings.add('RI-PRIORITY', file, priority.line, `${id} 优先级需以「必问」或「选问」开头：${priorityText}`);
     } else if (priorityText.startsWith('必问')) {
@@ -378,8 +400,9 @@ function checkAfter(findings, file, lines, section) {
     findings.add('RI-DIM', file, section.line, '「面试后」缺维度评分表');
   } else {
     const header = body[headerIndex];
-    if (!/4/.test(header) || !/1/.test(header)) {
-      findings.add('RI-DIM', file, section.line, '维度评分表缺 4 / 1 档列');
+    const hasAnchorLine = body.some((l) => /^-\s*锚点[：:]/.test(l.trim()));
+    if ((!/4/.test(header) || !/1/.test(header)) && !hasAnchorLine) {
+      findings.add('RI-DIM', file, section.line, '维度评分表缺 4 / 1 档列，也没有 `锚点：` 行');
     }
   }
   if (!body.some((l) => /^-\s*判定.*[：:]/.test(l.trim()))) {
@@ -442,14 +465,12 @@ function checkFile(file, findings) {
     if (!preFields.get('时间表')) findings.add('RI-PRE-SOFT', file, pre.line, '「面试前」缺 `时间表：`');
   }
 
-  const interview = sectionByName(sections, '面试');
+  const questions = collectQuestions(lines, sections, codeMask);
   let questionNums = new Set();
   let durations = new Map();
-  if (interview) {
-    const questions = parseQuestions(lines, interview, codeMask);
-    if (!questions.length) {
-      findings.add('RI-QUESTION', file, interview.line, '「面试」段落里没有 `### Q<编号>` 题目');
-    }
+  if (!questions.length) {
+    findings.add('RI-QUESTION', file, 1, '没有 `### Q<编号>` 题目（「面试」或「备用题」段落里都没有）');
+  } else {
     questionNums = new Set(questions.map((q) => q.num));
     ({ durations } = checkQuestions(findings, file, questions, minutes, level));
     checkSchedule(findings, file, lines, pre, questions, durations, minutes);
