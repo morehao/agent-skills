@@ -36,6 +36,7 @@ const RULES = [
   ['RI-ANSWER-SHORT', 'warn', '`示范答案` 少于 60 字'],
   ['RI-FLAG', 'warn', '题目缺 `危险信号`'],
   ['RI-FOLLOWUP', 'note', '题目没有追问（可选）'],
+  ['RI-PRIORITY', 'warn', '题目缺 `优先级：必问 / 选问`，或整份手册没有一道必问题'],
   ['RI-BUDGET', 'error', '各题时长合计超过面试时长，或与时间表不一致'],
   ['RI-BUDGET-LOW', 'warn', '各题时长合计不足面试时长的 60%'],
   ['RI-COVERAGE', 'error', '「覆盖核对」缺失、无表格或无数据行'],
@@ -49,6 +50,7 @@ const RULES = [
 
 const SEVERITY = new Map(RULES.map(([code, sev]) => [code, sev]));
 const REQUIRED_SECTIONS = ['面试前', '面试', '覆盖核对', '面试后'];
+const PRIORITIES = ['必问', '选问'];
 const LEVELS = ['初级', '中级', '高级', '架构'];
 const PLACEHOLDER_RE = /〔(待补充|待补|假设)[:：]/g;
 const TODO_RE = /\b(TODO|TBD|FIXME)\b/;
@@ -205,6 +207,7 @@ function expectedStarLevel(level) {
 
 function checkQuestions(findings, file, questions, minutes, level) {
   let total = 0;
+  let must = 0;
   const seen = new Set();
   const durations = new Map();
   for (const q of questions) {
@@ -266,8 +269,21 @@ function checkQuestions(findings, file, questions, minutes, level) {
       findings.add('RI-ANSWER-SHORT', file, answer.line, `${id} 示范答案不足 60 字`);
     }
 
+    const priority = q.fields.get('优先级');
+    const priorityText = priority ? priority.value.trim() : '';
+    if (!priorityText) {
+      findings.add('RI-PRIORITY', file, q.line, `${id} 缺 \`优先级：必问 / 选问\``);
+    } else if (!PRIORITIES.some((p) => priorityText.startsWith(p))) {
+      findings.add('RI-PRIORITY', file, priority.line, `${id} 优先级需以「必问」或「选问」开头：${priorityText}`);
+    } else if (priorityText.startsWith('必问')) {
+      must ++;
+    }
     if (!q.fields.get('危险信号')) findings.add('RI-FLAG', file, q.line, `${id} 缺 \`危险信号\``);
     if (!q.fields.get('追问')) findings.add('RI-FOLLOWUP', file, q.line, `${id} 无追问（可选）`);
+  }
+
+  if (questions.length && must === 0) {
+    findings.add('RI-PRIORITY', file, questions[0].line, '整份手册没有一道标记为「必问」的题');
   }
 
   if (questions.length) {
@@ -306,6 +322,14 @@ function checkSchedule(findings, file, lines, pre, questions, durations, minutes
   const totalMatch = /合计\s*(\d+)\s*[′'分]/.exec(schedule.value);
   if (totalMatch && minutes && Number(totalMatch[1]) !== minutes) {
     findings.add('RI-BUDGET', file, schedule.line, `时间表合计 ${totalMatch[1]}′ ≠ meta.minutes ${minutes}`);
+  }
+  const short = preFields.get('短版');
+  if (short) {
+    for (const [, num] of short.value.matchAll(/Q(\d+)/g)) {
+      if (![...durations.keys()].includes(Number(num))) {
+        findings.add('RI-COVERAGE-REF', file, short.line, `短版引用 Q${num}，但手册里没有这道题`);
+      }
+    }
   }
 }
 

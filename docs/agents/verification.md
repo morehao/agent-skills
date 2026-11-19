@@ -36,6 +36,16 @@ node skills/resume-interview/scripts/tests/check-interview-doc-test.mjs
 
 规则与严重度的唯一清单用 `node skills/resume-interview/scripts/check-interview-doc.mjs --list-rules` 查；改规则要同步 `references/handbook-format.md` 的结构约束表与 `scripts/tests/fixtures/good.md`。
 
+## resume-interview 题源核验回归
+
+```bash
+node skills/resume-interview/scripts/tests/verify-sources-test.mjs
+```
+
+退出码：`0` 全部断言通过 / `1` 有断言失败。守的是：逐字命中通过；改数字、编造句子必须 `SRC-MISS`；`「前段 ... 后段」` 按段核验；插入一个噪声字只报 `SRC-NEAR`；题源没有引文判失败；缺 `--resume` 与文件不存在都 `exit 2`。
+
+数字守卫是独立于编辑距离的一道闸：`75% → 90%` 只差 2 个字符，会被模糊匹配放过，所以引文里的多位数必须单独在原文中存在，否则直接 `SRC-MISS`。
+
 ## tech-design 文档门禁回归
 
 ```bash

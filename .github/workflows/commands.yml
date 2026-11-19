@@ -37,6 +37,9 @@ jobs:
       - name: resume-interview 手册门禁回归
         run: node skills/resume-interview/scripts/tests/check-interview-doc-test.mjs
 
+      - name: resume-interview 题源核验回归
+        run: node skills/resume-interview/scripts/tests/verify-sources-test.mjs
+
       - name: 脚本语法（安装脚本 + 技能脚本）
         run: |
           files=$(find scripts skills -name '*.sh' -type f | sort)

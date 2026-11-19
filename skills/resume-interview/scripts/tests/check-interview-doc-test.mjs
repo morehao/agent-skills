@@ -138,6 +138,9 @@ expect('缺危险信号只记 warn', GOOD.replace(/^- 危险信号：.*$/m, ''),
 expect('缺追问只记 note', GOOD.replace(/^- 追问：.*$/m, ''), [], 0, ['RI-FOLLOWUP']);
 expect('题号重复', GOOD.replace('### Q3 P99', '### Q1 P99'), [], 1, ['RI-DUP']);
 expect('时长无法解析', GOOD.replace('- 时长：18 分钟', '- 时长：看情况'), [], 1, ['RI-TIME-FIELD']);
+expect('缺优先级只记 warn', GOOD.replace(/^- 优先级：.*$/gm, ''), [], 0, ['RI-PRIORITY']);
+expect('优先级取值非法', GOOD.replace('- 优先级：必问', '- 优先级：重点'), [], 0, ['RI-PRIORITY']);
+expect('短版引用不存在的题号', GOOD.replace('- 短版：40 分钟只问 Q1、Q3', '- 短版：40 分钟只问 Q1、Q9'), [], 1, ['RI-COVERAGE-REF']);
 
 console.log('\n预算、时间表与覆盖');
 expect('题目超时', GOOD.replace('- 时长：18 分钟', '- 时长：40 分钟'), [], 1, ['RI-BUDGET']);
@@ -177,7 +180,7 @@ console.log('\n命令行契约');
 {
   const r = spawnSync(process.execPath, [SCRIPT, '--list-rules'], { encoding: 'utf8' });
   const lines = r.stdout.split('\n').filter((l) => /^RI-[A-Z-]+\s+(error|warn|note)\s/.test(l));
-  check('--list-rules 列全 30 条且带严重度', r.status === 0 && lines.length === 30, `实际 ${lines.length} 条`);
+  check('--list-rules 列全 31 条且带严重度', r.status === 0 && lines.length === 31, `实际 ${lines.length} 条`);
 }
 {
   const r = spawnSync(process.execPath, [SCRIPT], { encoding: 'utf8' });
