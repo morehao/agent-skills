@@ -36,7 +36,7 @@ const RULES = [
   ['RI-ANSWER-SHORT', 'warn', '`示范答案` 少于 60 字'],
   ['RI-FLAG', 'warn', '题目缺 `危险信号`'],
   ['RI-FOLLOWUP', 'note', '题目没有追问（可选）'],
-  ['RI-PRIORITY', 'warn', '题目缺 `优先级：必问 / 选问`，或整份手册没有一道必问题'],
+  ['RI-PRIORITY', 'warn', '题目缺 `优先级：必问 / 选问 / 备用`，或整份手册没有一道必问题'],
   ['RI-BUDGET', 'error', '各题时长合计超过面试时长，或与时间表不一致'],
   ['RI-BUDGET-LOW', 'warn', '各题时长合计不足面试时长的 60%'],
   ['RI-COVERAGE', 'error', '「覆盖核对」缺失、无表格或无数据行'],
@@ -50,7 +50,7 @@ const RULES = [
 
 const SEVERITY = new Map(RULES.map(([code, sev]) => [code, sev]));
 const REQUIRED_SECTIONS = ['面试前', '面试', '覆盖核对', '面试后'];
-const PRIORITIES = ['必问', '选问'];
+const PRIORITIES = ['必问', '选问', '备用'];
 const LEVELS = ['初级', '中级', '高级', '架构'];
 const PLACEHOLDER_RE = /〔(待补充|待补|假设)[:：]/g;
 const TODO_RE = /\b(TODO|TBD|FIXME)\b/;
@@ -207,6 +207,7 @@ function expectedStarLevel(level) {
 
 function checkQuestions(findings, file, questions, minutes, level) {
   let total = 0;
+  let planned = 0;
   let must = 0;
   const seen = new Set();
   const durations = new Map();
@@ -237,6 +238,8 @@ function checkQuestions(findings, file, questions, minutes, level) {
     } else {
       durations.set(q.num, Number(minutesMatch[1]));
       total += Number(minutesMatch[1]);
+      const tag = (q.fields.get('优先级')?.value ?? '').trim();
+      if (!tag.startsWith('备用')) planned += Number(minutesMatch[1]);
     }
 
     const listen = q.fields.get('要听的点');
@@ -276,7 +279,7 @@ function checkQuestions(findings, file, questions, minutes, level) {
     } else if (!PRIORITIES.some((p) => priorityText.startsWith(p))) {
       findings.add('RI-PRIORITY', file, priority.line, `${id} 优先级需以「必问」或「选问」开头：${priorityText}`);
     } else if (priorityText.startsWith('必问')) {
-      must ++;
+      must += 1;
     }
     if (!q.fields.get('危险信号')) findings.add('RI-FLAG', file, q.line, `${id} 缺 \`危险信号\``);
     if (!q.fields.get('追问')) findings.add('RI-FOLLOWUP', file, q.line, `${id} 无追问（可选）`);
@@ -298,13 +301,13 @@ function checkQuestions(findings, file, questions, minutes, level) {
   }
 
   if (minutes && total > 0) {
-    if (total > minutes) {
-      findings.add('RI-BUDGET', file, questions[0].line, `题目合计 ${total} 分钟 > 面试时长 ${minutes} 分钟`);
-    } else if (total < minutes * 0.6) {
-      findings.add('RI-BUDGET-LOW', file, questions[0].line, `题目合计 ${total} 分钟，不足 ${minutes} 分钟的 60%`);
+    if (planned > minutes) {
+      findings.add('RI-BUDGET', file, questions[0].line, `必问+选问合计 ${planned} 分钟 > 面试时长 ${minutes} 分钟（备用不计）`);
+    } else if (planned < minutes * 0.6) {
+      findings.add('RI-BUDGET-LOW', file, questions[0].line, `必问+选问合计 ${planned} 分钟，不足 ${minutes} 分钟的 60%`);
     }
   }
-  return { total, durations };
+  return { total, planned, durations };
 }
 
 function checkSchedule(findings, file, lines, pre, questions, durations, minutes) {

@@ -141,6 +141,8 @@ expect('时长无法解析', GOOD.replace('- 时长：18 分钟', '- 时长：�
 expect('缺优先级只记 warn', GOOD.replace(/^- 优先级：.*$/gm, ''), [], 0, ['RI-PRIORITY']);
 expect('优先级取值非法', GOOD.replace('- 优先级：必问', '- 优先级：重点'), [], 0, ['RI-PRIORITY']);
 expect('短版引用不存在的题号', GOOD.replace('- 短版：40 分钟只问 Q1、Q3', '- 短版：40 分钟只问 Q1、Q9'), [], 1, ['RI-COVERAGE-REF']);
+expect('备用题不占预算', GOOD.replace('- 优先级：选问（时间富余）', '- 优先级：备用').replace('- 时长：20 分钟', '- 时长：40 分钟').replace(/^- 时间表：.*$/m, ''), [], 0, []);
+expect('全部备用只记 warn', GOOD.replace(/- 优先级：(必问|选问（时间富余）)/g, '- 优先级：备用'), [], 0, ['RI-PRIORITY']);
 
 console.log('\n预算、时间表与覆盖');
 expect('题目超时', GOOD.replace('- 时长：18 分钟', '- 时长：40 分钟'), [], 1, ['RI-BUDGET']);

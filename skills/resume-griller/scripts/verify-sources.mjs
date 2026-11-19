@@ -55,7 +55,8 @@ function locate(quote, haystack) {
     if (!haystack.includes(n)) return { verdict: 'MISS', distance: Infinity, note: `数字 ${n} 不在原文` };
   }
   if (len < 6) return { verdict: 'MISS', distance: Infinity, note: '引文过短，无法核验' };
-  const tolerance = Math.max(2, Math.floor(len * 0.08));
+  // 短句给 3–4 字余量（PDF 水印会在句中插字），长句封顶 8 字，避免把改写当噪声放过。
+  const tolerance = Math.min(8, Math.max(3, Math.ceil(len * 0.12)));
   const anchors = [Math.floor(len / 2), 0, Math.max(0, len - 10)].map((start) =>
     quote.slice(start, Math.min(len, start + 10)),
   );
@@ -72,9 +73,14 @@ function locate(quote, haystack) {
       from = at + 1;
       const offset = quote.indexOf(anchor);
       const start = Math.max(0, at - offset);
-      const window = haystack.slice(start, start + len + 8);
-      best = Math.min(best, levenshtein(quote, window.slice(0, len)));
-      if (best === 0) return { verdict: 'OK', distance: 0 };
+      // 锚点前面可能被水印插了字，导致起点偏移；在 ±4 字内滑窗取最小距离。
+      for (let shift = -4; shift <= 4; shift += 1) {
+        const from = start + shift;
+        if (from < 0) continue;
+        const window = haystack.slice(from, from + len + 8);
+        best = Math.min(best, levenshtein(quote, window.slice(0, len)));
+        if (best === 0) return { verdict: 'OK', distance: 0 };
+      }
     }
   }
   if (best <= tolerance) return { verdict: 'NEAR', distance: best, tolerance };
