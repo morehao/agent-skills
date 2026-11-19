@@ -95,7 +95,7 @@ function extractQuotes(value) {
     const segments = match[1]
       .split(/\.{3,}|…+/)
       .map((s) => s.trim())
-      .filter((s) => normalize(s).length >= 4);
+      .filter((s) => normalize(s).length >= 6);
     quotes.push(...segments);
   }
   return quotes;
