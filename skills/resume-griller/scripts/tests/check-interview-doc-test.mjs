@@ -62,7 +62,7 @@ console.log('合规文档与合规变体');
   check('good.md 默认模式 0 note', r.status === 0 && r.out.includes('0 note'));
 }
 {
-  const r = run(GOOD.replace(/^  - /gm, '- '));
+  const r = run(GOOD.replace(/^  - (★?\s*[4321])：/gm, '- $1：'));
   check('锚点顶格写也算合规', r.status === 0, r.out.split('\n').pop());
 }
 {
@@ -149,7 +149,7 @@ expect(
 );
 expect('缺要听的点', GOOD.replace(/(^- 要听的点：[\s\S]*?)(?=^- 示范答案：)/m, ''), [], 1, ['RI-LISTEN']);
 expect('缺示范答案', GOOD.replace(/^- 示范答案：.*$/m, ''), [], 1, ['RI-ANSWER']);
-expect('示范答案过短', GOOD.replace(/^- 示范答案：.*$/m, '- 示范答案：不知道。'), [], 0, ['RI-ANSWER-SHORT']);
+expect('示范答案过短', GOOD.replace(/- 示范答案：[\s\S]*?(?=\n- 危险信号)/, '- 示范答案：不知道。'), [], 0, ['RI-ANSWER-SHORT']);
 expect('缺危险信号只记 warn', GOOD.replace(/^- 危险信号：.*$/m, ''), [], 0, ['RI-FLAG']);
 expect('缺追问只记 note', GOOD.replace(/^- 追问：.*$/m, ''), [], 0, ['RI-FOLLOWUP']);
 expect('题号重复', GOOD.replace('### Q3 P99', '### Q1 P99'), [], 1, ['RI-DUP']);
@@ -194,11 +194,11 @@ console.log('\n未收口记号与占位符');
 expect('残留 TODO', `${GOOD}\nTODO: 补上面试官的维度权重\n`, [], 1, ['RI-TODO']);
 expect('裸「待补」', `${GOOD}\n- 备注：结论待补\n`, [], 1, ['RI-TODO']);
 {
-  const r = run(GOOD.replace('压测峰值是 2000 QPS。', '压测峰值是 2000 QPS。〔待补充：线上真实峰值〕'));
+  const r = run(GOOD.replace('- 危险信号', '  - **边界**：线上峰值〔待补充：线上真实峰值〕\n- 危险信号'));
   check('占位符只记 note 且不阻断', r.status === 0 && r.out.includes('[RI-PLACEHOLDER]') && r.out.includes('PASS'));
 }
 {
-  const r = run(GOOD.replace('压测峰值是 2000 QPS。', '压测峰值是 2000 QPS。〔待补充：线上真实峰值〕'), ['--strict']);
+  const r = run(GOOD.replace('- 危险信号', '  - **边界**：线上峰值〔待补充：线上真实峰值〕\n- 危险信号'), ['--strict']);
   check('占位符在 --strict 下仍不阻断', r.status === 0);
 }
 
