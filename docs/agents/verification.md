@@ -22,6 +22,30 @@ node scripts/check-opencode-commands.mjs --dsh ../dsh-commands   # 顺带比对�
 
 新增/修改命令的完整步骤见 [安装与维护](../installation.md) 的「新增或修改命令」。
 
+## resume-griller 手册门禁回归
+
+```bash
+node skills/resume-griller/scripts/tests/check-interview-doc-test.mjs
+```
+
+退出码：`0` 全部断言通过 / `1` 有断言失败。
+
+守的是（61 条断言）：合规手册在默认与 `--strict` 下都通过，合规变体也不误伤（锚点顶格写、题源用“”、H1 在长元数据之后、覆盖表三列或自定义表头、围栏里的 `##`）；故意违规必须被拦住（缺元数据、缺段、无题源、题源用 ASCII 引号、缺 ★ 或 ★ 标错档、围栏里的假题目、计划题超时、时间表与逐题时长对不上、覆盖表引用不存在的题号、未收口 TODO、题号重复、缺 H1）；备用题不占预算、全部标备用只记 warn、YAML frontmatter、`## 备用题` 段落、标题里的【必问 · 9′】、紧凑维度表 + 锚点行也各有一条断言；软项按严重度处理（缺 H1 / 缺考点 / 四档不全 / 答案过短 / 缺危险信号 / 缺时间表 / 缺维度表 / 缺判定是 warn，仅 `--strict` 阻断；缺追问与占位符是 note，任何模式都不阻断）；文件读不到时先打印已得结论再 `exit 2`。
+
+`meta.level` 是 ★ 的判据：初级/中级须标 3，高级/架构须标 4，缺省时跳过这项校验。
+
+规则与严重度的唯一清单用 `node skills/resume-griller/scripts/check-interview-doc.mjs --list-rules` 查；改规则要同步 `references/handbook-format.md` 的结构约束表与 `scripts/tests/fixtures/good.md`。
+
+## resume-griller 题源核验回归
+
+```bash
+node skills/resume-griller/scripts/tests/verify-sources-test.mjs
+```
+
+退出码：`0` 全部断言通过 / `1` 有断言失败。守的是：逐字命中通过；改数字、编造句子必须 `SRC-MISS`；`「前段 ... 后段」` 按段核验；插入一个噪声字只报 `SRC-NEAR`；题源没有引文判失败；缺 `--resume` 与文件不存在都 `exit 2`。
+
+数字守卫是独立于编辑距离的一道闸：`75% → 90%` 只差 2 个字符，会被模糊匹配放过，所以引文里的多位数必须单独在原文中存在，否则直接 `SRC-MISS`。
+
 ## tech-design 文档门禁回归
 
 ```bash

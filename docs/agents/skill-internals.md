@@ -86,6 +86,20 @@ references：`templates.md`（**叙事链 10 问与顺序依赖** + 三档骨架
 
 与相邻技能边界（**窄触发，避免与 tech-design 误触**）：本技能与 `tech-design` 功能重叠（是其超集），故入口收窄——**仅当用户明确表达「调研/参考开源/对标业界/符合主流」时才进本技能**，否则一律 `tech-design`；tech-design 的 description 里也加了反向指路。只解读单个项目源码 → `project-insight`；只要独立图表 → `diagram-design`。
 
+## resume-griller
+
+面试官侧：简历 → 面试手册（Markdown）。`SKILL.md` = 六条铁律 + 0→5 工作流；细节在 `references/`（`question-design.md` 选题来源与深度阶梯、`answer-and-scoring.md` 四级锚点与判定、`handbook-format.md` 骨架与门禁契约）。
+
+硬规则：
+
+- **无源不出题**：每题 `题源` 必须引用简历原文（`「…」`）并带位置，缺了是 error（`RI-EVIDENCE`）。想考而简历里没有的，写进「必须核实」，不伪造成项目题。
+- **答案不编事实**：示范答案分两层——简历可证事实用「我们」，方案推演用「我会」；缺口写 `〔待补充：…〕`、前提写 `〔假设：…〕`（note，不阻断）。这是与外部同类工具的核心差异：**答案键可以有空缺，不可以有虚构**。
+- **答案正确性靠流程不靠门禁**：`references/accuracy.md` 是唯一真源（三层校验 + 20 条高频错误对照 + 措辞纪律 + 复核清单）；工作流多一步「3.5 技术复核」，有子 agent 时交独立上下文只回「哪条断言不成立」。门禁不做语义判断，别往里加「这句话对不对」的规则。
+- **题源核验独立**：`verify-sources.mjs --resume <清洗稿>` 只回答「这段引文在不在原文里」——归一化包含 + 编辑距离容差（水印噪声）+ 数字守卫（改数字直接判失败）；省略写法按段核验。它不管「位置标得对不对」，那需要简历结构，交给人读。
+- **门禁只判结构**：`check-interview-doc.mjs` 判元数据与 `level` / 四个段落 / 题源引用 / ★ 档位 / 优先级 / 时长预算与时间表对账 / 覆盖表引用 / 未收口记号；解析前标记代码围栏，围栏内内容不参与结构判断。61 条断言。题目深度与答案质量归 `references/question-design.md` 末节自检，不进门禁。
+- **严重度冻结**：error 只给「文档自相矛盾」（缺段、缺必填项、引用不存在的题号、超时、时间表与逐题时长打架、★ 与 `level` 不一致、未收口 TODO）；warn 给完整性缺口（缺考点 / 危险信号 / 四档不全 / 答案过短）；note 只提示占位符与缺追问。`--strict` 只提升 warn，note 永不阻断。
+- **材料不落仓**：简历、手册、JD 原文写用户目录，不进本仓 git；技能自身不复制候选人的任何材料。
+
 ## diagram-design（外部，不 vendor）
 
 图的生产者，来自上游 [`cathrynlavery/diagram-design`](https://github.com/cathrynlavery/diagram-design)，本仓不做任何改动、也不纳入 `skills/` 与安装脚本。内部结构（45 个 `type-*.md` + `primitives-core.md` + `style-guide.md` + 213 个示例 HTML）由上游维护，本仓只记三条验收口径：导出带 `--system-fonts`（否则 `[SVG-EXTERNAL]`）、产物无 `node/edge` 钩子（审计自动切几何推断，`[EDGE-UNPARSED]` 即未通过）、无 `:root`/`prefers-color-scheme`（深色看 HTML，不看预览图）。
