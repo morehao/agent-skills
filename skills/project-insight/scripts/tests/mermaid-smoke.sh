@@ -13,6 +13,10 @@
 #   6) 【反向】子图父链成环（render 布局期错误）必须报 MERMAID-ERROR、退出 1
 #   7) sequenceDiagram 只走 parse（不因 render 环境报错）
 #   8) <br/> 非规范写法给 MERMAID-WARN 但不阻断（退出 0）
+#   9) 【关键回归】中文标签的流程图必须渲染通过 —— 曾经的假错误
+#      "Invalid character" 来自 Node 的 btoa 只接受 Latin-1，mermaid 渲染时把
+#      「边/节点标签」btoa 成 id 就抛错；浏览器走 htmlLabels 分支不经 btoa。
+#      本用例守住 btoa 垫片不被改回去。
 # 退出码：0 = 全部通过；1 = 有断言失败。
 set -u
 
@@ -89,6 +93,13 @@ flowchart TD
     A["第一行<br/>第二行"] --> B
 ```'
 
+mk cjk-labels.md '```mermaid
+flowchart TD
+    A([开始]) --> B{{校验}}
+    B -->|通过| C[(落库)]
+    C -.->|失败重试| A
+```'
+
 echo "1) 最简 flowchart 渲染通过（exit 0）"
 out=$(node "$CM" "$T/simple.md"); code=$?
 assert "OK (parse+render)" "OK  (parse+render)" "$out"
@@ -130,6 +141,12 @@ assert_exit "退出码 0" 0 "$code"
 echo "8) <br/> 非规范写法给 WARN 但不阻断（exit 0）"
 out=$(node "$CM" "$T/br-warn.md"); code=$?
 assert "给出 MERMAID-WARN" "[MERMAID-WARN]" "$out"
+assert_exit "退出码 0" 0 "$code"
+
+echo "9) 【关键回归】中文标签的流程图必须渲染通过"
+out=$(node "$CM" "$T/cjk-labels.md"); code=$?
+assert "OK (parse+render)" "OK  (parse+render)" "$out"
+assert_not "不得出现 btoa 误报" "Invalid character" "$out"
 assert_exit "退出码 0" 0 "$code"
 
 if [ "$fail" -eq 0 ]; then echo; echo "全部通过"; else echo; echo "有断言失败"; fi

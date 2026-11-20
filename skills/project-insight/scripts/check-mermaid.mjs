@@ -71,6 +71,10 @@ mermaid.initialize({ startOnLoad: false, securityLevel: 'loose' });
 // 逐一补最小垫片（实验验证：补足后 render 能跑完布局并抛出成环错误）：
 //   - CSSStyleSheet：render 引入 keyframes / 样式时会访问它
 //   - SVGElement 测量方法 getBBox / getComputedTextLength / getTotalLength
+//   - btoa：mermaid 把「边/节点的标签文本」btoa 成 DOM-safe 的 id，Node 的 btoa 只
+//     接受 Latin-1，标签里有中文就抛 InvalidCharacterError: Invalid character。
+//     浏览器走的是 htmlLabels 分支、不经 btoa，所以同一张图在真浏览器里渲染正常——
+//     这是脚本曾把一批正常中文图误报成 [MERMAID-ERROR] 的原因。
 // 只对 flowchart/graph 启用 render 校验；sequenceDiagram / stateDiagram 等在纯
 // jsdom 下 render 会报「Cannot read properties of null」等 DOM 局限，与本脚本职责
 // 无关，仍只走 parse（见 main()）。
@@ -88,6 +92,18 @@ if (typeof globalThis.CSSStyleSheet === 'undefined') {
         replaceSync() {}
         replace() {}
       };
+}
+// mermaid 用 btoa(label) 生成 DOM-safe 的 id：Node 的 btoa 只吃 Latin-1，中文标签会抛
+// InvalidCharacterError。换成 UTF-8 → base64（输出仍是合法 base64，id 语义不变）。
+if (typeof globalThis.btoa === 'function') {
+  const _nativeBtoa = globalThis.btoa;
+  globalThis.btoa = (s) => {
+    try {
+      return _nativeBtoa(s);
+    } catch {
+      return Buffer.from(String(s), 'utf8').toString('base64');
+    }
+  };
 }
 if (typeof globalThis.DOMParser === 'undefined' && typeof window.DOMParser !== 'undefined') {
   // mermaid 解析内联 SVG 时会构造 DOMParser；缺了报 DOMPurify.sanitize is not a function。
