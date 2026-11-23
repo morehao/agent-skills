@@ -28,6 +28,8 @@
 
 元数据块必须在文件最前，字段 `key: value`，缺 `candidate` / `minutes` / `date` 判 error。元数据块之前允许一段 **YAML frontmatter**（Obsidian 的 tags/status），门禁会跳过它再找元数据块。
 
+> 每道题的 `### Q<n>` 标题都要能**直接念给候选人听**：`场景锚点：疑问落点？`，例如「Q1 订单服务为什么按业务域拆」「Q3 P99 数字是怎么测出来的」。纯名词并排的标题（「事件抽象与 Checkpoint 恢复」）判不合格，详见 [question-design.md](question-design.md) 的「标题即问题」。
+
 ```markdown
 <!-- resume-griller
 candidate: 张三
