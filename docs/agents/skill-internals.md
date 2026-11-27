@@ -82,7 +82,7 @@ references：`templates.md`（**叙事链 10 问与顺序依赖** + 三档骨架
 - **开源调研前置**（`references/oss-research.md`）：**在写第一版之前**做——先读 README 出「业界 vs 本方案」横向表定缺口，再 `git clone --depth 1` 到 `/tmp` 读源码取证（唯一键/主键真实定义、ID 生成、跳转状态与缓存头、统计同步异步与去重、GeoIP 位置、URL 校验）；横向表作为第一版输入，用完清理。每条借鉴回指「写进哪节/哪个决策/采纳与否」，不抄 AGPL/GPL 代码，不硬凑低星 Go 仓当标杆。台账落 `.dsh/docs/notes/`。
 - **终局取舍**：不可逆结构决定（唯一键、分片键、状态机枚举、契约字段）即使当期用不上也按终局定死并写「不改的代价」（如唯一键带 `domain_id`）；业界成熟方案优先，拍脑袋的换成业界方案并注明出处。
 - **输出落点与命名规则**（`references/delivery.md`）：落点**先探测环境（找 `.obsidian`）再给选项让用户选一次**——用户指定优先，否则 Obsidian 存在时把库内最贴合的具体路径列进选项（推荐排第一）、并留库内其它目录/自定义路径；命名**规则**是 `<主题>-<类型>.md`（连字符、类型词用「系统设计/技术方案」，不用「设计文档」，不无分隔符连写），改名同步 wikilink，批量改前备份。
-- **闭环验收**（`references/review-loop.md`）：门禁 `--strict` 到 0 error/0 warn、Mermaid 与 SVG 校验通过、独立上下文 1–2 个 lens 收成单一 `VERDICT`，改完**重跑门禁**。lens 定义以 tech-design 的 `review-gate.md` 为真源，本文只补「带开源调研」这一路的特别检查。
+- **闭环验收**（`references/review-loop.md`）：门禁 `--strict` 到 0 error/0 warn、Mermaid 与 SVG 校验通过、按选定深度执行独立评审并收成单一 `VERDICT`（仅机械门禁档跳过语义评审），改完**重跑门禁**。lens 定义以 tech-design 的 `review-gate.md` 为真源，本文只补「带开源调研」这一路的特别检查。
 
 与相邻技能边界（**窄触发，避免与 tech-design 误触**）：本技能与 `tech-design` 功能重叠（是其超集），故入口收窄——**仅当用户明确表达「调研/参考开源/对标业界/符合主流」时才进本技能**，否则一律 `tech-design`；tech-design 的 description 里也加了反向指路。只解读单个项目源码 → `project-insight`；只要独立图表 → `diagram-design`。
 

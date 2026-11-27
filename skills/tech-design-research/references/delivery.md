@@ -7,10 +7,15 @@
 ### 1. 先探测环境（只读）
 
 ```bash
-# 是否在 Obsidian 库？找库根（含 .obsidian 的目录向上找）
-pwd; ls -d .obsidian 2>/dev/null || (cd .. && ls -d .obsidian 2>/dev/null)
-# 若在库内：找与课题最贴合的目录作为候选
-ls -d Learning/*/*/*/ 2>/dev/null | head   # 按实际库结构调整
+# 从当前目录逐级找最近的库根，然后从库根查看候选主题目录。
+vault="$(pwd -P)"
+while [ "$vault" != / ] && [ ! -d "$vault/.obsidian" ]; do
+  vault="$(dirname "$vault")"
+done
+if [ -d "$vault/.obsidian" ]; then
+  printf 'Obsidian 库根：%s\n' "$vault"
+  ls -d "${vault%/}"/Learning/*/*/*/ 2>/dev/null | head  # 按实际库结构调整
+fi
 ```
 
 ### 2. 构造选项（用 `ask_user_question` 让用户选一次）
