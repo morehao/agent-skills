@@ -7,12 +7,14 @@
 评审是有成本的（起 subagent、多轮改）。默认按档位跑，但**若用户对深度/时间有偏好，用选项问一次**：
 
 - **完整评审**：跑全部相关 lens + builder check，改到 0 error/0 warn（完整档默认）。
-- **标准评审（推荐）**：机械门禁 + 图校验 + 1–2 个关键 lens（按场景选），改到 0 error。
+- **标准评审（推荐）**：机械门禁 + 图校验 + 1–2 个关键 lens（按场景选），按下文严格门禁收口。
 - **只跑机械门禁**：清占位符/空壳/缺图/DDL 不一致，不做语义 lens（赶时间时）。
 
-用户没表态 → 标准档按「标准评审」、完整档按「完整评审」。**lens 数量与是否起 subagent 不省成「这次应该没问题」**——省可以，但要明说省了哪几个、风险是什么。
+用户没表态 → 轻量档和标准档按「标准评审」、完整档按「完整评审」。**lens 数量与是否起 subagent 不省成「这次应该没问题」**——省可以，但要明说省了哪几个、风险是什么。
 
 ## 顺序：门禁 → 图校验 → lens → 收口 → 重跑门禁
+
+选「只跑机械门禁」时执行步骤 1–2，报告门禁和图校验结果，并标明语义评审未执行。标准评审执行步骤 1–5，选 1–2 个关键 lens。完整评审执行步骤 1–5，覆盖全部相关 lens 和 builder check。
 
 ### 1. 机械门禁（先清机械项）
 
@@ -23,7 +25,7 @@ node <tech-design>/scripts/check-design-doc.mjs <文档> --tier <light|standard|
 - `error` 必须清零；`warn` 要么改掉、要么在文档里写豁免理由（`--strict` 把 warn 当失败，本技能要求 0 warn）。
 - 常见 warn 与修法：
   - `TD-DDL-MISMATCH`（附录 DDL 与正文字段表不一致）：**最容易在「按开源对标补了字段」后踩到**——补了 `domain` 表 DDL 就必须补对应的正文字段表。本次就靠它抓出漏。
-  - `TD-NO-DIAGRAM` / `TD-DIAGRAM-MIN`：某节缺图或低于档位最小图集，补图或写 `图豁免：<理由>`。
+  - `TD-NO-DIAGRAM` / `TD-DIAGRAM-MIN`：分别是章节缺图与全篇图数不足。补图和豁免条件见 `tech-design/SKILL.md`「交付与收尾」。
   - `TD-SIZE`（超 ~20 屏）：note 级，单主题练习稿可接受，作为 note 说明理由保留。
   - `TD-CHALLENGE`（缺挑战点 / 超 3 条 / 标准档及以上未编号）：补「挑战点与取舍」节，1–3 个并编号 C1…Cn；确无设计取舍且文档必须存在时写 `挑战点豁免：<具体理由>`。
   - `TD-TRACE-CHALLENGE`（**error**：追溯表缺「挑战点」列 / 某行为空 / 孤儿挑战点）：表头「决策」后加「挑战点」列，每行写 C 编号或「标准做法」，每个编号至少被一行承接——这是本技能 0 error 闭环的第一阻塞项。
@@ -32,7 +34,7 @@ node <tech-design>/scripts/check-design-doc.mjs <文档> --tier <light|standard|
 ### 2. 图校验
 
 ```bash
-node <tech-design>/scripts/check-mermaid.mjs <生成的 .mmd 文件>   # 或内联块抽出来校验
+node <tech-design>/scripts/check-mermaid.mjs <方案.md>                      # 直接校验文档里的 Mermaid 围栏
 node <tech-design>/scripts/audit-svg-topology.mjs <图.svg>...      # 结构类 SVG，端点须贴合
 ```
 
@@ -41,7 +43,7 @@ node <tech-design>/scripts/audit-svg-topology.mjs <图.svg>...      # 结构类 
 
 ### 3. 独立评审（lens，独立上下文）
 
-用 `subagent` 起 1–2 个 lens，**不要让作者自评**。按场景选：
+按所选深度用 `subagent` 起对应的 lens，**不要让作者自评**。按场景选：
 
 | lens | 何时选 | 追问要点 |
 | --- | --- | --- |
